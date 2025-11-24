@@ -163,6 +163,25 @@ describe('EthrDIDModule', () => {
     expect(() => new EthrDIDModule({ networks: [] })).toThrow(/At least one network/);
   });
 
+  test('constructor sets defaultNetwork from string network config', () => {
+    // Test with string network as first entry and no explicit defaultNetwork
+    const moduleWithStringNetwork = new EthrDIDModule({
+      networks: ['sepolia', 'mainnet'],
+    });
+    expect(moduleWithStringNetwork.defaultNetwork).toBe('sepolia');
+    expect(moduleWithStringNetwork.networks.has('sepolia')).toBe(true);
+    expect(moduleWithStringNetwork.networks.has('mainnet')).toBe(true);
+  });
+
+  test('constructor sets defaultNetwork from object network config', () => {
+    // Test with object network as first entry and no explicit defaultNetwork
+    const moduleWithObjectNetwork = new EthrDIDModule({
+      networks: [createVietChainConfig()],
+    });
+    expect(moduleWithObjectNetwork.defaultNetwork).toBe('vietchain');
+    expect(moduleWithObjectNetwork.networks.has('vietchain')).toBe(true);
+  });
+
   test('createNewDID generates valid DID', async () => {
     const keypair = Secp256k1Keypair.random();
     const did = await module.createNewDID(keypair);

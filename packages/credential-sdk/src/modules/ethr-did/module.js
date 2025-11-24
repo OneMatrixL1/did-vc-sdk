@@ -65,8 +65,16 @@ class EthrDIDModule extends AbstractDIDModule {
       this.networks.set(normalized.name, normalized);
     });
 
-    // Set default network
-    this.defaultNetwork = config.defaultNetwork || config.networks[0].name || 'mainnet';
+    // Set default network - handle both string and object network configs
+    if (config.defaultNetwork) {
+      this.defaultNetwork = config.defaultNetwork;
+    } else {
+      // Get name from first network (handle both string and object)
+      const firstNetwork = config.networks[0];
+      this.defaultNetwork = typeof firstNetwork === 'string'
+        ? firstNetwork
+        : firstNetwork.name;
+    }
 
     // Store provider options
     this.providerOptions = config.providerOptions || {};

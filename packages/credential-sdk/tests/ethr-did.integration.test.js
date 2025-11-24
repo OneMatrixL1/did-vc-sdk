@@ -16,12 +16,15 @@
  *   export ETHR_PRIVATE_KEY=0x...  # REQUIRED: funded account for gas fees
  *   yarn test:integration
  *
- * Environment Variables:
- * ---------------------
- * ETHR_NETWORK           - Network name (vietchain, sepolia, mainnet, etc.)
- * ETHR_NETWORK_RPC_URL   - RPC endpoint URL
- * ETHR_REGISTRY_ADDRESS  - DID Registry contract address (ERC1056)
- * ETHR_PRIVATE_KEY       - Private key of funded account (REQUIRED)
+ * Environment Variables (REQUIRED):
+ * ----------------------------------
+ * ETHR_NETWORK_RPC_URL   - RPC endpoint URL (e.g., https://rpc.vietcha.in)
+ * ETHR_PRIVATE_KEY       - Private key of funded account
+ *
+ * Optional Environment Variables:
+ * -------------------------------
+ * ETHR_NETWORK           - Network name (default: sepolia)
+ * ETHR_REGISTRY_ADDRESS  - DID Registry contract address (default: Sepolia registry)
  *
  * Note: Tests will create on-chain transactions and consume gas fees.
  */
@@ -32,10 +35,17 @@ import { Secp256k1Keypair } from '../src/keypairs';
 import { keypairToAddress, parseDID } from '../src/modules/ethr-did/utils';
 import b58 from 'bs58';
 
-// Configuration from environment or defaults
+// Configuration from environment (required for integration tests)
+if (!process.env.ETHR_NETWORK_RPC_URL) {
+  throw new Error(
+    'ETHR_NETWORK_RPC_URL environment variable is required for integration tests. ' +
+    'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh'
+  );
+}
+
 const networkConfig = {
   name: process.env.ETHR_NETWORK || 'sepolia',
-  rpcUrl: process.env.ETHR_NETWORK_RPC_URL || 'https://sepolia.infura.io/v3/',
+  rpcUrl: process.env.ETHR_NETWORK_RPC_URL,
   registry: process.env.ETHR_REGISTRY_ADDRESS || '0x03d5003bf0e79c5f5223588f347eba39afbc3818',
 };
 

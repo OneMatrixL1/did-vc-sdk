@@ -246,8 +246,7 @@ describe('EthrDID Integration Tests', () => {
       const did = await module.createNewDID(ownerKeypair);
       console.log('  🆔 Created DID:', did);
 
-      // Wait a moment for DID to be fully resolvable
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Note: No need to wait - ethr DIDs exist implicitly and are immediately resolvable
 
       // Helper function to create credential
       const createCredential = (issuerDID, subject) => ({

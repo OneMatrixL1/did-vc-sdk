@@ -309,7 +309,7 @@ describe('EthrDID Integration Tests', () => {
 
       const cred2 = await issueCredential(ownerKeyDoc, createCredential(did, 'Service University'));
       expect(cred2.proof).toBeDefined();
-      expect(cred2.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      expect(cred2.proof.type).toBe('EcdsaSecp256k1Signature2020');
       console.log('  ✅ After setAttribute: credential still signs successfully');
 
       // === STEP 3: Add delegate, sign with both owner AND delegate ===
@@ -327,14 +327,14 @@ describe('EthrDID Integration Tests', () => {
       // Sign with owner key (should still work)
       const cred3a = await issueCredential(ownerKeyDoc, createCredential(did, 'Owner After Delegate'));
       expect(cred3a.proof).toBeDefined();
-      expect(cred3a.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      expect(cred3a.proof.type).toBe('EcdsaSecp256k1Signature2020');
       console.log('  ✅ After addDelegate: owner key still signs');
 
       // Sign with delegate key
       const delegateKeyDoc = await createKeyDocFromDIDDocument(delegateKeypair, did);
       const cred3b = await issueCredential(delegateKeyDoc, createCredential(did, 'Delegate University'));
       expect(cred3b.proof).toBeDefined();
-      expect(cred3b.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      expect(cred3b.proof.type).toBe('EcdsaSecp256k1Signature2020');
       console.log('  ✅ After addDelegate: delegate key signs');
 
       // === STEP 4: Revoke delegate, owner can still sign ===
@@ -349,7 +349,7 @@ describe('EthrDID Integration Tests', () => {
       // Sign with owner key (should still work)
       const cred4a = await issueCredential(ownerKeyDoc, createCredential(did, 'Owner After Revoke'));
       expect(cred4a.proof).toBeDefined();
-      expect(cred4a.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      expect(cred4a.proof.type).toBe('EcdsaSecp256k1Signature2020');
       console.log('  ✅ After revokeDelegate: owner key still signs');
 
       // Note: Revoked delegate can still cryptographically sign, but would fail verification
@@ -367,7 +367,7 @@ describe('EthrDID Integration Tests', () => {
       const newOwnerKeyDoc = await createKeyDocFromDIDDocument(newOwnerKeypair, did);
       const cred5b = await issueCredential(newOwnerKeyDoc, createCredential(did, 'New Owner University'));
       expect(cred5b.proof).toBeDefined();
-      expect(cred5b.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      expect(cred5b.proof.type).toBe('EcdsaSecp256k1Signature2020');
       console.log('  ✅ After changeOwner: new owner key signs successfully');
 
       // Note: Old owner can still cryptographically sign, but would fail verification

@@ -66,9 +66,15 @@ export default class EcdsaSecp256k1Signature2020 extends CustomLinkedDataSignatu
         const messageHash = hashMessage(data);
         const signature = signingKey.signDigest(messageHash);
 
-        // Return the serialized signature (includes recovery ID)
-        // ethers returns signature in format: r (32 bytes) + s (32 bytes) + v (1 byte)
-        return Buffer.from(signature.substring(2), 'hex');
+        // The signature object has r, s, v properties
+        // We need to serialize it properly for recovery
+        // ethers serialized format: r (32 bytes) + s (32 bytes) + v (1 byte)
+        const r = signature.r.substring(2); // Remove 0x prefix
+        const s = signature.s.substring(2); // Remove 0x prefix
+        const v = signature.v.toString(16).padStart(2, '0'); // Convert to hex
+
+        const serialized = r + s + v;
+        return Buffer.from(serialized, 'hex');
       },
     };
   }

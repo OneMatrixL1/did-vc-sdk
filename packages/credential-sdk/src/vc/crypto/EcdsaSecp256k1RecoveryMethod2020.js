@@ -58,6 +58,9 @@ export default class EcdsaSecp256k1RecoveryMethod2020 {
    * @returns {object}
    */
   static verifierFactory(expectedAddress) {
+    // Normalize expected address to lowercase for case-insensitive comparison
+    const normalizedExpectedAddress = expectedAddress.toLowerCase();
+
     return {
       async verify({ data, signature }) {
         // Import ethers for public key recovery
@@ -78,7 +81,7 @@ export default class EcdsaSecp256k1RecoveryMethod2020 {
           const recoveredAddress = computeAddress(recoveredPubKey).toLowerCase();
 
           // Verify the recovered address matches the expected address
-          return recoveredAddress === expectedAddress;
+          return recoveredAddress === normalizedExpectedAddress;
         } catch (error) {
           // Recovery failed or signature invalid
           return false;

@@ -49,6 +49,7 @@ export default class CustomLinkedDataSignature extends jsigs.suites
       verificationMethod,
       {
         '@context': jsigs.SECURITY_CONTEXT_URL,
+        '@explicit': false,  // Include all properties, not just those in frame
         '@embed': '@always',
         id: possibleVerificationMethodRefs(verificationMethod),
       },

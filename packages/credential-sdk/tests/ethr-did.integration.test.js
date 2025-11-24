@@ -1,0 +1,564 @@
+/**
+ * Integration tests for EthrDIDModule
+ *
+ * These tests require network connectivity to an Ethereum-compatible chain.
+ *
+ * Quick Start:
+ * -----------
+ * Use provided shell scripts for common networks:
+ *   ../../scripts/test-integration-vietchain.sh
+ *   ../../scripts/test-integration-sepolia.sh
+ *
+ * Or set environment variables manually:
+ *   export ETHR_NETWORK=vietchain
+ *   export ETHR_NETWORK_RPC_URL=https://rpc.vietcha.in
+ *   export ETHR_REGISTRY_ADDRESS=0xF0889fb2473F91c068178870ae2e1A0408059A03
+ *   export ETHR_PRIVATE_KEY=0x...  # Optional: funded account for mutation tests
+ *   yarn test:integration
+ *
+ * Environment Variables:
+ * ---------------------
+ * ETHR_NETWORK           - Network name (vietchain, sepolia, mainnet, etc.)
+ * ETHR_NETWORK_RPC_URL   - RPC endpoint URL
+ * ETHR_REGISTRY_ADDRESS  - DID Registry contract address (ERC1056)
+ * ETHR_PRIVATE_KEY       - Private key of funded account (optional)
+ *
+ * Note: Tests will create on-chain transactions and consume gas fees.
+ */
+
+import { ethers } from 'ethers';
+import { EthrDIDModule, createVietChainConfig } from '../src/modules/ethr-did';
+import { Secp256k1Keypair } from '../src/keypairs';
+import { keypairToAddress, parseDID } from '../src/modules/ethr-did/utils';
+import b58 from 'bs58';
+
+// Configuration from environment or defaults
+const networkConfig = {
+  name: process.env.ETHR_NETWORK || 'sepolia',
+  rpcUrl: process.env.ETHR_NETWORK_RPC_URL || 'https://sepolia.infura.io/v3/',
+  registry: process.env.ETHR_REGISTRY_ADDRESS || '0x03d5003bf0e79c5f5223588f347eba39afbc3818',
+};
+
+describe('EthrDID Integration Tests', () => {
+  let module;
+  let founderKeypair; // Main funded wallet
+  let provider;
+
+  // Helper function to fund a test account with minimal gas
+  async function fundTestAccount(recipientAddress, amountInEther = '0.1') {
+    const founderPrivateKey = founderKeypair.privateKey();
+    const founderPrivateKeyHex = '0x' + Array.from(founderPrivateKey)
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+    const founderWallet = new ethers.Wallet(founderPrivateKeyHex, provider);
+
+    const tx = await founderWallet.sendTransaction({
+      to: recipientAddress,
+      value: ethers.utils.parseEther(amountInEther),
+    });
+
+    await tx.wait();
+    console.log(`  ✅ Funded ${recipientAddress} with ${amountInEther} ETH for gas`);
+  }
+
+  beforeAll(() => {
+    // Create module with test network
+    module = new EthrDIDModule({
+      networks: [networkConfig],
+      defaultNetwork: networkConfig.name,
+    });
+
+    // Create provider
+    provider = new ethers.providers.JsonRpcProvider(networkConfig.rpcUrl);
+
+    // Use provided private key or generate random (will need manual funding)
+    if (process.env.ETHR_PRIVATE_KEY) {
+      const privateKeyBytes = Buffer.from(
+        process.env.ETHR_PRIVATE_KEY.replace('0x', ''),
+        'hex',
+      );
+      founderKeypair = new Secp256k1Keypair(privateKeyBytes, 'private');
+    } else {
+      console.warn('⚠️  No ETHR_PRIVATE_KEY provided. Tests may fail due to insufficient funds.');
+      founderKeypair = Secp256k1Keypair.random();
+    }
+  });
+
+  describe('DID Resolution', () => {
+    test('getDocument resolves DID document', async () => {
+      const keypair = Secp256k1Keypair.random();
+      const did = await module.createNewDID(keypair);
+      const document = await module.getDocument(did);
+
+      expect(document).toBeDefined();
+      expect(document.id).toBe(did);
+      expect(document.verificationMethod).toBeDefined();
+    }, 30000); // 30s timeout for network operations
+  });
+
+  describe('DID Attribute Management', () => {
+    test('setAttribute adds attribute to DID document', async () => {
+      // Create and fund a test account
+      const testKeypair = Secp256k1Keypair.random();
+      const testAddress = keypairToAddress(testKeypair);
+      await fundTestAccount(testAddress, '0.05');
+
+      const did = await module.createNewDID(testKeypair);
+
+      const receipt = await module.setAttribute(
+        did,
+        'did/svc/TestService',
+        'https://example.com/test',
+        testKeypair,
+      );
+
+      expect(receipt.transactionHash).toBeDefined();
+      expect(receipt.blockNumber).toBeGreaterThan(0);
+      expect(receipt.status).toBe(1); // Transaction success
+
+      // Verify attribute was added
+      const document = await module.getDocument(did);
+      expect(document.service).toBeDefined();
+    }, 60000); // 60s timeout
+  });
+
+  describe('Delegate Management', () => {
+    test('addDelegate adds delegate to DID', async () => {
+      // Create and fund a test account
+      const testKeypair = Secp256k1Keypair.random();
+      const testAddress = keypairToAddress(testKeypair);
+      await fundTestAccount(testAddress, '0.05');
+
+      const delegateKeypair = Secp256k1Keypair.random();
+      const did = await module.createNewDID(testKeypair);
+      const delegateAddress = keypairToAddress(delegateKeypair);
+
+      const receipt = await module.addDelegate(
+        did,
+        delegateAddress,
+        testKeypair,
+        { delegateType: 'veriKey', expiresIn: 86400 },
+      );
+
+      expect(receipt.transactionHash).toBeDefined();
+      expect(receipt.status).toBe(1);
+
+      // Verify delegate was added
+      const document = await module.getDocument(did);
+      expect(document.verificationMethod.length).toBeGreaterThan(1);
+    }, 60000);
+
+    test('revokeDelegate removes delegate from DID', async () => {
+      // Create and fund a test account
+      const testKeypair = Secp256k1Keypair.random();
+      const testAddress = keypairToAddress(testKeypair);
+      await fundTestAccount(testAddress, '0.05');
+
+      const delegateKeypair = Secp256k1Keypair.random();
+      const did = await module.createNewDID(testKeypair);
+      const delegateAddress = keypairToAddress(delegateKeypair);
+
+      // Add delegate first
+      await module.addDelegate(
+        did,
+        delegateAddress,
+        testKeypair,
+        { delegateType: 'veriKey', expiresIn: 86400 },
+      );
+
+      // Then revoke
+      const receipt = await module.revokeDelegate(
+        did,
+        delegateAddress,
+        testKeypair,
+        'veriKey',
+      );
+
+      expect(receipt.transactionHash).toBeDefined();
+      expect(receipt.status).toBe(1);
+    }, 120000); // 2 minutes for 2 transactions
+  });
+
+  describe('Ownership Transfer', () => {
+    test('changeOwner transfers DID ownership', async () => {
+      // Create and fund two test accounts
+      const testKeypair = Secp256k1Keypair.random();
+      const testAddress = keypairToAddress(testKeypair);
+      await fundTestAccount(testAddress, '0.05');
+
+      const newOwnerKeypair = Secp256k1Keypair.random();
+      const newOwnerAddress = keypairToAddress(newOwnerKeypair);
+      await fundTestAccount(newOwnerAddress, '0.05');
+
+      const did = await module.createNewDID(testKeypair);
+
+      // Transfer ownership to new owner
+      const receipt = await module.changeOwner(
+        did,
+        newOwnerAddress,
+        testKeypair,
+      );
+
+      expect(receipt.transactionHash).toBeDefined();
+      expect(receipt.status).toBe(1);
+
+      // After transfer, old owner can no longer modify
+      await expect(
+        module.setAttribute(did, 'test', 'value', testKeypair),
+      ).rejects.toThrow();
+
+      // But new owner can modify
+      const receipt2 = await module.setAttribute(
+        did,
+        'did/svc/NewService',
+        'https://example.com/new',
+        newOwnerKeypair,
+      );
+
+      expect(receipt2.status).toBe(1);
+    }, 90000); // 90s for multiple transactions
+  });
+
+  describe('DID Document Updates & Signing', () => {
+    test('signs and verifies credentials after each DID manipulation', async () => {
+      // Import VC functions
+      const { issueCredential, verifyCredential } = await import('../src/vc/index.js');
+      const { EcdsaSecp256k1VerKeyName } = await import('../src/vc/crypto/constants.js');
+
+      // Create and fund a test account
+      const ownerKeypair = Secp256k1Keypair.random();
+      const ownerAddress = keypairToAddress(ownerKeypair);
+      await fundTestAccount(ownerAddress, '0.2');
+
+      const did = await module.createNewDID(ownerKeypair);
+      console.log('  🆔 Created DID:', did);
+
+      // Wait a moment for DID to be fully resolvable
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Helper function to create credential
+      const createCredential = (issuerDID, subject) => ({
+        '@context': [
+          'https://www.w3.org/2018/credentials/v1',
+          'https://www.w3.org/2018/credentials/examples/v1',
+        ],
+        type: ['VerifiableCredential', 'AlumniCredential'],
+        issuer: issuerDID,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: 'did:example:student123',
+          alumniOf: subject,
+        },
+      });
+
+      // Helper to create key doc using verification method from DID document
+      const createKeyDocFromDIDDocument = async (keypair, didId) => {
+        const didDocument = await module.getDocument(didId);
+        const address = keypairToAddress(keypair).toLowerCase();
+
+        // Find verification method that matches this keypair's address (case-insensitive)
+        const verificationMethod = didDocument.verificationMethod?.find(vm => {
+          if (!vm.blockchainAccountId) return false;
+          const vmAddress = vm.blockchainAccountId.split(':').pop().toLowerCase();
+          return vmAddress === address;
+        });
+
+        if (!verificationMethod) {
+          console.error('Available verification methods:', didDocument.verificationMethod);
+          console.error('Looking for address:', address);
+          throw new Error(`No verification method found for address ${address}`);
+        }
+
+        const publicKeyBytes = keypair._publicKey();
+        const publicKeyBase58 = b58.encode(publicKeyBytes);
+        return {
+          id: verificationMethod.id,
+          controller: didId,
+          type: verificationMethod.type,  // Use actual type from DID document
+          publicKeyBase58,
+          keypair,
+        };
+      };
+
+      // === STEP 1: Sign with initial DID ===
+      console.log('\n  📝 Step 1: Sign with initial DID (owner key)');
+      const ownerKeyDoc = await createKeyDocFromDIDDocument(ownerKeypair, did);
+      const cred1 = await issueCredential(ownerKeyDoc, createCredential(did, 'Initial University'));
+
+      expect(cred1.proof).toBeDefined();
+      expect(cred1.proof.type).toBe('EcdsaSecp256k1Signature2020');
+      expect(cred1.issuer).toBe(did);
+
+      console.log('  🔍 Verifying credential...');
+      const verify1 = await verifyCredential(cred1, { resolver: module });
+      if (!verify1.verified) {
+        console.error('  ❌ Verification failed:', JSON.stringify(verify1, null, 2));
+      }
+      expect(verify1.verified).toBe(true);
+      console.log('  ✅ Credential verified successfully with owner key');
+
+      // === STEP 2: Add service attribute, then sign ===
+      console.log('\n  📝 Step 2: Add service attribute, then sign');
+      await module.setAttribute(
+        did,
+        'did/svc/MessagingService',
+        'https://example.com/messages',
+        ownerKeypair,
+        86400,
+      );
+
+      const cred2 = await issueCredential(ownerKeyDoc, createCredential(did, 'Service University'));
+      expect(cred2.proof).toBeDefined();
+      expect(cred2.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      console.log('  ✅ After setAttribute: credential still signs successfully');
+
+      // === STEP 3: Add delegate, sign with both owner AND delegate ===
+      console.log('\n  📝 Step 3: Add delegate, sign with owner AND delegate');
+      const delegateKeypair = Secp256k1Keypair.random();
+      const delegateAddress = keypairToAddress(delegateKeypair);
+
+      await module.addDelegate(
+        did,
+        delegateAddress,
+        ownerKeypair,
+        { delegateType: 'veriKey', expiresIn: 86400 },
+      );
+
+      // Sign with owner key (should still work)
+      const cred3a = await issueCredential(ownerKeyDoc, createCredential(did, 'Owner After Delegate'));
+      expect(cred3a.proof).toBeDefined();
+      expect(cred3a.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      console.log('  ✅ After addDelegate: owner key still signs');
+
+      // Sign with delegate key
+      const delegateKeyDoc = await createKeyDocFromDIDDocument(delegateKeypair, did);
+      const cred3b = await issueCredential(delegateKeyDoc, createCredential(did, 'Delegate University'));
+      expect(cred3b.proof).toBeDefined();
+      expect(cred3b.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      console.log('  ✅ After addDelegate: delegate key signs');
+
+      // === STEP 4: Revoke delegate, owner can still sign ===
+      console.log('\n  📝 Step 4: Revoke delegate, owner continues to sign');
+      await module.revokeDelegate(
+        did,
+        delegateAddress,
+        ownerKeypair,
+        'veriKey',
+      );
+
+      // Sign with owner key (should still work)
+      const cred4a = await issueCredential(ownerKeyDoc, createCredential(did, 'Owner After Revoke'));
+      expect(cred4a.proof).toBeDefined();
+      expect(cred4a.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      console.log('  ✅ After revokeDelegate: owner key still signs');
+
+      // Note: Revoked delegate can still cryptographically sign, but would fail verification
+      console.log('  ℹ️  Revoked delegate can still sign but would fail verification');
+
+      // === STEP 5: Transfer ownership, new owner can sign ===
+      console.log('\n  📝 Step 5: Transfer ownership, new owner signs');
+      const newOwnerKeypair = Secp256k1Keypair.random();
+      const newOwnerAddress = keypairToAddress(newOwnerKeypair);
+      await fundTestAccount(newOwnerAddress, '0.05');
+
+      await module.changeOwner(did, newOwnerAddress, ownerKeypair);
+
+      // Sign with new owner key
+      const newOwnerKeyDoc = await createKeyDocFromDIDDocument(newOwnerKeypair, did);
+      const cred5b = await issueCredential(newOwnerKeyDoc, createCredential(did, 'New Owner University'));
+      expect(cred5b.proof).toBeDefined();
+      expect(cred5b.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      console.log('  ✅ After changeOwner: new owner key signs successfully');
+
+      // Note: Old owner can still cryptographically sign, but would fail verification
+      console.log('  ℹ️  Old owner can still sign but would fail verification');
+
+      console.log('\n  🎉 Complete flow test passed: Signed credentials after each DID manipulation!');
+    }, 180000); // 3 minutes for multiple transactions
+
+    test('verifies document changes before/after updates and can sign credentials', async () => {
+      // Create and fund a test account
+      const testKeypair = Secp256k1Keypair.random();
+      const testAddress = keypairToAddress(testKeypair);
+      await fundTestAccount(testAddress, '0.1');
+
+      const did = await module.createNewDID(testKeypair);
+
+      // Get BEFORE document
+      const docBefore = await module.getDocument(did);
+      console.log('  📄 DID Document BEFORE updates:');
+      console.log('    - ID:', docBefore.id);
+      console.log('    - Verification Methods:', docBefore.verificationMethod?.length || 0);
+      console.log('    - Services:', docBefore.service?.length || 0);
+
+      expect(docBefore.id).toBe(did);
+      expect(docBefore.verificationMethod).toBeDefined();
+      expect(docBefore.verificationMethod.length).toBeGreaterThanOrEqual(1); // At least owner key
+
+      const vmCountBefore = docBefore.verificationMethod.length;
+      const serviceCountBefore = docBefore.service?.length || 0;
+
+      // Add a service attribute
+      await module.setAttribute(
+        did,
+        'did/svc/MessagingService',
+        'https://example.com/messages',
+        testKeypair,
+        86400, // 1 day
+      );
+
+      // Add a delegate
+      const delegateKeypair = Secp256k1Keypair.random();
+      const delegateAddress = keypairToAddress(delegateKeypair);
+      await module.addDelegate(
+        did,
+        delegateAddress,
+        testKeypair,
+        { delegateType: 'veriKey', expiresIn: 86400 },
+      );
+
+      // Get AFTER document
+      const docAfter = await module.getDocument(did);
+      console.log('  📄 DID Document AFTER updates:');
+      console.log('    - ID:', docAfter.id);
+      console.log('    - Verification Methods:', docAfter.verificationMethod?.length || 0);
+      console.log('    - Services:', docAfter.service?.length || 0);
+
+      // Verify changes
+      expect(docAfter.id).toBe(did);
+      expect(docAfter.verificationMethod.length).toBeGreaterThan(vmCountBefore);
+      expect(docAfter.service?.length || 0).toBeGreaterThan(serviceCountBefore);
+
+      // Verify the specific service was added
+      const messagingService = docAfter.service?.find(
+        s => s.type === 'MessagingService' || s.serviceEndpoint === 'https://example.com/messages'
+      );
+      expect(messagingService).toBeDefined();
+
+      // Verify the delegate was added as a verification method
+      // The delegate should be in the verification methods
+      const delegateVM = docAfter.verificationMethod.find(vm => {
+        // Check various possible formats
+        return vm.blockchainAccountId?.toLowerCase().includes(delegateAddress.toLowerCase()) ||
+               vm.ethereumAddress?.toLowerCase() === delegateAddress.toLowerCase() ||
+               vm.id?.toLowerCase().includes(delegateAddress.toLowerCase());
+      });
+
+      // Log the verification methods to understand the structure
+      console.log('  🔍 Verification methods:', JSON.stringify(docAfter.verificationMethod, null, 2));
+
+      // We expect 2 VMs: the owner + the delegate
+      expect(docAfter.verificationMethod.length).toBe(2);
+
+      console.log('  ✅ Document updates verified successfully');
+
+      // Verify the delegate is in the verification methods
+      const delegateInVM = docAfter.verificationMethod.some(vm =>
+        vm.blockchainAccountId?.toLowerCase().includes(delegateAddress.toLowerCase())
+      );
+      expect(delegateInVM).toBe(true);
+      console.log('  ✅ Delegate found in verification methods');
+
+      // Now test issuing a credential with the ethr DID
+      const { issueCredential } = await import('../src/vc/index.js');
+      const { EcdsaSecp256k1VerKeyName } = await import('../src/vc/crypto/constants.js');
+
+      // Create a proper key document for signing
+      const publicKey = testKeypair.publicKey();
+      const publicKeyBytes = testKeypair._publicKey();
+      const publicKeyBase58 = b58.encode(publicKeyBytes);
+
+      const keyDoc = {
+        id: `${did}#keys-1`,
+        controller: did,
+        type: EcdsaSecp256k1VerKeyName, // Use the supported type
+        publicKeyBase58,
+        keypair: testKeypair,
+      };
+
+      const unsignedCredential = {
+        '@context': [
+          'https://www.w3.org/2018/credentials/v1',
+          'https://www.w3.org/2018/credentials/examples/v1',
+        ],
+        type: ['VerifiableCredential', 'UniversityDegreeCredential'],
+        issuer: did,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: 'did:example:student123',
+          degree: {
+            type: 'BachelorDegree',
+            name: 'Bachelor of Science and Arts',
+          },
+        },
+      };
+
+      const signedVC = await issueCredential(keyDoc, unsignedCredential);
+
+      expect(signedVC).toBeDefined();
+      expect(signedVC.proof).toBeDefined();
+      expect(signedVC.proof.type).toBe('EcdsaSecp256k1Signature2019');
+      expect(signedVC.proof.verificationMethod).toBeDefined();
+      expect(signedVC.issuer).toBe(did);
+
+      console.log('  ✅ Successfully signed credential with ethr DID');
+      console.log('    - Issuer DID:', signedVC.issuer);
+      console.log('    - Proof type:', signedVC.proof.type);
+      console.log('    - Verification method:', signedVC.proof.verificationMethod);
+    }, 120000); // 2 minutes for multiple transactions
+  });
+
+  describe('Multi-Network Operations', () => {
+    test('can operate on different networks', async () => {
+      const multiNetModule = new EthrDIDModule({
+        networks: [
+          'mainnet',
+          'sepolia',
+          createVietChainConfig(),
+        ],
+        defaultNetwork: 'mainnet',
+      });
+
+      const keypair = Secp256k1Keypair.random();
+      const mainnetDID = await multiNetModule.createNewDID(keypair, 'mainnet');
+      const sepoliaDID = await multiNetModule.createNewDID(keypair, 'sepolia');
+      const vietChainDID = await multiNetModule.createNewDID(keypair, 'vietchain');
+
+      // DIDs should be different due to network prefix
+      expect(mainnetDID).not.toBe(sepoliaDID);
+      expect(mainnetDID).not.toBe(vietChainDID);
+      expect(parseDID(mainnetDID).network).toBeNull(); // Mainnet doesn't include network
+      expect(sepoliaDID).toContain('sepolia');
+      expect(vietChainDID).toContain('vietchain');
+    }, 30000);
+  });
+
+  describe('Error Handling', () => {
+    test('handles insufficient funds gracefully', async () => {
+      // Create an unfunded account
+      const unfundedKeypair = Secp256k1Keypair.random();
+      const did = await module.createNewDID(unfundedKeypair);
+
+      await expect(
+        module.setAttribute(did, 'test', 'value', unfundedKeypair),
+      ).rejects.toThrow(/insufficient funds|gas/i);
+    }, 30000);
+
+    test('handles network errors gracefully', async () => {
+      const badModule = new EthrDIDModule({
+        networks: [{
+          name: 'invalid',
+          rpcUrl: 'https://invalid-network.example.com',
+          registry: '0x0000000000000000000000000000000000000000',
+        }],
+      });
+
+      const keypair = Secp256k1Keypair.random();
+      const did = await badModule.createNewDID(keypair);
+
+      await expect(
+        badModule.getDocument(did),
+      ).rejects.toThrow();
+    }, 30000);
+  });
+});

@@ -6,6 +6,7 @@ import {
   EcdsaSecp256k1VerKeyName,
   Ed25519VerKeyName,
   EcdsaSecp256k1Signature2019,
+  EcdsaSecp256k1Signature2020,
   Ed25519Signature2018,
   // Sr25519Signature2020,
   Bls12381BBSSignatureDock2022,
@@ -71,6 +72,9 @@ export async function getSuiteFromKeyDoc(keyDoc, useProofValue, options) {
   switch (keyDoc.type) {
     case EcdsaSecp256k1VerKeyName:
       Cls = EcdsaSecp256k1Signature2019;
+      break;
+    case 'EcdsaSecp256k1RecoveryMethod2020':
+      Cls = EcdsaSecp256k1Signature2020;
       break;
     case Ed25519VerKeyName:
       Cls = Ed25519Signature2018;

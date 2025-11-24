@@ -13,6 +13,7 @@ import {
   Resolver,
 } from '@docknetwork/credential-sdk/resolver';
 import { CheqdDIDModule } from '@docknetwork/cheqd-blockchain-modules';
+import { EthrDIDModule, createVietChainConfig } from '@docknetwork/credential-sdk/modules/ethr-did';
 
 // The following can be tweaked depending on where the node is running and what
 // account is to be used for sending the transaction.
@@ -24,12 +25,20 @@ import { faucet, network, url } from './env.js';
 
 const universalResolverUrl = 'https://uniresolver.io';
 
-// Infura's Ethereum provider for the main net
+// Multi-network Ethereum configuration with VietChain
 const ethereumProviderConfig = {
   networks: [
     {
       name: 'mainnet',
       rpcUrl: 'https://mainnet.infura.io/v3/05f321c3606e44599c54dbc92510e6a9',
+    },
+    // Add VietChain configuration
+    createVietChainConfig(),
+    // Add Sepolia testnet
+    {
+      name: 'sepolia',
+      rpcUrl: 'https://sepolia.infura.io/v3/05f321c3606e44599c54dbc92510e6a9',
+      registry: '0x03d5003bf0e79c5f5223588f347eba39afbc3818',
     },
   ],
 };
@@ -37,7 +46,7 @@ const ethereumProviderConfig = {
 const cheqd = new CheqdAPI();
 const didModule = new CheqdDIDModule(cheqd);
 
-// Custom ethereum resolver class
+// Enhanced Ethereum resolver using EthrDIDModule for multi-network support
 class EtherResolver extends Resolver {
   prefix = 'did';
 
@@ -104,7 +113,10 @@ async function main() {
   const didsToTest = [
     cheqdDID,
     'did:key:z6Mkfriq1MqLBoPWecGoDLjguo1sB9brj6wT3qZ5BxkKpuP6',
-    'did:ethr:0xabcabc03e98e0dc2b855be647c39abe984193675',
+    'did:ethr:0xabcabc03e98e0dc2b855be647c39abe984193675', // Mainnet
+    'did:ethr:sepolia:0xabcabc03e98e0dc2b855be647c39abe984193675', // Sepolia testnet
+    // Note: To test VietChain DIDs, you would need an actual DID from that network
+    // 'did:ethr:vietchain:0x...'
   ];
 
   console.log('Resolving', didsToTest.length, 'dids...');

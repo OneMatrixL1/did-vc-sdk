@@ -7,7 +7,7 @@
  * Standard ERC1056 DID Registry contract address on mainnet
  * @see https://github.com/uport-project/ethr-did-registry
  */
-export const STANDARD_REGISTRY_ADDRESS = '0xdca7ef03e98e0dc2b855be647c39abe984193675';
+export const STANDARD_REGISTRY_ADDRESS = '0xdCa7EF03e98e0DC2B855bE647C39ABe984fcF21B';
 
 /**
  * Default network configurations for common Ethereum-compatible chains

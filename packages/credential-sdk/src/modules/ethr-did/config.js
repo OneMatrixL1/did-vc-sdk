@@ -4,23 +4,21 @@
  */
 
 /**
- * Standard ERC1056 DID Registry contract address on mainnet
- * @see https://github.com/uport-project/ethr-did-registry
- */
-export const STANDARD_REGISTRY_ADDRESS = '0xdCa7EF03e98e0DC2B855bE647C39ABe984fcF21B';
-
-/**
- * Default network configurations for common Ethereum-compatible chains
+ * Verified default network configurations for ethr DID
+ * Only includes networks with verified registry deployments
  * @type {Object.<string, NetworkConfig>}
+ * @see https://github.com/uport-project/ethr-did-registry - Official registry deployments
  */
 export const DEFAULT_NETWORKS = {
+  // Verified from official ethr-did-registry: https://github.com/uport-project/ethr-did-registry
   mainnet: {
     name: 'mainnet',
     description: 'Ethereum Mainnet',
     rpcUrl: 'https://mainnet.infura.io/v3/',
     chainId: 1,
-    registry: STANDARD_REGISTRY_ADDRESS,
+    registry: '0xdca7ef03e98e0dc2b855be647c39abe984fcf21b',
   },
+  // Verified from official ethr-did-registry: https://github.com/uport-project/ethr-did-registry
   sepolia: {
     name: 'sepolia',
     description: 'Ethereum Sepolia Testnet',
@@ -28,33 +26,13 @@ export const DEFAULT_NETWORKS = {
     chainId: 11155111,
     registry: '0x03d5003bf0e79c5f5223588f347eba39afbc3818',
   },
-  polygon: {
-    name: 'polygon',
-    description: 'Polygon Mainnet',
-    rpcUrl: 'https://polygon-rpc.com',
-    chainId: 137,
-    registry: '0x41D788c9c5D335362D713152F407692c5EEAfAae',
-  },
-  'polygon-amoy': {
-    name: 'polygon-amoy',
-    description: 'Polygon Amoy Testnet',
-    rpcUrl: 'https://rpc-amoy.polygon.technology',
-    chainId: 80002,
-    registry: '0x03d5003bf0e79c5f5223588f347eba39afbc3818',
-  },
-  arbitrum: {
-    name: 'arbitrum',
-    description: 'Arbitrum One',
-    rpcUrl: 'https://arb1.arbitrum.io/rpc',
-    chainId: 42161,
-    registry: '0xdca7ef03e98e0dc2b855be647c39abe984fcf21',
-  },
-  optimism: {
-    name: 'optimism',
-    description: 'Optimism Mainnet',
-    rpcUrl: 'https://mainnet.optimism.io',
-    chainId: 10,
-    registry: '0xdca7ef03e98e0dc2b855be647c39abe984fcf21',
+  // Verified through testing with VietChain RPC and registry
+  vietchain: {
+    name: 'vietchain',
+    description: 'VietChain Network',
+    rpcUrl: 'https://rpc.vietcha.in',
+    chainId: 84005,
+    registry: '0xF0889fb2473F91c068178870ae2e1A0408059A03',
   },
 };
 
@@ -152,20 +130,16 @@ export function validateModuleConfig(config) {
 }
 
 /**
- * Create network configuration for VietChain
- * @param {string} [rpcUrl='https://rpc.vietcha.in'] - RPC URL
- * @param {string} [registry='0xF0889fb2473F91c068178870ae2e1A0408059A03'] - Registry contract address
+ * Create network configuration for VietChain with optional overrides
+ * @param {string} [rpcUrl] - Optional RPC URL override
+ * @param {string} [registry] - Optional registry contract address override
  * @returns {NetworkConfig} VietChain network configuration
  */
-export function createVietChainConfig(
-  rpcUrl = 'https://rpc.vietcha.in',
-  registry = '0xF0889fb2473F91c068178870ae2e1A0408059A03',
-) {
+export function createVietChainConfig(rpcUrl, registry) {
   return {
-    name: 'vietchain',
-    description: 'VietChain Network',
-    rpcUrl,
-    registry,
+    ...DEFAULT_NETWORKS.vietchain,
+    ...(rpcUrl && { rpcUrl }),
+    ...(registry && { registry }),
   };
 }
 

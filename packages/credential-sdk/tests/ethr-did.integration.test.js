@@ -13,7 +13,7 @@
  *   export ETHR_NETWORK=vietchain
  *   export ETHR_NETWORK_RPC_URL=https://rpc.vietcha.in
  *   export ETHR_REGISTRY_ADDRESS=0xF0889fb2473F91c068178870ae2e1A0408059A03
- *   export ETHR_PRIVATE_KEY=0x...  # Optional: funded account for mutation tests
+ *   export ETHR_PRIVATE_KEY=0x...  # REQUIRED: funded account for gas fees
  *   yarn test:integration
  *
  * Environment Variables:
@@ -21,7 +21,7 @@
  * ETHR_NETWORK           - Network name (vietchain, sepolia, mainnet, etc.)
  * ETHR_NETWORK_RPC_URL   - RPC endpoint URL
  * ETHR_REGISTRY_ADDRESS  - DID Registry contract address (ERC1056)
- * ETHR_PRIVATE_KEY       - Private key of funded account (optional)
+ * ETHR_PRIVATE_KEY       - Private key of funded account (REQUIRED)
  *
  * Note: Tests will create on-chain transactions and consume gas fees.
  */
@@ -71,17 +71,20 @@ describe('EthrDID Integration Tests', () => {
     // Create provider
     provider = new ethers.providers.JsonRpcProvider(networkConfig.rpcUrl);
 
-    // Use provided private key or generate random (will need manual funding)
-    if (process.env.ETHR_PRIVATE_KEY) {
-      const privateKeyBytes = Buffer.from(
-        process.env.ETHR_PRIVATE_KEY.replace('0x', ''),
-        'hex',
+    // Require funded private key for integration tests
+    if (!process.env.ETHR_PRIVATE_KEY) {
+      throw new Error(
+        'ETHR_PRIVATE_KEY environment variable is required for integration tests. ' +
+        'Tests require a funded account to pay gas fees. ' +
+        'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh'
       );
-      founderKeypair = new Secp256k1Keypair(privateKeyBytes, 'private');
-    } else {
-      console.warn('⚠️  No ETHR_PRIVATE_KEY provided. Tests may fail due to insufficient funds.');
-      founderKeypair = Secp256k1Keypair.random();
     }
+
+    const privateKeyBytes = Buffer.from(
+      process.env.ETHR_PRIVATE_KEY.replace('0x', ''),
+      'hex',
+    );
+    founderKeypair = new Secp256k1Keypair(privateKeyBytes, 'private');
   });
 
   describe('DID Resolution', () => {

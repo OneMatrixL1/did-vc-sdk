@@ -412,7 +412,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const ethrDid = await this._createEthrDID(keypair, networkName);
 
     // Revoke the owner's delegate status (effectively deactivates the DID)
-    const promise = ethrDid.revokeDelegate('veriKey', keypairToAddress(keypair));
+    const promise = ethrDid.revokeDelegate(keypairToAddress(keypair), 'veriKey');
 
     return {
       promise,

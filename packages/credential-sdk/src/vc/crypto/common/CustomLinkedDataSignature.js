@@ -45,18 +45,31 @@ export default class CustomLinkedDataSignature extends jsigs.suites
 
     // Note: `expansionMap` is intentionally not passed; we can safely drop
     // properties here and must allow for it
+    // Extended context to include blockchainAccountId (not in security/v2)
+    const frameContext = [
+      jsigs.SECURITY_CONTEXT_URL,
+      { blockchainAccountId: 'https://w3id.org/security#blockchainAccountId' },
+    ];
     const result = await jsonld.frame(
       verificationMethod,
       {
-        '@context': jsigs.SECURITY_CONTEXT_URL,
-        '@explicit': false,  // Include all properties, not just those in frame
+        '@context': frameContext,
+        '@explicit': true,
         '@embed': '@always',
         id: possibleVerificationMethodRefs(verificationMethod),
+        type: {},
+        controller: {},
+        publicKeyBase58: {},
+        publicKeyBase64: {},
+        publicKeyMultibase: {},
+        publicKeyHex: {},
+        publicKeyJwk: {},
+        blockchainAccountId: {},
       },
       {
         documentLoader,
         compactToRelative: false,
-        expandContext: jsigs.SECURITY_CONTEXT_URL,
+        expandContext: frameContext,
       },
     );
 

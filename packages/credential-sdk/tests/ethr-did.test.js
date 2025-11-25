@@ -6,8 +6,12 @@
  * - ethr-did.integration.test.js
  */
 
-import { EthrDIDModule, createVietChainConfig, validateModuleConfig, validateNetworkConfig, normalizeNetworkConfig, DEFAULT_NETWORKS } from '../src/modules/ethr-did';
-import { addressToDID, parseDID, isEthrDID, keypairToAddress } from '../src/modules/ethr-did/utils';
+import {
+  EthrDIDModule, createVietChainConfig, validateModuleConfig, validateNetworkConfig, normalizeNetworkConfig, DEFAULT_NETWORKS,
+} from '../src/modules/ethr-did';
+import {
+  addressToDID, parseDID, isEthrDID, keypairToAddress,
+} from '../src/modules/ethr-did/utils';
 import { Secp256k1Keypair } from '../src/keypairs';
 
 describe('EthrDID Configuration', () => {

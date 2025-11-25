@@ -54,18 +54,16 @@ import { EthrDIDModule } from '@docknetwork/credential-sdk/modules/ethr-did';
 
 // Use default configurations
 const module = new EthrDIDModule({
-  networks: ['mainnet', 'sepolia', 'polygon'],
+  networks: ['sepolia', 'vietchain'],
   defaultNetwork: 'sepolia',
 });
 ```
 
 Supported default networks:
-- `mainnet` - Ethereum Mainnet
-- `sepolia` - Ethereum Sepolia Testnet
-- `polygon` - Polygon Mainnet
-- `polygon-amoy` - Polygon Amoy Testnet
-- `arbitrum` - Arbitrum One
-- `optimism` - Optimism Mainnet
+- `sepolia` - Ethereum Sepolia Testnet (registry: `0x03d5003bf0e79c5f5223588f347eba39afbc3818`)
+- `vietchain` - VietChain Network (registry: `0xF0889fb2473F91c068178870ae2e1A0408059A03`)
+
+For other networks (mainnet, polygon, arbitrum, etc.), use custom configuration with the appropriate registry address.
 
 ## Custom Network Configuration
 
@@ -95,13 +93,12 @@ const module = new EthrDIDModule({
 ```javascript
 const module = new EthrDIDModule({
   networks: [
-    'mainnet',
     'sepolia',
-    createVietChainConfig(),
+    'vietchain',
     {
-      name: 'custom-chain',
-      rpcUrl: 'https://rpc.custom.com',
-      registry: '0x...',
+      name: 'mainnet',
+      rpcUrl: 'https://mainnet.infura.io/v3/YOUR_API_KEY',
+      registry: '0xdca7ef03e98e0dc2b855be647c39abe984fcf21b',
     },
   ],
   defaultNetwork: 'sepolia',
@@ -109,8 +106,8 @@ const module = new EthrDIDModule({
 
 // Create DIDs on different networks
 const sepoliaDID = await module.createNewDID(keypair); // Uses default
-const mainnetDID = await module.createNewDID(keypair, 'mainnet');
 const vietChainDID = await module.createNewDID(keypair, 'vietchain');
+const mainnetDID = await module.createNewDID(keypair, 'mainnet');
 ```
 
 ## Working with DIDs

@@ -6,13 +6,32 @@
  */
 
 // Mock fetch for document loader
-import mockFetch from "./mocks/fetch";
-import networkCache from "./utils/network-cache";
-import { issueCredential, verifyCredential, signPresentation, verifyPresentation } from "../src/vc";
-import { Secp256k1Keypair } from "../src/keypairs";
-import { addressToDID, keypairToAddress } from "../src/modules/ethr-did/utils";
-import { EcdsaSecp256k1VerKeyName } from "../src/vc/crypto/constants";
 import b58 from 'bs58';
+import mockFetch from './mocks/fetch';
+import networkCache from './utils/network-cache';
+import {
+  issueCredential, verifyCredential, signPresentation, verifyPresentation,
+} from '../src/vc';
+import { Secp256k1Keypair } from '../src/keypairs';
+import { addressToDID, keypairToAddress } from '../src/modules/ethr-did/utils';
+import { EcdsaSecp256k1VerKeyName } from '../src/vc/crypto/constants';
+
+// Constants to avoid duplicate string literals
+const CREDENTIALS_V1_CONTEXT = 'https://www.w3.org/2018/credentials/v1';
+const CREDENTIALS_EXAMPLES_CONTEXT = 'https://www.w3.org/2018/credentials/examples/v1';
+const SECURITY_V2_CONTEXT = 'https://w3id.org/security/v2';
+const DID_V1_CONTEXT = 'https://www.w3.org/ns/did/v1';
+const VIETCHAIN_NETWORK = 'vietchain';
+const TEST_ISSUANCE_DATE = '2024-01-01T00:00:00Z';
+const TEST_DOMAIN = 'example.com';
+
+/**
+ * Get raw public key bytes from keypair
+ * @param {Secp256k1Keypair} keypair
+ * @returns {Uint8Array}
+ */
+// eslint-disable-next-line no-underscore-dangle
+const getRawPublicKeyBytes = (keypair) => keypair._publicKey();
 
 mockFetch();
 
@@ -27,15 +46,15 @@ describe('Ethr DID VC Issuance', () => {
   beforeAll(() => {
     // Create issuer identity
     issuerKeypair = new Secp256k1Keypair(
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     );
     const issuerAddress = keypairToAddress(issuerKeypair);
-    issuerDID = addressToDID(issuerAddress, 'vietchain');
+    issuerDID = addressToDID(issuerAddress, VIETCHAIN_NETWORK);
 
     // Create issuer key document for signing
     const issuerPublicKey = issuerKeypair.publicKey();
-    // Use _publicKey() to get raw bytes (publicKey() wraps it in PublicKeySecp256k1)
-    const issuerPublicKeyBytes = issuerKeypair._publicKey();
+    // Use getRawPublicKeyBytes to get raw bytes (publicKey() wraps it in PublicKeySecp256k1)
+    const issuerPublicKeyBytes = getRawPublicKeyBytes(issuerKeypair);
     const issuerPublicKeyBase58 = b58.encode(issuerPublicKeyBytes);
 
     issuerKeyDoc = {
@@ -48,14 +67,14 @@ describe('Ethr DID VC Issuance', () => {
 
     // Mock DID document resolution for issuer
     networkCache[issuerKeyDoc.id] = {
-      '@context': 'https://w3id.org/security/v2',
+      '@context': SECURITY_V2_CONTEXT,
       id: issuerKeyDoc.id,
       type: EcdsaSecp256k1VerKeyName,
       controller: issuerDID,
       publicKeyBase58: issuerPublicKeyBase58,
     };
     networkCache[issuerDID] = {
-      '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/v2'],
+      '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
       id: issuerDID,
       verificationMethod: [
         {
@@ -71,14 +90,14 @@ describe('Ethr DID VC Issuance', () => {
 
     // Create holder identity
     holderKeypair = new Secp256k1Keypair(
-      "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+      'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
     );
     const holderAddress = keypairToAddress(holderKeypair);
-    holderDID = addressToDID(holderAddress, 'vietchain');
+    holderDID = addressToDID(holderAddress, VIETCHAIN_NETWORK);
 
     // Create holder key document for signing
     const holderPublicKey = holderKeypair.publicKey();
-    const holderPublicKeyBytes = holderKeypair._publicKey();
+    const holderPublicKeyBytes = getRawPublicKeyBytes(holderKeypair);
     const holderPublicKeyBase58 = b58.encode(holderPublicKeyBytes);
 
     holderKeyDoc = {
@@ -91,14 +110,14 @@ describe('Ethr DID VC Issuance', () => {
 
     // Mock DID document resolution for holder
     networkCache[holderKeyDoc.id] = {
-      '@context': 'https://w3id.org/security/v2',
+      '@context': SECURITY_V2_CONTEXT,
       id: holderKeyDoc.id,
       type: EcdsaSecp256k1VerKeyName,
       controller: holderDID,
       publicKeyBase58: holderPublicKeyBase58,
     };
     networkCache[holderDID] = {
-      '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/v2'],
+      '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
       id: holderDID,
       verificationMethod: [
         {
@@ -117,8 +136,8 @@ describe('Ethr DID VC Issuance', () => {
     test('should issue a credential with ethr DID as issuer', async () => {
       const unsignedCredential = {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential', 'UniversityDegreeCredential'],
         issuer: issuerDID,
@@ -158,8 +177,8 @@ describe('Ethr DID VC Issuance', () => {
 
       const unsignedCredential = {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential'],
         issuer: mainnetDID,
@@ -196,8 +215,8 @@ describe('Ethr DID VC Issuance', () => {
 
         const unsignedCredential = {
           '@context': [
-            'https://www.w3.org/2018/credentials/v1',
-            'https://www.w3.org/2018/credentials/examples/v1',
+            CREDENTIALS_V1_CONTEXT,
+            CREDENTIALS_EXAMPLES_CONTEXT,
           ],
           type: ['VerifiableCredential'],
           issuer: did,
@@ -208,6 +227,7 @@ describe('Ethr DID VC Issuance', () => {
           },
         };
 
+        // eslint-disable-next-line no-await-in-loop
         const signedVC = await issueCredential(keyDoc, unsignedCredential);
 
         expect(signedVC.issuer).toBe(did);
@@ -223,12 +243,12 @@ describe('Ethr DID VC Issuance', () => {
     beforeAll(async () => {
       const unsignedCredential = {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential', 'AlumniCredential'],
         issuer: issuerDID,
-        issuanceDate: '2024-01-01T00:00:00Z',
+        issuanceDate: TEST_ISSUANCE_DATE,
         credentialSubject: {
           id: holderDID,
           alumniOf: 'Example University',
@@ -267,12 +287,12 @@ describe('Ethr DID VC Issuance', () => {
     beforeAll(async () => {
       const unsignedCredential = {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential', 'UniversityDegreeCredential'],
         issuer: issuerDID,
-        issuanceDate: '2024-01-01T00:00:00Z',
+        issuanceDate: TEST_ISSUANCE_DATE,
         credentialSubject: {
           id: holderDID,
           degree: {
@@ -287,7 +307,7 @@ describe('Ethr DID VC Issuance', () => {
 
     test('should create presentation with ethr DID as holder', async () => {
       const unsignedPresentation = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': [CREDENTIALS_V1_CONTEXT],
         type: ['VerifiablePresentation'],
         verifiableCredential: [verifiableCredential],
         holder: holderDID,
@@ -297,7 +317,7 @@ describe('Ethr DID VC Issuance', () => {
         unsignedPresentation,
         holderKeyDoc,
         'some-challenge-123',
-        'example.com'
+        TEST_DOMAIN,
       );
 
       expect(signedVP).toBeDefined();
@@ -308,12 +328,12 @@ describe('Ethr DID VC Issuance', () => {
       expect(signedVP.proof.verificationMethod).toBe(holderKeyDoc.id);
       expect(signedVP.proof.proofPurpose).toBe('authentication');
       expect(signedVP.proof.challenge).toBe('some-challenge-123');
-      expect(signedVP.proof.domain).toBe('example.com');
+      expect(signedVP.proof.domain).toBe(TEST_DOMAIN);
     }, 30000);
 
     test('should verify presentation signed with ethr DID', async () => {
       const unsignedPresentation = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': [CREDENTIALS_V1_CONTEXT],
         type: ['VerifiablePresentation'],
         verifiableCredential: [verifiableCredential],
         holder: holderDID,
@@ -323,7 +343,7 @@ describe('Ethr DID VC Issuance', () => {
         unsignedPresentation,
         holderKeyDoc,
         'challenge-456',
-        'verifier.example.com'
+        'verifier.example.com',
       );
 
       const result = await verifyPresentation(signedVP, {
@@ -337,7 +357,7 @@ describe('Ethr DID VC Issuance', () => {
 
     test('should fail verification with wrong challenge', async () => {
       const unsignedPresentation = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': [CREDENTIALS_V1_CONTEXT],
         type: ['VerifiablePresentation'],
         verifiableCredential: [verifiableCredential],
         holder: holderDID,
@@ -347,12 +367,12 @@ describe('Ethr DID VC Issuance', () => {
         unsignedPresentation,
         holderKeyDoc,
         'correct-challenge',
-        'example.com'
+        TEST_DOMAIN,
       );
 
       const result = await verifyPresentation(signedVP, {
         challenge: 'wrong-challenge', // Wrong challenge
-        domain: 'example.com',
+        domain: TEST_DOMAIN,
       });
 
       expect(result.verified).toBe(false);
@@ -364,12 +384,12 @@ describe('Ethr DID VC Issuance', () => {
       // Issue multiple credentials
       const credential1 = await issueCredential(issuerKeyDoc, {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential', 'AlumniCredential'],
         issuer: issuerDID,
-        issuanceDate: '2024-01-01T00:00:00Z',
+        issuanceDate: TEST_ISSUANCE_DATE,
         credentialSubject: {
           id: holderDID,
           alumniOf: 'JavaScript University',
@@ -378,12 +398,12 @@ describe('Ethr DID VC Issuance', () => {
 
       const credential2 = await issueCredential(issuerKeyDoc, {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential', 'AlumniCredential'],
         issuer: issuerDID,
-        issuanceDate: '2024-01-02T00:00:00Z',
+        issuanceDate: TEST_ISSUANCE_DATE,
         credentialSubject: {
           id: holderDID,
           alumniOf: 'Rust University',
@@ -391,7 +411,7 @@ describe('Ethr DID VC Issuance', () => {
       });
 
       const unsignedPresentation = {
-        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        '@context': [CREDENTIALS_V1_CONTEXT],
         type: ['VerifiablePresentation'],
         verifiableCredential: [credential1, credential2],
         holder: holderDID,
@@ -401,7 +421,7 @@ describe('Ethr DID VC Issuance', () => {
         unsignedPresentation,
         holderKeyDoc,
         'multi-cred-challenge',
-        'example.com'
+        TEST_DOMAIN,
       );
 
       expect(signedVP.verifiableCredential).toHaveLength(2);
@@ -411,7 +431,7 @@ describe('Ethr DID VC Issuance', () => {
 
       const result = await verifyPresentation(signedVP, {
         challenge: 'multi-cred-challenge',
-        domain: 'example.com',
+        domain: TEST_DOMAIN,
       });
 
       expect(result.verified).toBe(true);
@@ -422,11 +442,11 @@ describe('Ethr DID VC Issuance', () => {
     test('should issue credential with delegate key', async () => {
       // Create a fresh issuer for this test to avoid interference
       const delegateTestIssuerKeypair = new Secp256k1Keypair(
-        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
       );
       const delegateTestIssuerAddress = keypairToAddress(delegateTestIssuerKeypair);
-      const delegateTestIssuerDID = addressToDID(delegateTestIssuerAddress, 'vietchain');
-      const delegateTestIssuerPublicKeyBytes = delegateTestIssuerKeypair._publicKey();
+      const delegateTestIssuerDID = addressToDID(delegateTestIssuerAddress, VIETCHAIN_NETWORK);
+      const delegateTestIssuerPublicKeyBytes = getRawPublicKeyBytes(delegateTestIssuerKeypair);
       const delegateTestIssuerPublicKeyBase58 = b58.encode(delegateTestIssuerPublicKeyBytes);
 
       const delegateTestIssuerKeyDoc = {
@@ -439,14 +459,14 @@ describe('Ethr DID VC Issuance', () => {
 
       // Mock fresh DID documents
       networkCache[delegateTestIssuerKeyDoc.id] = {
-        '@context': 'https://w3id.org/security/v2',
+        '@context': SECURITY_V2_CONTEXT,
         id: delegateTestIssuerKeyDoc.id,
         type: EcdsaSecp256k1VerKeyName,
         controller: delegateTestIssuerDID,
         publicKeyBase58: delegateTestIssuerPublicKeyBase58,
       };
       networkCache[delegateTestIssuerDID] = {
-        '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/v2'],
+        '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
         id: delegateTestIssuerDID,
         verificationMethod: [
           {
@@ -462,10 +482,10 @@ describe('Ethr DID VC Issuance', () => {
 
       // Create a delegate keypair
       const delegateKeypair = new Secp256k1Keypair(
-        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
       );
       const delegatePublicKey = delegateKeypair.publicKey();
-      const delegatePublicKeyBytes = delegateKeypair._publicKey();
+      const delegatePublicKeyBytes = getRawPublicKeyBytes(delegateKeypair);
       const delegatePublicKeyBase58 = b58.encode(delegatePublicKeyBytes);
 
       // Create delegate key document
@@ -479,7 +499,7 @@ describe('Ethr DID VC Issuance', () => {
 
       // Mock the delegate verification method in network cache
       networkCache[delegateKeyDoc.id] = {
-        '@context': 'https://w3id.org/security/v2',
+        '@context': SECURITY_V2_CONTEXT,
         id: delegateKeyDoc.id,
         type: EcdsaSecp256k1VerKeyName,
         controller: delegateTestIssuerDID,
@@ -500,8 +520,8 @@ describe('Ethr DID VC Issuance', () => {
       // Issue credential using the delegate key
       const unsignedCredential = {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential', 'AlumniCredential'],
         issuer: delegateTestIssuerDID,
@@ -531,11 +551,11 @@ describe('Ethr DID VC Issuance', () => {
     test('should issue credential with multiple delegates', async () => {
       // Create a fresh issuer for this test
       const multiDelegateIssuerKeypair = new Secp256k1Keypair(
-        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
       );
       const multiDelegateIssuerAddress = keypairToAddress(multiDelegateIssuerKeypair);
-      const multiDelegateIssuerDID = addressToDID(multiDelegateIssuerAddress, 'vietchain');
-      const multiDelegateIssuerPublicKeyBytes = multiDelegateIssuerKeypair._publicKey();
+      const multiDelegateIssuerDID = addressToDID(multiDelegateIssuerAddress, VIETCHAIN_NETWORK);
+      const multiDelegateIssuerPublicKeyBytes = getRawPublicKeyBytes(multiDelegateIssuerKeypair);
       const multiDelegateIssuerPublicKeyBase58 = b58.encode(multiDelegateIssuerPublicKeyBytes);
 
       const multiDelegateIssuerKeyDoc = {
@@ -548,14 +568,14 @@ describe('Ethr DID VC Issuance', () => {
 
       // Mock fresh DID documents
       networkCache[multiDelegateIssuerKeyDoc.id] = {
-        '@context': 'https://w3id.org/security/v2',
+        '@context': SECURITY_V2_CONTEXT,
         id: multiDelegateIssuerKeyDoc.id,
         type: EcdsaSecp256k1VerKeyName,
         controller: multiDelegateIssuerDID,
         publicKeyBase58: multiDelegateIssuerPublicKeyBase58,
       };
       networkCache[multiDelegateIssuerDID] = {
-        '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/v2'],
+        '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
         id: multiDelegateIssuerDID,
         verificationMethod: [
           {
@@ -571,15 +591,15 @@ describe('Ethr DID VC Issuance', () => {
 
       // Create two delegate keypairs
       const delegate1Keypair = new Secp256k1Keypair(
-        "1111111111111111111111111111111111111111111111111111111111111111"
+        '1111111111111111111111111111111111111111111111111111111111111111',
       );
       const delegate2Keypair = new Secp256k1Keypair(
-        "2222222222222222222222222222222222222222222222222222222222222222"
+        '2222222222222222222222222222222222222222222222222222222222222222',
       );
 
-      const delegate1PublicKeyBytes = delegate1Keypair._publicKey();
+      const delegate1PublicKeyBytes = getRawPublicKeyBytes(delegate1Keypair);
       const delegate1PublicKeyBase58 = b58.encode(delegate1PublicKeyBytes);
-      const delegate2PublicKeyBytes = delegate2Keypair._publicKey();
+      const delegate2PublicKeyBytes = getRawPublicKeyBytes(delegate2Keypair);
       const delegate2PublicKeyBase58 = b58.encode(delegate2PublicKeyBytes);
 
       const delegate1KeyDoc = {
@@ -600,14 +620,14 @@ describe('Ethr DID VC Issuance', () => {
 
       // Mock both delegates
       networkCache[delegate1KeyDoc.id] = {
-        '@context': 'https://w3id.org/security/v2',
+        '@context': SECURITY_V2_CONTEXT,
         id: delegate1KeyDoc.id,
         type: EcdsaSecp256k1VerKeyName,
         controller: multiDelegateIssuerDID,
         publicKeyBase58: delegate1PublicKeyBase58,
       };
       networkCache[delegate2KeyDoc.id] = {
-        '@context': 'https://w3id.org/security/v2',
+        '@context': SECURITY_V2_CONTEXT,
         id: delegate2KeyDoc.id,
         type: EcdsaSecp256k1VerKeyName,
         controller: multiDelegateIssuerDID,
@@ -628,7 +648,7 @@ describe('Ethr DID VC Issuance', () => {
           type: EcdsaSecp256k1VerKeyName,
           controller: multiDelegateIssuerDID,
           publicKeyBase58: delegate2PublicKeyBase58,
-        }
+        },
       );
       networkCache[multiDelegateIssuerDID].assertionMethod.push(delegate1KeyDoc.id, delegate2KeyDoc.id);
       networkCache[multiDelegateIssuerDID].authentication.push(delegate1KeyDoc.id, delegate2KeyDoc.id);
@@ -636,8 +656,8 @@ describe('Ethr DID VC Issuance', () => {
       // Issue credentials with different delegates
       const cred1 = await issueCredential(delegate1KeyDoc, {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential'],
         issuer: multiDelegateIssuerDID,
@@ -650,8 +670,8 @@ describe('Ethr DID VC Issuance', () => {
 
       const cred2 = await issueCredential(delegate2KeyDoc, {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential'],
         issuer: multiDelegateIssuerDID,
@@ -682,11 +702,11 @@ describe('Ethr DID VC Issuance', () => {
       // Create a completely fresh DID for this test to avoid caching issues
       // This simulates the state AFTER an ownership transfer has occurred
       const transferTestKeypair = new Secp256k1Keypair(
-        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
       );
       const transferTestAddress = keypairToAddress(transferTestKeypair);
-      const transferTestDID = addressToDID(transferTestAddress, 'vietchain');
-      const transferTestPublicKeyBytes = transferTestKeypair._publicKey();
+      const transferTestDID = addressToDID(transferTestAddress, VIETCHAIN_NETWORK);
+      const transferTestPublicKeyBytes = getRawPublicKeyBytes(transferTestKeypair);
       const transferTestPublicKeyBase58 = b58.encode(transferTestPublicKeyBytes);
 
       const newOwnerKeyDoc = {
@@ -700,14 +720,14 @@ describe('Ethr DID VC Issuance', () => {
       // Mock DID document with new owner (after transfer)
       // Old owner's key is NOT in this document
       networkCache[newOwnerKeyDoc.id] = {
-        '@context': 'https://w3id.org/security/v2',
+        '@context': SECURITY_V2_CONTEXT,
         id: newOwnerKeyDoc.id,
         type: EcdsaSecp256k1VerKeyName,
         controller: transferTestDID,
         publicKeyBase58: transferTestPublicKeyBase58,
       };
       networkCache[transferTestDID] = {
-        '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/v2'],
+        '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
         id: transferTestDID,
         verificationMethod: [
           {
@@ -724,8 +744,8 @@ describe('Ethr DID VC Issuance', () => {
       // Issue credential with new owner's key (after ownership transfer)
       const credentialAfterTransfer = await issueCredential(newOwnerKeyDoc, {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential', 'UniversityDegreeCredential'],
         issuer: transferTestDID,
@@ -751,7 +771,7 @@ describe('Ethr DID VC Issuance', () => {
 
       // Test that a different keypair (simulating old owner) cannot be used
       const oldOwnerKeypair = new Secp256k1Keypair(
-        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
       );
       const oldOwnerKeyDoc = {
         id: `${transferTestDID}#keys-old-owner`,
@@ -764,8 +784,8 @@ describe('Ethr DID VC Issuance', () => {
       // Issue credential with old owner's key (not in DID document)
       const credentialWithOldKey = await issueCredential(oldOwnerKeyDoc, {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential', 'AlumniCredential'],
         issuer: transferTestDID,
@@ -785,12 +805,10 @@ describe('Ethr DID VC Issuance', () => {
     test('should fail to sign with old owner key after ownership transfer', async () => {
       // Create initial owner
       const oldOwnerKeypair = new Secp256k1Keypair(
-        "9999999999999999999999999999999999999999999999999999999999999999"
+        '9999999999999999999999999999999999999999999999999999999999999999',
       );
       const oldOwnerAddress = keypairToAddress(oldOwnerKeypair);
-      const rotationDID = addressToDID(oldOwnerAddress, 'vietchain');
-      const oldOwnerPublicKeyBytes = oldOwnerKeypair._publicKey();
-      const oldOwnerPublicKeyBase58 = b58.encode(oldOwnerPublicKeyBytes);
+      const rotationDID = addressToDID(oldOwnerAddress, VIETCHAIN_NETWORK);
 
       const oldOwnerKeyDoc = {
         id: `${rotationDID}#keys-1`,
@@ -802,9 +820,9 @@ describe('Ethr DID VC Issuance', () => {
 
       // Create new owner
       const newOwnerKeypair = new Secp256k1Keypair(
-        "8888888888888888888888888888888888888888888888888888888888888888"
+        '8888888888888888888888888888888888888888888888888888888888888888',
       );
-      const newOwnerPublicKeyBytes = newOwnerKeypair._publicKey();
+      const newOwnerPublicKeyBytes = getRawPublicKeyBytes(newOwnerKeypair);
       const newOwnerPublicKeyBase58 = b58.encode(newOwnerPublicKeyBytes);
 
       const newOwnerKeyDoc = {
@@ -817,14 +835,14 @@ describe('Ethr DID VC Issuance', () => {
 
       // Mock DID document with ONLY new owner (simulating ownership transfer)
       networkCache[newOwnerKeyDoc.id] = {
-        '@context': 'https://w3id.org/security/v2',
+        '@context': SECURITY_V2_CONTEXT,
         id: newOwnerKeyDoc.id,
         type: EcdsaSecp256k1VerKeyName,
         controller: rotationDID,
         publicKeyBase58: newOwnerPublicKeyBase58,
       };
       networkCache[rotationDID] = {
-        '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/v2'],
+        '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
         id: rotationDID,
         verificationMethod: [
           {
@@ -841,8 +859,8 @@ describe('Ethr DID VC Issuance', () => {
       // Try to issue credential with old owner's key (should create credential but fail verification)
       const signedVC = await issueCredential(oldOwnerKeyDoc, {
         '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
         ],
         type: ['VerifiableCredential', 'AlumniCredential'],
         issuer: rotationDID,
@@ -869,7 +887,7 @@ describe('Ethr DID VC Issuance', () => {
     test('should work with checksummed addresses in DIDs', () => {
       const keypair = Secp256k1Keypair.random();
       const address = keypairToAddress(keypair);
-      const did = addressToDID(address, 'vietchain');
+      const did = addressToDID(address, VIETCHAIN_NETWORK);
 
       // Address should be checksummed (mixed case)
       expect(did).toMatch(/did:ethr:vietchain:0x[0-9a-fA-F]{40}/);

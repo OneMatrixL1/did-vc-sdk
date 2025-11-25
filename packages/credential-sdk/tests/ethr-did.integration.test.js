@@ -447,15 +447,6 @@ describe('EthrDID Integration Tests', () => {
       );
       expect(messagingService).toBeDefined();
 
-      // Verify the delegate was added as a verification method
-      // The delegate should be in the verification methods
-      const delegateVM = docAfter.verificationMethod.find(vm => {
-        // Check various possible formats
-        return vm.blockchainAccountId?.toLowerCase().includes(delegateAddress.toLowerCase()) ||
-               vm.ethereumAddress?.toLowerCase() === delegateAddress.toLowerCase() ||
-               vm.id?.toLowerCase().includes(delegateAddress.toLowerCase());
-      });
-
       // Log the verification methods to understand the structure
       console.log('  🔍 Verification methods:', JSON.stringify(docAfter.verificationMethod, null, 2));
 
@@ -476,7 +467,7 @@ describe('EthrDID Integration Tests', () => {
       const { EcdsaSecp256k1VerKeyName } = await import('../src/vc/crypto/constants.js');
 
       // Create a proper key document for signing
-      const publicKey = testKeypair.publicKey();
+      // eslint-disable-next-line no-underscore-dangle
       const publicKeyBytes = testKeypair._publicKey();
       const publicKeyBase58 = b58.encode(publicKeyBytes);
 

@@ -83,8 +83,7 @@ class EthrDIDModule extends AbstractDIDModule {
     this.providers = new Map();
 
     // Initialize resolver
-    // eslint-disable-next-line no-underscore-dangle
-    this._initializeResolver();
+    this.#initializeResolver();
   }
 
   /**
@@ -97,9 +96,8 @@ class EthrDIDModule extends AbstractDIDModule {
 
   /**
    * Initialize DID resolver with all configured networks
-   * @private
    */
-  _initializeResolver() {
+  #initializeResolver() {
     const resolverConfig = {
       networks: Array.from(this.networks.values()).map((network) => ({
         name: network.name,
@@ -181,9 +179,8 @@ class EthrDIDModule extends AbstractDIDModule {
    * Get provider for a specific network
    * @param {string} [networkName] - Network name (uses default if not specified)
    * @returns {ethers.providers.JsonRpcProvider} Provider instance
-   * @private
    */
-  _getProvider(networkName = null) {
+  #getProvider(networkName = null) {
     const name = networkName || this.defaultNetwork;
 
     if (!this.networks.has(name)) {
@@ -204,37 +201,15 @@ class EthrDIDModule extends AbstractDIDModule {
   }
 
   /**
-   * Get network configuration for a DID
-   * @param {string} did - DID string
-   * @returns {Object} Network config
-   * @private
-   */
-  _getNetworkForDID(did) {
-    const { network } = parseDID(did);
-    const networkName = network || this.defaultNetwork;
-
-    if (!this.networks.has(networkName)) {
-      throw new Error(`Unknown network "${networkName}" for DID: ${did}`);
-    }
-
-    return {
-      name: networkName,
-      config: this.networks.get(networkName),
-    };
-  }
-
-  /**
    * Create EthrDID instance for operations
    * @param {import('../../keypairs/keypair-secp256k1').default} keypair - Secp256k1 keypair
    * @param {string} [networkName] - Network name
    * @returns {Promise<EthrDID>} EthrDID instance
-   * @private
    */
-  async _createEthrDID(keypair, networkName = null) {
+  async #createEthrDID(keypair, networkName = null) {
     const name = networkName || this.defaultNetwork;
     const networkConfig = this.networks.get(name);
-    // eslint-disable-next-line no-underscore-dangle
-    const provider = this._getProvider(name);
+    const provider = this.#getProvider(name);
 
     if (!networkConfig) {
       throw new Error(`Network not found: ${name}`);
@@ -324,8 +299,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const keypair = didKeypair.keyPair || didKeypair;
 
     // Create EthrDID instance
-    // eslint-disable-next-line no-underscore-dangle
-    const ethrDid = await this._createEthrDID(keypair, networkName);
+    const ethrDid = await this.#createEthrDID(keypair, networkName);
 
     // Convert document to attributes
     const attributes = documentToAttributes(didDocument);
@@ -368,7 +342,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const keypair = didKeypair.keyPair || didKeypair;
 
     // Create EthrDID instance
-    const ethrDid = await this._createEthrDID(keypair, networkName);
+    const ethrDid = await this.#createEthrDID(keypair, networkName);
 
     // Convert document to attributes
     const attributes = documentToAttributes(didDocument);
@@ -408,8 +382,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const keypair = didKeypair.keyPair || didKeypair;
 
     // Create EthrDID instance
-    // eslint-disable-next-line no-underscore-dangle
-    const ethrDid = await this._createEthrDID(keypair, networkName);
+    const ethrDid = await this.#createEthrDID(keypair, networkName);
 
     // Revoke the owner's delegate status (effectively deactivates the DID)
     const promise = ethrDid.revokeDelegate(keypairToAddress(keypair), 'veriKey');
@@ -467,14 +440,12 @@ class EthrDIDModule extends AbstractDIDModule {
     const { network } = parseDID(did);
     const networkName = network || this.defaultNetwork;
 
-    // eslint-disable-next-line no-underscore-dangle
-    const provider = this._getProvider(networkName);
+    const provider = this.#getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
     const checksummedAddress = ethers.utils.getAddress(delegateAddress);
 
-    // eslint-disable-next-line no-underscore-dangle
-    const ethrDid = await this._createEthrDID(keypair, networkName);
+    const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.addDelegate(checksummedAddress, { delegateType, expiresIn });
     return await waitForTransaction(txHash, provider);
   }
@@ -491,14 +462,12 @@ class EthrDIDModule extends AbstractDIDModule {
     const { network } = parseDID(did);
     const networkName = network || this.defaultNetwork;
 
-    // eslint-disable-next-line no-underscore-dangle
-    const provider = this._getProvider(networkName);
+    const provider = this.#getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
     const checksummedAddress = ethers.utils.getAddress(delegateAddress);
 
-    // eslint-disable-next-line no-underscore-dangle
-    const ethrDid = await this._createEthrDID(keypair, networkName);
+    const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.revokeDelegate(checksummedAddress, delegateType);
     return await waitForTransaction(txHash, provider);
   }
@@ -515,9 +484,9 @@ class EthrDIDModule extends AbstractDIDModule {
   async setAttribute(did, key, value, keypair, expiresIn = null) {
     const { network } = parseDID(did);
     const networkName = network || this.defaultNetwork;
-    const provider = this._getProvider(networkName);
+    const provider = this.#getProvider(networkName);
 
-    const ethrDid = await this._createEthrDID(keypair, networkName);
+    const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = expiresIn
       ? await ethrDid.setAttribute(key, value, expiresIn)
       : await ethrDid.setAttribute(key, value);
@@ -534,12 +503,12 @@ class EthrDIDModule extends AbstractDIDModule {
   async changeOwner(did, newOwnerAddress, keypair) {
     const { network } = parseDID(did);
     const networkName = network || this.defaultNetwork;
-    const provider = this._getProvider(networkName);
+    const provider = this.#getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
     const checksummedAddress = ethers.utils.getAddress(newOwnerAddress);
 
-    const ethrDid = await this._createEthrDID(keypair, networkName);
+    const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.changeOwner(checksummedAddress);
     return await waitForTransaction(txHash, provider);
   }

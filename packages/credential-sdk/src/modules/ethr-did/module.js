@@ -230,6 +230,27 @@ class EthrDIDModule extends AbstractDIDModule {
   }
 
   /**
+   * Set attributes on-chain sequentially to avoid nonce conflicts
+   * @param {EthrDID} ethrDid - EthrDID instance
+   * @param {Array} attributes - Array of {key, value} objects
+   * @param {string} did - DID string
+   * @returns {Object} Transaction object with promise
+   */
+  #setAttributesSequentially(ethrDid, attributes, did) {
+    return {
+      promise: (async () => {
+        for (const attr of attributes) {
+          // eslint-disable-next-line no-await-in-loop
+          await ethrDid.setAttribute(attr.key, attr.value);
+        }
+        return { did };
+      })(),
+      did,
+      attributes,
+    };
+  }
+
+  /**
    * Override signAndSend for Ethereum transaction handling
    * @param {Object} tx - Transaction object from *Tx methods
    * @param {Object} params - Additional parameters
@@ -245,6 +266,16 @@ class EthrDIDModule extends AbstractDIDModule {
 
       // Execute the transaction promise
       const txResponse = await tx.promise;
+
+      // Handle no-op transactions (e.g., createDocumentTx with no attributes)
+      if (!txResponse.wait) {
+        return {
+          txHash: null,
+          blockNumber: null,
+          success: true,
+          ...txResponse,
+        };
+      }
 
       // Wait for confirmation
       const receipt = await txResponse.wait(confirmations);
@@ -312,14 +343,8 @@ class EthrDIDModule extends AbstractDIDModule {
       };
     }
 
-    // Set attributes on-chain
-    const promises = attributes.map((attr) => ethrDid.setAttribute(attr.key, attr.value));
-
-    return {
-      promise: Promise.all(promises).then(() => ({ did })),
-      did,
-      attributes,
-    };
+    // Set attributes on-chain sequentially to avoid nonce conflicts
+    return this.#setAttributesSequentially(ethrDid, attributes, did);
   }
 
   /**
@@ -351,14 +376,8 @@ class EthrDIDModule extends AbstractDIDModule {
       throw new Error('No attributes to update in DID document');
     }
 
-    // Update attributes on-chain
-    const promises = attributes.map((attr) => ethrDid.setAttribute(attr.key, attr.value));
-
-    return {
-      promise: Promise.all(promises).then(() => ({ did })),
-      did,
-      attributes,
-    };
+    // Update attributes on-chain sequentially to avoid nonce conflicts
+    return this.#setAttributesSequentially(ethrDid, attributes, did);
   }
 
   /**

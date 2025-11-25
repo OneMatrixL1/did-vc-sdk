@@ -82,7 +82,7 @@ const module = new EthrDIDModule({
   networks: [{
     name: 'vietchain',
     rpcUrl: 'https://rpc.vietcha.in',
-    registry: '0x50CbD0618e556655D902E6C3210eB97Aa8Fd0ED0',
+    registry: '0xF0889fb2473F91c068178870ae2e1A0408059A03',
     chainId: 88, // Optional
   }],
 });
@@ -339,7 +339,7 @@ try {
 
 Ethr DIDs follow this format:
 
-```
+```text
 did:ethr:[network:]address
 
 Examples:
@@ -430,7 +430,7 @@ console.log('Current gas price:', ethers.utils.formatUnits(gasPrice, 'gwei'), 'g
 ## Example: Complete DID Lifecycle
 
 ```javascript
-import { EthrDIDModule, createVietChainConfig } from '@docknetwork/credential-sdk/modules/ethr-did';
+import { EthrDIDModule, createVietChainConfig, keypairToAddress } from '@docknetwork/credential-sdk/modules/ethr-did';
 import { Secp256k1Keypair } from '@docknetwork/credential-sdk/keypairs';
 
 async function completeDIDLifecycle() {
@@ -468,8 +468,7 @@ async function completeDIDLifecycle() {
   doc = await module.getDocument(did);
   console.log('Updated document:', doc);
 
-  // 7. Sign a credential
-  const credential = await signCredentialWithDID(did, keypair);
+  // 7. Sign a credential (see "Signing Verifiable Credentials" section above)
 
   // 8. Revoke delegate
   await module.revokeDelegate(

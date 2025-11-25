@@ -11,9 +11,12 @@ export default {
       DeleteKeyOperation: 'sec:DeleteKeyOperation',
       DeriveSecretOperation: 'sec:DeriveSecretOperation',
       EcdsaSecp256k1Signature2019: 'sec:EcdsaSecp256k1Signature2019',
+      EcdsaSecp256k1Signature2020: 'sec:EcdsaSecp256k1Signature2020',
       EcdsaSecp256r1Signature2019: 'sec:EcdsaSecp256r1Signature2019',
       EcdsaSecp256k1VerificationKey2019:
         'sec:EcdsaSecp256k1VerificationKey2019',
+      EcdsaSecp256k1RecoveryMethod2020:
+        'sec:EcdsaSecp256k1RecoveryMethod2020',
       EcdsaSecp256r1VerificationKey2019:
         'sec:EcdsaSecp256r1VerificationKey2019',
       Ed25519Signature2018: 'sec:Ed25519Signature2018',
@@ -35,6 +38,7 @@ export default {
       X25519KeyAgreementKey2019: 'sec:X25519KeyAgreementKey2019',
 
       allowedAction: 'sec:allowedAction',
+      blockchainAccountId: 'sec:blockchainAccountId',
       assertionMethod: {
         '@id': 'sec:assertionMethod',
         '@type': '@id',

@@ -16,6 +16,7 @@
     "CryptographicKey": "sec:Key",
 
     "authenticationTag": "sec:authenticationTag",
+    "blockchainAccountId": "sec:blockchainAccountId",
     "canonicalizationAlgorithm": "sec:canonicalizationAlgorithm",
     "cipherAlgorithm": "sec:cipherAlgorithm",
     "cipherData": "sec:cipherData",

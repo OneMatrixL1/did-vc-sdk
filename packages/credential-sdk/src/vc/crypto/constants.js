@@ -1,5 +1,7 @@
 export const EcdsaSecp256k1VerKeyName = 'EcdsaSecp256k1VerificationKey2019';
 export const EcdsaSecp256k1SigName = 'EcdsaSecp256k1Signature2019';
+export const EcdsaSecp256k1RecoveryMethod2020Name = 'EcdsaSecp256k1RecoveryMethod2020';
+export const EcdsaSecp256k1Signature2020Name = 'EcdsaSecp256k1Signature2020';
 export const Ed25519VerKeyName = 'Ed25519VerificationKey2018';
 export const Ed255192020VerKeyName = 'Ed25519VerificationKey2020';
 export const Ed25519SigName = 'Ed25519Signature2018';

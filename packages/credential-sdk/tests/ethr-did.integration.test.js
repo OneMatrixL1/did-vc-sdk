@@ -524,22 +524,18 @@ describe('EthrDID Integration Tests', () => {
     test('can operate on different networks', async () => {
       const multiNetModule = new EthrDIDModule({
         networks: [
-          'mainnet',
           'sepolia',
           createVietChainConfig(),
         ],
-        defaultNetwork: 'mainnet',
+        defaultNetwork: 'sepolia',
       });
 
       const keypair = Secp256k1Keypair.random();
-      const mainnetDID = await multiNetModule.createNewDID(keypair, 'mainnet');
       const sepoliaDID = await multiNetModule.createNewDID(keypair, 'sepolia');
       const vietChainDID = await multiNetModule.createNewDID(keypair, 'vietchain');
 
       // DIDs should be different due to network prefix
-      expect(mainnetDID).not.toBe(sepoliaDID);
-      expect(mainnetDID).not.toBe(vietChainDID);
-      expect(parseDID(mainnetDID).network).toBeNull(); // Mainnet doesn't include network
+      expect(sepoliaDID).not.toBe(vietChainDID);
       expect(sepoliaDID).toContain('sepolia');
       expect(vietChainDID).toContain('vietchain');
     }, 30000);

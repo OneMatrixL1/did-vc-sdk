@@ -5,19 +5,11 @@
 
 /**
  * Verified default network configurations for ethr DID
- * Only includes networks with verified registry deployments
+ * Only includes networks with verified registry deployments and working RPC URLs
  * @type {Object.<string, NetworkConfig>}
  * @see https://github.com/uport-project/ethr-did-registry - Official registry deployments
  */
 export const DEFAULT_NETWORKS = {
-  // Verified from official ethr-did-registry: https://github.com/uport-project/ethr-did-registry
-  mainnet: {
-    name: 'mainnet',
-    description: 'Ethereum Mainnet',
-    rpcUrl: 'https://mainnet.infura.io/v3/',
-    chainId: 1,
-    registry: '0xdca7ef03e98e0dc2b855be647c39abe984fcf21b',
-  },
   // Verified from official ethr-did-registry: https://github.com/uport-project/ethr-did-registry
   sepolia: {
     name: 'sepolia',
@@ -145,7 +137,7 @@ export function createVietChainConfig(rpcUrl, registry) {
 
 /**
  * @typedef {Object} NetworkConfig
- * @property {string} name - Network identifier (e.g., 'mainnet', 'sepolia', 'vietchain')
+ * @property {string} name - Network identifier (e.g., 'sepolia', 'vietchain')
  * @property {string} [description] - Human-readable network description
  * @property {string} rpcUrl - RPC endpoint URL for the network
  * @property {string} registry - DID Registry contract address (ERC1056)

@@ -42,21 +42,21 @@ describe('EthrDID Configuration', () => {
   });
 
   test('normalizeNetworkConfig uses defaults for known networks', () => {
-    const normalized = normalizeNetworkConfig('mainnet');
-    expect(normalized.name).toBe('mainnet');
+    const normalized = normalizeNetworkConfig('sepolia');
+    expect(normalized.name).toBe('sepolia');
     expect(normalized.registry).toBeDefined();
     expect(normalized.rpcUrl).toBeDefined();
   });
 
   test('normalizeNetworkConfig merges custom with defaults', () => {
     const normalized = normalizeNetworkConfig({
-      name: 'mainnet',
+      name: 'sepolia',
       rpcUrl: 'https://custom.rpc.com',
     });
 
-    expect(normalized.name).toBe('mainnet');
+    expect(normalized.name).toBe('sepolia');
     expect(normalized.rpcUrl).toBe('https://custom.rpc.com');
-    expect(normalized.registry).toBe(DEFAULT_NETWORKS.mainnet.registry);
+    expect(normalized.registry).toBe(DEFAULT_NETWORKS.sepolia.registry);
   });
 
   test('createVietChainConfig returns valid config', () => {
@@ -166,11 +166,11 @@ describe('EthrDIDModule', () => {
   test('constructor sets defaultNetwork from string network config', () => {
     // Test with string network as first entry and no explicit defaultNetwork
     const moduleWithStringNetwork = new EthrDIDModule({
-      networks: ['sepolia', 'mainnet'],
+      networks: ['sepolia', createVietChainConfig()],
     });
     expect(moduleWithStringNetwork.defaultNetwork).toBe('sepolia');
     expect(moduleWithStringNetwork.networks.has('sepolia')).toBe(true);
-    expect(moduleWithStringNetwork.networks.has('mainnet')).toBe(true);
+    expect(moduleWithStringNetwork.networks.has('vietchain')).toBe(true);
   });
 
   test('constructor sets defaultNetwork from object network config', () => {
@@ -209,32 +209,28 @@ describe('EthrDID Multi-Network Support', () => {
   test('module handles multiple networks', () => {
     const module = new EthrDIDModule({
       networks: [
-        'mainnet',
         'sepolia',
         createVietChainConfig(),
       ],
-      defaultNetwork: 'mainnet',
+      defaultNetwork: 'sepolia',
     });
 
-    expect(module.networks.size).toBe(3);
-    expect(module.networks.has('mainnet')).toBe(true);
+    expect(module.networks.size).toBe(2);
     expect(module.networks.has('sepolia')).toBe(true);
     expect(module.networks.has('vietchain')).toBe(true);
   });
 
   test('can create DIDs on different networks', async () => {
     const module = new EthrDIDModule({
-      networks: ['mainnet', 'sepolia', createVietChainConfig()],
-      defaultNetwork: 'mainnet',
+      networks: ['sepolia', createVietChainConfig()],
+      defaultNetwork: 'sepolia',
     });
 
     const keypair = Secp256k1Keypair.random();
 
-    const mainnetDID = await module.createNewDID(keypair, 'mainnet');
     const sepoliaDID = await module.createNewDID(keypair, 'sepolia');
     const vietChainDID = await module.createNewDID(keypair, 'vietchain');
 
-    expect(parseDID(mainnetDID).network).toBeNull(); // Mainnet doesn't include network in DID
     expect(parseDID(sepoliaDID).network).toBe('sepolia');
     expect(parseDID(vietChainDID).network).toBe('vietchain');
   });

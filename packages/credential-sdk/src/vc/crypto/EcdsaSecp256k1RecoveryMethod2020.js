@@ -73,7 +73,7 @@ export default class EcdsaSecp256k1RecoveryMethod2020 {
           const messageHash = hashMessage(data);
 
           // Convert signature to hex string format that ethers expects
-          const signatureHex = '0x' + Buffer.from(signature).toString('hex');
+          const signatureHex = `0x${Buffer.from(signature).toString('hex')}`;
 
           const recoveredPubKey = recoverPublicKey(messageHash, signatureHex);
 

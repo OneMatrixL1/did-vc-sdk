@@ -83,6 +83,7 @@ class EthrDIDModule extends AbstractDIDModule {
     this.providers = new Map();
 
     // Initialize resolver
+    // eslint-disable-next-line no-underscore-dangle
     this._initializeResolver();
   }
 
@@ -155,7 +156,7 @@ class EthrDIDModule extends AbstractDIDModule {
 
       // Find the verification method with matching ID
       const verificationMethod = didDocument.verificationMethod?.find(
-        vm => vm.id === id || vm.id === fragment || vm.id.endsWith(fragment)
+        (vm) => vm.id === id || vm.id === fragment || vm.id.endsWith(fragment),
       );
 
       if (verificationMethod) {
@@ -163,9 +164,9 @@ class EthrDIDModule extends AbstractDIDModule {
         return {
           '@context': [
             'https://www.w3.org/ns/did/v1',
-            'https://w3id.org/security/v2'
+            'https://w3id.org/security/v2',
           ],
-          ...verificationMethod
+          ...verificationMethod,
         };
       }
 
@@ -232,6 +233,7 @@ class EthrDIDModule extends AbstractDIDModule {
   async _createEthrDID(keypair, networkName = null) {
     const name = networkName || this.defaultNetwork;
     const networkConfig = this.networks.get(name);
+    // eslint-disable-next-line no-underscore-dangle
     const provider = this._getProvider(name);
 
     if (!networkConfig) {
@@ -298,11 +300,7 @@ class EthrDIDModule extends AbstractDIDModule {
     }
 
     const address = keypairToAddress(keypair);
-    const did = addressToDID(address, name !== 'mainnet' ? name : null);
-
-    // For ethr DID, the DID exists implicitly once the address is created
-    // No on-chain transaction needed for basic DID creation
-    return did;
+    return addressToDID(address, name !== 'mainnet' ? name : null);
   }
 
   /**
@@ -326,6 +324,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const keypair = didKeypair.keyPair || didKeypair;
 
     // Create EthrDID instance
+    // eslint-disable-next-line no-underscore-dangle
     const ethrDid = await this._createEthrDID(keypair, networkName);
 
     // Convert document to attributes
@@ -409,6 +408,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const keypair = didKeypair.keyPair || didKeypair;
 
     // Create EthrDID instance
+    // eslint-disable-next-line no-underscore-dangle
     const ethrDid = await this._createEthrDID(keypair, networkName);
 
     // Revoke the owner's delegate status (effectively deactivates the DID)
@@ -466,11 +466,14 @@ class EthrDIDModule extends AbstractDIDModule {
 
     const { network } = parseDID(did);
     const networkName = network || this.defaultNetwork;
+
+    // eslint-disable-next-line no-underscore-dangle
     const provider = this._getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
     const checksummedAddress = ethers.utils.getAddress(delegateAddress);
 
+    // eslint-disable-next-line no-underscore-dangle
     const ethrDid = await this._createEthrDID(keypair, networkName);
     const txHash = await ethrDid.addDelegate(checksummedAddress, { delegateType, expiresIn });
     return await waitForTransaction(txHash, provider);
@@ -487,11 +490,14 @@ class EthrDIDModule extends AbstractDIDModule {
   async revokeDelegate(did, delegateAddress, keypair, delegateType = 'veriKey') {
     const { network } = parseDID(did);
     const networkName = network || this.defaultNetwork;
+
+    // eslint-disable-next-line no-underscore-dangle
     const provider = this._getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
     const checksummedAddress = ethers.utils.getAddress(delegateAddress);
 
+    // eslint-disable-next-line no-underscore-dangle
     const ethrDid = await this._createEthrDID(keypair, networkName);
     const txHash = await ethrDid.revokeDelegate(checksummedAddress, delegateType);
     return await waitForTransaction(txHash, provider);

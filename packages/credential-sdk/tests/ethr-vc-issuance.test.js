@@ -33,6 +33,117 @@ const TEST_DOMAIN = 'example.com';
 // eslint-disable-next-line no-underscore-dangle
 const getRawPublicKeyBytes = (keypair) => keypair._publicKey();
 
+/**
+ * Helper to create and register mock DID document in networkCache
+ * @param {Secp256k1Keypair} keypair
+ * @param {string} did
+ * @returns {object} keyDoc for signing
+ */
+function createMockDIDDocument(keypair, did) {
+  const publicKeyBytes = getRawPublicKeyBytes(keypair);
+  const publicKeyBase58 = b58.encode(publicKeyBytes);
+  const keyId = `${did}#keys-1`;
+
+  const keyDoc = {
+    id: keyId,
+    controller: did,
+    type: EcdsaSecp256k1VerKeyName,
+    publicKey: keypair.publicKey(),
+    keypair,
+  };
+
+  // Register verification method
+  networkCache[keyId] = {
+    '@context': SECURITY_V2_CONTEXT,
+    id: keyId,
+    type: EcdsaSecp256k1VerKeyName,
+    controller: did,
+    publicKeyBase58,
+  };
+
+  // Register DID document
+  networkCache[did] = {
+    '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
+    id: did,
+    verificationMethod: [
+      {
+        id: keyId,
+        type: EcdsaSecp256k1VerKeyName,
+        controller: did,
+        publicKeyBase58,
+      },
+    ],
+    assertionMethod: [keyId],
+    authentication: [keyId],
+  };
+
+  return keyDoc;
+}
+
+/**
+ * Helper to clean up DID entries from networkCache
+ * @param {string} did
+ */
+function cleanupDIDFromCache(did) {
+  // Find and delete all keys that start with this DID
+  Object.keys(networkCache).forEach((key) => {
+    if (key === did || key.startsWith(`${did}#`)) {
+      delete networkCache[key];
+    }
+  });
+}
+
+/**
+ * Helper to add a delegate to an existing DID document in networkCache
+ * Creates a fresh copy to avoid mutation side effects
+ * @param {string} controllerDID - The DID that controls the delegate
+ * @param {Secp256k1Keypair} delegateKeypair - The delegate's keypair
+ * @param {string} delegateKeyId - The key ID for the delegate (e.g., 'did:ethr:...#delegate-1')
+ * @returns {object} delegateKeyDoc for signing
+ */
+function addDelegateToCache(controllerDID, delegateKeypair, delegateKeyId) {
+  const delegatePublicKeyBytes = getRawPublicKeyBytes(delegateKeypair);
+  const delegatePublicKeyBase58 = b58.encode(delegatePublicKeyBytes);
+
+  const delegateKeyDoc = {
+    id: delegateKeyId,
+    controller: controllerDID,
+    type: EcdsaSecp256k1VerKeyName,
+    publicKey: delegateKeypair.publicKey(),
+    keypair: delegateKeypair,
+  };
+
+  // Register delegate verification method
+  networkCache[delegateKeyId] = {
+    '@context': SECURITY_V2_CONTEXT,
+    id: delegateKeyId,
+    type: EcdsaSecp256k1VerKeyName,
+    controller: controllerDID,
+    publicKeyBase58: delegatePublicKeyBase58,
+  };
+
+  // Get existing DID document and create a fresh copy with delegate added
+  const existingDoc = networkCache[controllerDID];
+  if (existingDoc) {
+    networkCache[controllerDID] = {
+      ...existingDoc,
+      verificationMethod: [
+        ...existingDoc.verificationMethod,
+        {
+          id: delegateKeyId,
+          type: EcdsaSecp256k1VerKeyName,
+          controller: controllerDID,
+          publicKeyBase58: delegatePublicKeyBase58,
+        },
+      ],
+      assertionMethod: [...existingDoc.assertionMethod, delegateKeyId],
+      authentication: [...existingDoc.authentication, delegateKeyId],
+    };
+  }
+
+  return delegateKeyDoc;
+}
+
 mockFetch();
 
 describe('Ethr DID VC Issuance', () => {
@@ -167,13 +278,8 @@ describe('Ethr DID VC Issuance', () => {
       const mainnetAddress = keypairToAddress(mainnetKeypair);
       const mainnetDID = addressToDID(mainnetAddress); // No network = mainnet
 
-      const keyDoc = {
-        id: `${mainnetDID}#keys-1`,
-        controller: mainnetDID,
-        type: EcdsaSecp256k1VerKeyName,
-        publicKey: mainnetKeypair.publicKey(),
-        keypair: mainnetKeypair,
-      };
+      // Register mock DID document for verification
+      const keyDoc = createMockDIDDocument(mainnetKeypair, mainnetDID);
 
       const unsignedCredential = {
         '@context': [
@@ -195,23 +301,27 @@ describe('Ethr DID VC Issuance', () => {
       expect(signedVC.issuer).toMatch(/^did:ethr:0x[0-9a-fA-F]{40}$/); // Mainnet format
       expect(signedVC.issuer).not.toContain('vietchain');
       expect(signedVC.proof).toBeDefined();
+
+      // Verify the credential can be verified
+      const result = await verifyCredential(signedVC);
+      expect(result.verified).toBe(true);
+
+      // Cleanup
+      cleanupDIDFromCache(mainnetDID);
     }, 30000);
 
     test('should issue credential with ethr DID on different networks', async () => {
       const networks = ['sepolia', 'polygon', 'arbitrum'];
+      const createdDIDs = [];
 
       for (const network of networks) {
         const keypair = Secp256k1Keypair.random();
         const address = keypairToAddress(keypair);
         const did = addressToDID(address, network);
+        createdDIDs.push(did);
 
-        const keyDoc = {
-          id: `${did}#keys-1`,
-          controller: did,
-          type: EcdsaSecp256k1VerKeyName,
-          publicKey: keypair.publicKey(),
-          keypair,
-        };
+        // Register mock DID document for verification
+        const keyDoc = createMockDIDDocument(keypair, did);
 
         const unsignedCredential = {
           '@context': [
@@ -233,7 +343,15 @@ describe('Ethr DID VC Issuance', () => {
         expect(signedVC.issuer).toBe(did);
         expect(signedVC.issuer).toContain(network);
         expect(signedVC.proof).toBeDefined();
+
+        // Verify the credential can be verified
+        // eslint-disable-next-line no-await-in-loop
+        const result = await verifyCredential(signedVC);
+        expect(result.verified).toBe(true);
       }
+
+      // Cleanup all created DIDs
+      createdDIDs.forEach((did) => cleanupDIDFromCache(did));
     }, 30000);
   });
 
@@ -440,82 +558,22 @@ describe('Ethr DID VC Issuance', () => {
 
   describe('Issuing with Delegate Keys', () => {
     test('should issue credential with delegate key', async () => {
-      // Create a fresh issuer for this test to avoid interference
+      // Create a fresh issuer for this test
       const delegateTestIssuerKeypair = new Secp256k1Keypair(
         'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
       );
       const delegateTestIssuerAddress = keypairToAddress(delegateTestIssuerKeypair);
       const delegateTestIssuerDID = addressToDID(delegateTestIssuerAddress, VIETCHAIN_NETWORK);
-      const delegateTestIssuerPublicKeyBytes = getRawPublicKeyBytes(delegateTestIssuerKeypair);
-      const delegateTestIssuerPublicKeyBase58 = b58.encode(delegateTestIssuerPublicKeyBytes);
 
-      const delegateTestIssuerKeyDoc = {
-        id: `${delegateTestIssuerDID}#keys-1`,
-        controller: delegateTestIssuerDID,
-        type: EcdsaSecp256k1VerKeyName,
-        publicKey: delegateTestIssuerKeypair.publicKey(),
-        keypair: delegateTestIssuerKeypair,
-      };
+      // Create issuer DID document using helper
+      createMockDIDDocument(delegateTestIssuerKeypair, delegateTestIssuerDID);
 
-      // Mock fresh DID documents
-      networkCache[delegateTestIssuerKeyDoc.id] = {
-        '@context': SECURITY_V2_CONTEXT,
-        id: delegateTestIssuerKeyDoc.id,
-        type: EcdsaSecp256k1VerKeyName,
-        controller: delegateTestIssuerDID,
-        publicKeyBase58: delegateTestIssuerPublicKeyBase58,
-      };
-      networkCache[delegateTestIssuerDID] = {
-        '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
-        id: delegateTestIssuerDID,
-        verificationMethod: [
-          {
-            id: delegateTestIssuerKeyDoc.id,
-            type: EcdsaSecp256k1VerKeyName,
-            controller: delegateTestIssuerDID,
-            publicKeyBase58: delegateTestIssuerPublicKeyBase58,
-          },
-        ],
-        assertionMethod: [delegateTestIssuerKeyDoc.id],
-        authentication: [delegateTestIssuerKeyDoc.id],
-      };
-
-      // Create a delegate keypair
+      // Create and add delegate using helper (creates fresh copy, no mutation)
       const delegateKeypair = new Secp256k1Keypair(
         'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
       );
-      const delegatePublicKey = delegateKeypair.publicKey();
-      const delegatePublicKeyBytes = getRawPublicKeyBytes(delegateKeypair);
-      const delegatePublicKeyBase58 = b58.encode(delegatePublicKeyBytes);
-
-      // Create delegate key document
-      const delegateKeyDoc = {
-        id: `${delegateTestIssuerDID}#delegate-keys-1`,
-        controller: delegateTestIssuerDID,
-        type: EcdsaSecp256k1VerKeyName,
-        publicKey: delegatePublicKey,
-        keypair: delegateKeypair,
-      };
-
-      // Mock the delegate verification method in network cache
-      networkCache[delegateKeyDoc.id] = {
-        '@context': SECURITY_V2_CONTEXT,
-        id: delegateKeyDoc.id,
-        type: EcdsaSecp256k1VerKeyName,
-        controller: delegateTestIssuerDID,
-        publicKeyBase58: delegatePublicKeyBase58,
-      };
-
-      // Add delegate to issuer DID document's verification methods
-      // Must add to verificationMethod array AND to assertionMethod/authentication
-      networkCache[delegateTestIssuerDID].verificationMethod.push({
-        id: delegateKeyDoc.id,
-        type: EcdsaSecp256k1VerKeyName,
-        controller: delegateTestIssuerDID,
-        publicKeyBase58: delegatePublicKeyBase58,
-      });
-      networkCache[delegateTestIssuerDID].assertionMethod.push(delegateKeyDoc.id);
-      networkCache[delegateTestIssuerDID].authentication.push(delegateKeyDoc.id);
+      const delegateKeyId = `${delegateTestIssuerDID}#delegate-keys-1`;
+      const delegateKeyDoc = addDelegateToCache(delegateTestIssuerDID, delegateKeypair, delegateKeyId);
 
       // Issue credential using the delegate key
       const unsignedCredential = {
@@ -542,10 +600,10 @@ describe('Ethr DID VC Issuance', () => {
 
       // Verify the credential
       const result = await verifyCredential(signedVC);
-      if (!result.verified) {
-        console.log('Delegate verification failed:', JSON.stringify(result.error, null, 2));
-      }
       expect(result.verified).toBe(true);
+
+      // Cleanup
+      cleanupDIDFromCache(delegateTestIssuerDID);
     }, 30000);
 
     test('should issue credential with multiple delegates', async () => {
@@ -555,41 +613,11 @@ describe('Ethr DID VC Issuance', () => {
       );
       const multiDelegateIssuerAddress = keypairToAddress(multiDelegateIssuerKeypair);
       const multiDelegateIssuerDID = addressToDID(multiDelegateIssuerAddress, VIETCHAIN_NETWORK);
-      const multiDelegateIssuerPublicKeyBytes = getRawPublicKeyBytes(multiDelegateIssuerKeypair);
-      const multiDelegateIssuerPublicKeyBase58 = b58.encode(multiDelegateIssuerPublicKeyBytes);
 
-      const multiDelegateIssuerKeyDoc = {
-        id: `${multiDelegateIssuerDID}#keys-1`,
-        controller: multiDelegateIssuerDID,
-        type: EcdsaSecp256k1VerKeyName,
-        publicKey: multiDelegateIssuerKeypair.publicKey(),
-        keypair: multiDelegateIssuerKeypair,
-      };
+      // Create issuer DID document using helper
+      createMockDIDDocument(multiDelegateIssuerKeypair, multiDelegateIssuerDID);
 
-      // Mock fresh DID documents
-      networkCache[multiDelegateIssuerKeyDoc.id] = {
-        '@context': SECURITY_V2_CONTEXT,
-        id: multiDelegateIssuerKeyDoc.id,
-        type: EcdsaSecp256k1VerKeyName,
-        controller: multiDelegateIssuerDID,
-        publicKeyBase58: multiDelegateIssuerPublicKeyBase58,
-      };
-      networkCache[multiDelegateIssuerDID] = {
-        '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
-        id: multiDelegateIssuerDID,
-        verificationMethod: [
-          {
-            id: multiDelegateIssuerKeyDoc.id,
-            type: EcdsaSecp256k1VerKeyName,
-            controller: multiDelegateIssuerDID,
-            publicKeyBase58: multiDelegateIssuerPublicKeyBase58,
-          },
-        ],
-        assertionMethod: [multiDelegateIssuerKeyDoc.id],
-        authentication: [multiDelegateIssuerKeyDoc.id],
-      };
-
-      // Create two delegate keypairs
+      // Create and add delegates using helper (creates fresh copies, no mutation)
       const delegate1Keypair = new Secp256k1Keypair(
         '1111111111111111111111111111111111111111111111111111111111111111',
       );
@@ -597,61 +625,16 @@ describe('Ethr DID VC Issuance', () => {
         '2222222222222222222222222222222222222222222222222222222222222222',
       );
 
-      const delegate1PublicKeyBytes = getRawPublicKeyBytes(delegate1Keypair);
-      const delegate1PublicKeyBase58 = b58.encode(delegate1PublicKeyBytes);
-      const delegate2PublicKeyBytes = getRawPublicKeyBytes(delegate2Keypair);
-      const delegate2PublicKeyBase58 = b58.encode(delegate2PublicKeyBytes);
-
-      const delegate1KeyDoc = {
-        id: `${multiDelegateIssuerDID}#delegate1`,
-        controller: multiDelegateIssuerDID,
-        type: EcdsaSecp256k1VerKeyName,
-        publicKey: delegate1Keypair.publicKey(),
-        keypair: delegate1Keypair,
-      };
-
-      const delegate2KeyDoc = {
-        id: `${multiDelegateIssuerDID}#delegate2`,
-        controller: multiDelegateIssuerDID,
-        type: EcdsaSecp256k1VerKeyName,
-        publicKey: delegate2Keypair.publicKey(),
-        keypair: delegate2Keypair,
-      };
-
-      // Mock both delegates
-      networkCache[delegate1KeyDoc.id] = {
-        '@context': SECURITY_V2_CONTEXT,
-        id: delegate1KeyDoc.id,
-        type: EcdsaSecp256k1VerKeyName,
-        controller: multiDelegateIssuerDID,
-        publicKeyBase58: delegate1PublicKeyBase58,
-      };
-      networkCache[delegate2KeyDoc.id] = {
-        '@context': SECURITY_V2_CONTEXT,
-        id: delegate2KeyDoc.id,
-        type: EcdsaSecp256k1VerKeyName,
-        controller: multiDelegateIssuerDID,
-        publicKeyBase58: delegate2PublicKeyBase58,
-      };
-
-      // Add both delegates to the DID document's verification methods
-      // Must add to verificationMethod array AND to assertionMethod/authentication
-      networkCache[multiDelegateIssuerDID].verificationMethod.push(
-        {
-          id: delegate1KeyDoc.id,
-          type: EcdsaSecp256k1VerKeyName,
-          controller: multiDelegateIssuerDID,
-          publicKeyBase58: delegate1PublicKeyBase58,
-        },
-        {
-          id: delegate2KeyDoc.id,
-          type: EcdsaSecp256k1VerKeyName,
-          controller: multiDelegateIssuerDID,
-          publicKeyBase58: delegate2PublicKeyBase58,
-        },
+      const delegate1KeyDoc = addDelegateToCache(
+        multiDelegateIssuerDID,
+        delegate1Keypair,
+        `${multiDelegateIssuerDID}#delegate1`,
       );
-      networkCache[multiDelegateIssuerDID].assertionMethod.push(delegate1KeyDoc.id, delegate2KeyDoc.id);
-      networkCache[multiDelegateIssuerDID].authentication.push(delegate1KeyDoc.id, delegate2KeyDoc.id);
+      const delegate2KeyDoc = addDelegateToCache(
+        multiDelegateIssuerDID,
+        delegate2Keypair,
+        `${multiDelegateIssuerDID}#delegate2`,
+      );
 
       // Issue credentials with different delegates
       const cred1 = await issueCredential(delegate1KeyDoc, {
@@ -694,6 +677,9 @@ describe('Ethr DID VC Issuance', () => {
       const result2 = await verifyCredential(cred2);
       expect(result1.verified).toBe(true);
       expect(result2.verified).toBe(true);
+
+      // Cleanup
+      cleanupDIDFromCache(multiDelegateIssuerDID);
     }, 30000);
   });
 
@@ -800,6 +786,9 @@ describe('Ethr DID VC Issuance', () => {
       const resultOldKey = await verifyCredential(credentialWithOldKey);
       expect(resultOldKey.verified).toBe(false);
       expect(resultOldKey.error).toBeDefined();
+
+      // Cleanup
+      cleanupDIDFromCache(transferTestDID);
     }, 30000);
 
     test('should fail to sign with old owner key after ownership transfer', async () => {
@@ -880,6 +869,9 @@ describe('Ethr DID VC Issuance', () => {
       expect(result.verified).toBe(false);
       // The error should indicate that the verification method is not found
       expect(result.error).toBeDefined();
+
+      // Cleanup
+      cleanupDIDFromCache(rotationDID);
     }, 30000);
   });
 

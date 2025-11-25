@@ -6,32 +6,12 @@
 import { ethers } from 'ethers';
 
 /**
- * Convert Secp256k1Keypair private key to hex string format for ethers
- * @param {Uint8Array} privateKeyBytes - Private key as bytes
- * @returns {string} Private key as hex string with 0x prefix
- */
-export function privateKeyToHex(privateKeyBytes) {
-  if (!privateKeyBytes || privateKeyBytes.length === 0) {
-    throw new Error('Private key is required');
-  }
-
-  // Convert Uint8Array to hex string
-  const hexString = Array.from(privateKeyBytes)
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-
-  return `0x${hexString}`;
-}
-
-/**
  * Extract Ethereum address from a Secp256k1Keypair
  * @param {import('../../keypairs/keypair-secp256k1').default} keypair - Secp256k1 keypair
  * @returns {string} Ethereum address (0x prefixed)
  */
 export function keypairToAddress(keypair) {
-  const privateKeyHex = privateKeyToHex(keypair.privateKey());
-  const wallet = new ethers.Wallet(privateKeyHex);
-  return wallet.address;
+  return ethers.utils.computeAddress(keypair.privateKey());
 }
 
 /**
@@ -122,8 +102,7 @@ export function createProvider(networkConfig, providerOptions = {}) {
  * @returns {ethers.Wallet} Ethers wallet (signer)
  */
 export function createSigner(keypair, provider) {
-  const privateKeyHex = privateKeyToHex(keypair.privateKey());
-  return new ethers.Wallet(privateKeyHex, provider);
+  return new ethers.Wallet(keypair.privateKey(), provider);
 }
 
 /**

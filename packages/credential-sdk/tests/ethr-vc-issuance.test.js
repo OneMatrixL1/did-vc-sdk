@@ -750,9 +750,6 @@ describe('Ethr DID VC Issuance', () => {
 
       // Verify credential signed with new owner works
       const resultAfter = await verifyCredential(credentialAfterTransfer);
-      if (!resultAfter.verified) {
-        console.log('New owner verification failed:', JSON.stringify(resultAfter.error, null, 2));
-      }
       expect(resultAfter.verified).toBe(true);
 
       // Test that a different keypair (simulating old owner) cannot be used

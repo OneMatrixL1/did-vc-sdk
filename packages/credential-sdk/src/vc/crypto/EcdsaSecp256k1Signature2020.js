@@ -59,7 +59,7 @@ export default class EcdsaSecp256k1Signature2020 extends CustomLinkedDataSignatu
         const privateKeyBytes = typeof keypair.privateKey === 'function'
           ? keypair.privateKey()
           : keypair.privateKey;
-        const privateKeyHex = '0x' + Buffer.from(privateKeyBytes).toString('hex');
+        const privateKeyHex = `0x${Buffer.from(privateKeyBytes).toString('hex')}`;
         const signingKey = new SigningKey(privateKeyHex);
 
         // Hash the data and sign

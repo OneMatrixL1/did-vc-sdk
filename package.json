@@ -8,6 +8,9 @@
     "scripts/migration",
     "scripts/bench"
   ],
+  "resolutions": {
+    "@digitalbazaar/http-client": "^3.4.1"
+  },
   "dependencies": {},
   "devDependencies": {
     "@babel/cli": "^7.24.1",

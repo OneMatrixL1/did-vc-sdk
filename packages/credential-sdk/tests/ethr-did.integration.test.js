@@ -30,24 +30,28 @@
  */
 
 import { ethers } from 'ethers';
+import b58 from 'bs58';
 import { EthrDIDModule, createVietChainConfig } from '../src/modules/ethr-did';
 import { Secp256k1Keypair } from '../src/keypairs';
-import { keypairToAddress, parseDID } from '../src/modules/ethr-did/utils';
-import b58 from 'bs58';
+import { keypairToAddress } from '../src/modules/ethr-did/utils';
 
 // Configuration from environment (required for integration tests)
 if (!process.env.ETHR_NETWORK_RPC_URL) {
   throw new Error(
-    'ETHR_NETWORK_RPC_URL environment variable is required for integration tests. ' +
-    'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh'
+    'ETHR_NETWORK_RPC_URL environment variable is required for integration tests. '
+      + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
   );
 }
 
 const networkConfig = {
   name: process.env.ETHR_NETWORK || 'sepolia',
   rpcUrl: process.env.ETHR_NETWORK_RPC_URL,
-  registry: process.env.ETHR_REGISTRY_ADDRESS || '0x03d5003bf0e79c5f5223588f347eba39afbc3818',
+  registry:
+    process.env.ETHR_REGISTRY_ADDRESS
+    || '0x03d5003bf0e79c5f5223588f347eba39afbc3818',
 };
+
+const MESSAGING_SERVICE_URL = 'https://example.com/messages';
 
 describe('EthrDID Integration Tests', () => {
   let module;
@@ -57,9 +61,9 @@ describe('EthrDID Integration Tests', () => {
   // Helper function to fund a test account with minimal gas
   async function fundTestAccount(recipientAddress, amountInEther = '0.1') {
     const founderPrivateKey = founderKeypair.privateKey();
-    const founderPrivateKeyHex = '0x' + Array.from(founderPrivateKey)
+    const founderPrivateKeyHex = `0x${Array.from(founderPrivateKey)
       .map((byte) => byte.toString(16).padStart(2, '0'))
-      .join('');
+      .join('')}`;
     const founderWallet = new ethers.Wallet(founderPrivateKeyHex, provider);
 
     const tx = await founderWallet.sendTransaction({
@@ -68,7 +72,9 @@ describe('EthrDID Integration Tests', () => {
     });
 
     await tx.wait();
-    console.log(`  ✅ Funded ${recipientAddress} with ${amountInEther} ETH for gas`);
+    console.log(
+      `  ✅ Funded ${recipientAddress} with ${amountInEther} ETH for gas`,
+    );
   }
 
   beforeAll(() => {
@@ -84,9 +90,9 @@ describe('EthrDID Integration Tests', () => {
     // Require funded private key for integration tests
     if (!process.env.ETHR_PRIVATE_KEY) {
       throw new Error(
-        'ETHR_PRIVATE_KEY environment variable is required for integration tests. ' +
-        'Tests require a funded account to pay gas fees. ' +
-        'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh'
+        'ETHR_PRIVATE_KEY environment variable is required for integration tests. '
+          + 'Tests require a funded account to pay gas fees. '
+          + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
       );
     }
 
@@ -172,12 +178,10 @@ describe('EthrDID Integration Tests', () => {
       const delegateAddress = keypairToAddress(delegateKeypair);
 
       // Add delegate first
-      await module.addDelegate(
-        did,
-        delegateAddress,
-        testKeypair,
-        { delegateType: 'veriKey', expiresIn: 86400 },
-      );
+      await module.addDelegate(did, delegateAddress, testKeypair, {
+        delegateType: 'veriKey',
+        expiresIn: 86400,
+      });
 
       // Then revoke
       const receipt = await module.revokeDelegate(
@@ -232,11 +236,60 @@ describe('EthrDID Integration Tests', () => {
     }, 90000); // 90s for multiple transactions
   });
 
+  // Helper function to create credential
+  const createCredential = (issuerDID, subject) => ({
+    '@context': [
+      'https://www.w3.org/2018/credentials/v1',
+      'https://www.w3.org/2018/credentials/examples/v1',
+    ],
+    type: ['VerifiableCredential', 'AlumniCredential'],
+    issuer: issuerDID,
+    issuanceDate: new Date().toISOString(),
+    credentialSubject: {
+      id: 'did:example:student123',
+      alumniOf: subject,
+    },
+  });
+
+  // Helper to create key doc using verification method from DID document
+  const createKeyDocFromDIDDocument = async (ethrModule, keypair, didId) => {
+    const didDocument = await ethrModule.getDocument(didId);
+    const address = keypairToAddress(keypair).toLowerCase();
+
+    // Find verification method that matches this keypair's address (case-insensitive)
+    const verificationMethod = didDocument.verificationMethod?.find((vm) => {
+      if (!vm.blockchainAccountId) return false;
+      const vmAddress = vm.blockchainAccountId.split(':').pop().toLowerCase();
+      return vmAddress === address;
+    });
+
+    if (!verificationMethod) {
+      console.error(
+        'Available verification methods:',
+        didDocument.verificationMethod,
+      );
+      console.error('Looking for address:', address);
+      throw new Error(`No verification method found for address ${address}`);
+    }
+
+    // eslint-disable-next-line no-underscore-dangle
+    const publicKeyBytes = keypair._publicKey();
+    const publicKeyBase58 = b58.encode(publicKeyBytes);
+    return {
+      id: verificationMethod.id,
+      controller: didId,
+      type: verificationMethod.type, // Use actual type from DID document
+      publicKeyBase58,
+      keypair,
+    };
+  };
+
   describe('DID Document Updates & Signing', () => {
     test('signs and verifies credentials after each DID manipulation', async () => {
       // Import VC functions
-      const { issueCredential, verifyCredential } = await import('../src/vc/index.js');
-      const { EcdsaSecp256k1VerKeyName } = await import('../src/vc/crypto/constants.js');
+      const { issueCredential, verifyCredential } = await import(
+        '../src/vc/index.js'
+      );
 
       // Create and fund a test account
       const ownerKeypair = Secp256k1Keypair.random();
@@ -248,54 +301,17 @@ describe('EthrDID Integration Tests', () => {
 
       // Note: No need to wait - ethr DIDs exist implicitly and are immediately resolvable
 
-      // Helper function to create credential
-      const createCredential = (issuerDID, subject) => ({
-        '@context': [
-          'https://www.w3.org/2018/credentials/v1',
-          'https://www.w3.org/2018/credentials/examples/v1',
-        ],
-        type: ['VerifiableCredential', 'AlumniCredential'],
-        issuer: issuerDID,
-        issuanceDate: new Date().toISOString(),
-        credentialSubject: {
-          id: 'did:example:student123',
-          alumniOf: subject,
-        },
-      });
-
-      // Helper to create key doc using verification method from DID document
-      const createKeyDocFromDIDDocument = async (keypair, didId) => {
-        const didDocument = await module.getDocument(didId);
-        const address = keypairToAddress(keypair).toLowerCase();
-
-        // Find verification method that matches this keypair's address (case-insensitive)
-        const verificationMethod = didDocument.verificationMethod?.find(vm => {
-          if (!vm.blockchainAccountId) return false;
-          const vmAddress = vm.blockchainAccountId.split(':').pop().toLowerCase();
-          return vmAddress === address;
-        });
-
-        if (!verificationMethod) {
-          console.error('Available verification methods:', didDocument.verificationMethod);
-          console.error('Looking for address:', address);
-          throw new Error(`No verification method found for address ${address}`);
-        }
-
-        const publicKeyBytes = keypair._publicKey();
-        const publicKeyBase58 = b58.encode(publicKeyBytes);
-        return {
-          id: verificationMethod.id,
-          controller: didId,
-          type: verificationMethod.type,  // Use actual type from DID document
-          publicKeyBase58,
-          keypair,
-        };
-      };
-
       // === STEP 1: Sign with initial DID ===
       console.log('\n  📝 Step 1: Sign with initial DID (owner key)');
-      const ownerKeyDoc = await createKeyDocFromDIDDocument(ownerKeypair, did);
-      const cred1 = await issueCredential(ownerKeyDoc, createCredential(did, 'Initial University'));
+      const ownerKeyDoc = await createKeyDocFromDIDDocument(
+        module,
+        ownerKeypair,
+        did,
+      );
+      const cred1 = await issueCredential(
+        ownerKeyDoc,
+        createCredential(did, 'Initial University'),
+      );
 
       expect(cred1.proof).toBeDefined();
       expect(cred1.proof.type).toBe('EcdsaSecp256k1Signature2020');
@@ -304,7 +320,10 @@ describe('EthrDID Integration Tests', () => {
       console.log('  🔍 Verifying credential...');
       const verify1 = await verifyCredential(cred1, { resolver: module });
       if (!verify1.verified) {
-        console.error('  ❌ Verification failed:', JSON.stringify(verify1, null, 2));
+        console.error(
+          '  ❌ Verification failed:',
+          JSON.stringify(verify1, null, 2),
+        );
       }
       expect(verify1.verified).toBe(true);
       console.log('  ✅ Credential verified successfully with owner key');
@@ -314,37 +333,50 @@ describe('EthrDID Integration Tests', () => {
       await module.setAttribute(
         did,
         'did/svc/MessagingService',
-        'https://example.com/messages',
+        MESSAGING_SERVICE_URL,
         ownerKeypair,
         86400,
       );
 
-      const cred2 = await issueCredential(ownerKeyDoc, createCredential(did, 'Service University'));
+      const cred2 = await issueCredential(
+        ownerKeyDoc,
+        createCredential(did, 'Service University'),
+      );
       expect(cred2.proof).toBeDefined();
       expect(cred2.proof.type).toBe('EcdsaSecp256k1Signature2020');
-      console.log('  ✅ After setAttribute: credential still signs successfully');
+      console.log(
+        '  ✅ After setAttribute: credential still signs successfully',
+      );
 
       // === STEP 3: Add delegate, sign with both owner AND delegate ===
       console.log('\n  📝 Step 3: Add delegate, sign with owner AND delegate');
       const delegateKeypair = Secp256k1Keypair.random();
       const delegateAddress = keypairToAddress(delegateKeypair);
 
-      await module.addDelegate(
-        did,
-        delegateAddress,
-        ownerKeypair,
-        { delegateType: 'veriKey', expiresIn: 86400 },
-      );
+      await module.addDelegate(did, delegateAddress, ownerKeypair, {
+        delegateType: 'veriKey',
+        expiresIn: 86400,
+      });
 
       // Sign with owner key (should still work)
-      const cred3a = await issueCredential(ownerKeyDoc, createCredential(did, 'Owner After Delegate'));
+      const cred3a = await issueCredential(
+        ownerKeyDoc,
+        createCredential(did, 'Owner After Delegate'),
+      );
       expect(cred3a.proof).toBeDefined();
       expect(cred3a.proof.type).toBe('EcdsaSecp256k1Signature2020');
       console.log('  ✅ After addDelegate: owner key still signs');
 
       // Sign with delegate key
-      const delegateKeyDoc = await createKeyDocFromDIDDocument(delegateKeypair, did);
-      const cred3b = await issueCredential(delegateKeyDoc, createCredential(did, 'Delegate University'));
+      const delegateKeyDoc = await createKeyDocFromDIDDocument(
+        module,
+        delegateKeypair,
+        did,
+      );
+      const cred3b = await issueCredential(
+        delegateKeyDoc,
+        createCredential(did, 'Delegate University'),
+      );
       expect(cred3b.proof).toBeDefined();
       expect(cred3b.proof.type).toBe('EcdsaSecp256k1Signature2020');
       console.log('  ✅ After addDelegate: delegate key signs');
@@ -359,13 +391,18 @@ describe('EthrDID Integration Tests', () => {
       );
 
       // Sign with owner key (should still work)
-      const cred4a = await issueCredential(ownerKeyDoc, createCredential(did, 'Owner After Revoke'));
+      const cred4a = await issueCredential(
+        ownerKeyDoc,
+        createCredential(did, 'Owner After Revoke'),
+      );
       expect(cred4a.proof).toBeDefined();
       expect(cred4a.proof.type).toBe('EcdsaSecp256k1Signature2020');
       console.log('  ✅ After revokeDelegate: owner key still signs');
 
       // Note: Revoked delegate can still cryptographically sign, but would fail verification
-      console.log('  ℹ️  Revoked delegate can still sign but would fail verification');
+      console.log(
+        '  ℹ️  Revoked delegate can still sign but would fail verification',
+      );
 
       // === STEP 5: Transfer ownership, new owner can sign ===
       console.log('\n  📝 Step 5: Transfer ownership, new owner signs');
@@ -376,8 +413,15 @@ describe('EthrDID Integration Tests', () => {
       await module.changeOwner(did, newOwnerAddress, ownerKeypair);
 
       // Sign with new owner key
-      const newOwnerKeyDoc = await createKeyDocFromDIDDocument(newOwnerKeypair, did);
-      const cred5b = await issueCredential(newOwnerKeyDoc, createCredential(did, 'New Owner University'));
+      const newOwnerKeyDoc = await createKeyDocFromDIDDocument(
+        module,
+        newOwnerKeypair,
+        did,
+      );
+      const cred5b = await issueCredential(
+        newOwnerKeyDoc,
+        createCredential(did, 'New Owner University'),
+      );
       expect(cred5b.proof).toBeDefined();
       expect(cred5b.proof.type).toBe('EcdsaSecp256k1Signature2020');
       console.log('  ✅ After changeOwner: new owner key signs successfully');
@@ -385,7 +429,9 @@ describe('EthrDID Integration Tests', () => {
       // Note: Old owner can still cryptographically sign, but would fail verification
       console.log('  ℹ️  Old owner can still sign but would fail verification');
 
-      console.log('\n  🎉 Complete flow test passed: Signed credentials after each DID manipulation!');
+      console.log(
+        '\n  🎉 Complete flow test passed: Signed credentials after each DID manipulation!',
+      );
     }, 180000); // 3 minutes for multiple transactions
 
     test('verifies document changes before/after updates and can sign credentials', async () => {
@@ -400,7 +446,10 @@ describe('EthrDID Integration Tests', () => {
       const docBefore = await module.getDocument(did);
       console.log('  📄 DID Document BEFORE updates:');
       console.log('    - ID:', docBefore.id);
-      console.log('    - Verification Methods:', docBefore.verificationMethod?.length || 0);
+      console.log(
+        '    - Verification Methods:',
+        docBefore.verificationMethod?.length || 0,
+      );
       console.log('    - Services:', docBefore.service?.length || 0);
 
       expect(docBefore.id).toBe(did);
@@ -414,7 +463,7 @@ describe('EthrDID Integration Tests', () => {
       await module.setAttribute(
         did,
         'did/svc/MessagingService',
-        'https://example.com/messages',
+        MESSAGING_SERVICE_URL,
         testKeypair,
         86400, // 1 day
       );
@@ -422,18 +471,19 @@ describe('EthrDID Integration Tests', () => {
       // Add a delegate
       const delegateKeypair = Secp256k1Keypair.random();
       const delegateAddress = keypairToAddress(delegateKeypair);
-      await module.addDelegate(
-        did,
-        delegateAddress,
-        testKeypair,
-        { delegateType: 'veriKey', expiresIn: 86400 },
-      );
+      await module.addDelegate(did, delegateAddress, testKeypair, {
+        delegateType: 'veriKey',
+        expiresIn: 86400,
+      });
 
       // Get AFTER document
       const docAfter = await module.getDocument(did);
       console.log('  📄 DID Document AFTER updates:');
       console.log('    - ID:', docAfter.id);
-      console.log('    - Verification Methods:', docAfter.verificationMethod?.length || 0);
+      console.log(
+        '    - Verification Methods:',
+        docAfter.verificationMethod?.length || 0,
+      );
       console.log('    - Services:', docAfter.service?.length || 0);
 
       // Verify changes
@@ -443,12 +493,16 @@ describe('EthrDID Integration Tests', () => {
 
       // Verify the specific service was added
       const messagingService = docAfter.service?.find(
-        s => s.type === 'MessagingService' || s.serviceEndpoint === 'https://example.com/messages'
+        (s) => s.type === 'MessagingService'
+          || s.serviceEndpoint === MESSAGING_SERVICE_URL,
       );
       expect(messagingService).toBeDefined();
 
       // Log the verification methods to understand the structure
-      console.log('  🔍 Verification methods:', JSON.stringify(docAfter.verificationMethod, null, 2));
+      console.log(
+        '  🔍 Verification methods:',
+        JSON.stringify(docAfter.verificationMethod, null, 2),
+      );
 
       // We expect at least 2 VMs: the owner + the delegate
       expect(docAfter.verificationMethod.length).toBeGreaterThanOrEqual(2);
@@ -456,15 +510,17 @@ describe('EthrDID Integration Tests', () => {
       console.log('  ✅ Document updates verified successfully');
 
       // Verify the delegate is in the verification methods
-      const delegateInVM = docAfter.verificationMethod.some(vm =>
-        vm.blockchainAccountId?.toLowerCase().includes(delegateAddress.toLowerCase())
-      );
+      const delegateInVM = docAfter.verificationMethod.some((vm) => vm.blockchainAccountId
+        ?.toLowerCase()
+        .includes(delegateAddress.toLowerCase()));
       expect(delegateInVM).toBe(true);
       console.log('  ✅ Delegate found in verification methods');
 
       // Now test issuing a credential with the ethr DID
       const { issueCredential } = await import('../src/vc/index.js');
-      const { EcdsaSecp256k1VerKeyName } = await import('../src/vc/crypto/constants.js');
+      const { EcdsaSecp256k1VerKeyName } = await import(
+        '../src/vc/crypto/constants.js'
+      );
 
       // Create a proper key document for signing
       // eslint-disable-next-line no-underscore-dangle
@@ -507,23 +563,26 @@ describe('EthrDID Integration Tests', () => {
       console.log('  ✅ Successfully signed credential with ethr DID');
       console.log('    - Issuer DID:', signedVC.issuer);
       console.log('    - Proof type:', signedVC.proof.type);
-      console.log('    - Verification method:', signedVC.proof.verificationMethod);
+      console.log(
+        '    - Verification method:',
+        signedVC.proof.verificationMethod,
+      );
     }, 120000); // 2 minutes for multiple transactions
   });
 
   describe('Multi-Network Operations', () => {
     test('can operate on different networks', async () => {
       const multiNetModule = new EthrDIDModule({
-        networks: [
-          'sepolia',
-          createVietChainConfig(),
-        ],
+        networks: ['sepolia', createVietChainConfig()],
         defaultNetwork: 'sepolia',
       });
 
       const keypair = Secp256k1Keypair.random();
       const sepoliaDID = await multiNetModule.createNewDID(keypair, 'sepolia');
-      const vietChainDID = await multiNetModule.createNewDID(keypair, 'vietchain');
+      const vietChainDID = await multiNetModule.createNewDID(
+        keypair,
+        'vietchain',
+      );
 
       // DIDs should be different due to network prefix
       expect(sepoliaDID).not.toBe(vietChainDID);
@@ -545,19 +604,19 @@ describe('EthrDID Integration Tests', () => {
 
     test('handles network errors gracefully', async () => {
       const badModule = new EthrDIDModule({
-        networks: [{
-          name: 'invalid',
-          rpcUrl: 'https://invalid-network.example.com',
-          registry: '0x0000000000000000000000000000000000000000',
-        }],
+        networks: [
+          {
+            name: 'invalid',
+            rpcUrl: 'https://invalid-network.example.com',
+            registry: '0x0000000000000000000000000000000000000000',
+          },
+        ],
       });
 
       const keypair = Secp256k1Keypair.random();
       const did = await badModule.createNewDID(keypair);
 
-      await expect(
-        badModule.getDocument(did),
-      ).rejects.toThrow();
+      await expect(badModule.getDocument(did)).rejects.toThrow();
     }, 30000);
   });
 });

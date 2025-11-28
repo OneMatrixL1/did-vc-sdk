@@ -22,6 +22,7 @@ import {
   Bls12381BBDT16DockVerKeyName,
   Bls12381BBDT16MacDockName,
   Ed255192020VerKeyName,
+  Bls12381BBSRecoveryMethod2023Name,
 } from './crypto/constants';
 import Bls12381BBDT16MACDock2024 from './crypto/Bls12381BBDT16MACDock2024';
 import { DidKeypair } from '../keypairs';
@@ -86,6 +87,7 @@ export async function getSuiteFromKeyDoc(keyDoc, useProofValue, options) {
       Cls = Bls12381BBSSignatureDock2022;
       break;
     case Bls12381BBS23DockVerKeyName:
+    case Bls12381BBSRecoveryMethod2023Name:
       Cls = Bls12381BBSSignatureDock2023;
       break;
     case Bls12381PSDockVerKeyName:

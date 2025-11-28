@@ -177,6 +177,12 @@ export default class CustomLinkedDataSignature extends jsigs.suites
       )}`;
     }
 
+    // Include publicKeyBase58 in proof if signer provides it
+    // This enables address-based verification for ethr DIDs with BBS signatures
+    if (this.signer && this.signer.publicKeyBase58) {
+      finalProof.publicKeyBase58 = this.signer.publicKeyBase58;
+    }
+
     return finalProof;
   }
 

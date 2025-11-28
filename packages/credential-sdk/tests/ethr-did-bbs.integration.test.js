@@ -72,7 +72,7 @@ const DID_V1_CONTEXT = 'https://www.w3.org/ns/did/v1';
  * @returns {object} keyDoc for signing
  */
 function createBBSKeyDocWithMinimalDIDDocument(keypair, did) {
-  const keyId = `${did}#keys-1`;
+  const keyId = `${did}#keys-bbs`;
   const address = did.split(':').pop();
 
   const keyDoc = {

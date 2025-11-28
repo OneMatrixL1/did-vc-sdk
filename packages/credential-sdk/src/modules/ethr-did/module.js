@@ -22,6 +22,7 @@ import {
   documentToAttributes,
   formatEthersError,
   isEthrDID,
+  ETHR_BBS_KEY_ID,
 } from './utils';
 
 /**
@@ -445,7 +446,7 @@ class EthrDIDModule extends AbstractDIDModule {
       // The BBS public key comes from the proof's publicKeyBase58 field and is validated
       // by deriving the address and comparing with the DID's address
       const document = result.didDocument;
-      const bbsKeyId = `${didString}#keys-1`;
+      const bbsKeyId = `${didString}${ETHR_BBS_KEY_ID}`;
 
       if (document.assertionMethod && !document.assertionMethod.includes(bbsKeyId)) {
         document.assertionMethod = [...document.assertionMethod, bbsKeyId];

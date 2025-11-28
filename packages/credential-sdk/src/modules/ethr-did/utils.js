@@ -6,6 +6,12 @@
 import { ethers } from 'ethers';
 
 /**
+ * Default key ID fragment for BBS keys in ethr DIDs
+ * Used when creating key documents and authorizing BBS keys
+ */
+export const ETHR_BBS_KEY_ID = '#keys-bbs';
+
+/**
  * Derive Ethereum address from BBS public key
  * @param {Uint8Array|Array<number>} bbsPublicKey - BBS public key (96 bytes, compressed G2 point)
  * @returns {string} Ethereum address (0x prefixed, checksummed)

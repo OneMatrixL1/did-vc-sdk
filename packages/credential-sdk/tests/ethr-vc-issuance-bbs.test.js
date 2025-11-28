@@ -45,7 +45,7 @@ const TEST_ISSUANCE_DATE = '2024-01-01T00:00:00Z';
  * @returns {object} keyDoc for signing
  */
 function createBBSKeyDocWithMinimalDIDDocument(keypair, did) {
-  const keyId = `${did}#keys-1`;
+  const keyId = `${did}#keys-bbs`;
   const address = did.split(':').pop();
 
   const keyDoc = {

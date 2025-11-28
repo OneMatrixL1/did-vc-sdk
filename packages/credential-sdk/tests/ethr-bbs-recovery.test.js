@@ -50,7 +50,7 @@ describe('BBS Address-Based Recovery Verification', () => {
 
     // Create key document for signing
     keyDoc = {
-      id: `${ethrDID}#keys-1`,
+      id: `${ethrDID}#keys-bbs`,
       controller: ethrDID,
       type: Bls12381BBS23DockVerKeyName,
       keypair: bbsKeypair,
@@ -164,7 +164,7 @@ describe('BBS Address-Based Recovery Verification', () => {
       // IMPORTANT: This document does NOT contain the BBS public key -
       // it only has the default EcdsaSecp256k1RecoveryMethod2020 for controller validation.
       // The BBS public key comes from the proof itself (embedded publicKeyBase58).
-      const keyId = `${ethrDID}#keys-1`;
+      const keyId = `${ethrDID}#keys-bbs`;
       networkCache[ethrDID] = {
         '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/v2'],
         id: ethrDID,
@@ -267,7 +267,7 @@ describe('BBS Address-Based Recovery Verification', () => {
   describe('Multi-Network Support', () => {
     // Helper to create minimal DID document for purpose validation
     function setupMinimalDIDDoc(did) {
-      const keyId = `${did}#keys-1`;
+      const keyId = `${did}#keys-bbs`;
       const address = did.split(':').pop();
       networkCache[did] = {
         '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/v2'],
@@ -295,7 +295,7 @@ describe('BBS Address-Based Recovery Verification', () => {
       setupMinimalDIDDoc(mainnetDID);
 
       const mainnetKeyDoc = {
-        id: `${mainnetDID}#keys-1`,
+        id: `${mainnetDID}#keys-bbs`,
         controller: mainnetDID,
         type: Bls12381BBS23DockVerKeyName,
         keypair: mainnetKeypair,
@@ -345,7 +345,7 @@ describe('BBS Address-Based Recovery Verification', () => {
         setupMinimalDIDDoc(did);
 
         const networkKeyDoc = {
-          id: `${did}#keys-1`,
+          id: `${did}#keys-bbs`,
           controller: did,
           type: Bls12381BBS23DockVerKeyName,
           keypair,
@@ -389,7 +389,7 @@ describe('BBS Address-Based Recovery Verification', () => {
 
       // Create mock DID document for verification
       const publicKeyBase58 = b58.encode(new Uint8Array(bbsKeypair.publicKeyBuffer));
-      const keyId = `${nonEthrDID}#keys-1`;
+      const keyId = `${nonEthrDID}#keys-bbs`;
 
       networkCache[keyId] = {
         '@context': 'https://w3id.org/security/v2',

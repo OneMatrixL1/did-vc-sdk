@@ -1,7 +1,7 @@
 /**
  * Test BBS verification with REAL EthrDIDModule resolver (no mocks)
  *
- * This test verifies that the resolver properly adds #keys-1 to assertionMethod
+ * This test verifies that the resolver properly adds #keys-bbs to assertionMethod
  * so BBS credentials can be verified without on-chain key registration.
  */
 
@@ -55,7 +55,7 @@ describe('BBS Verification with Real EthrDIDModule Resolver', () => {
     ethrDID = addressToDID(address, networkConfig.name);
 
     keyDoc = {
-      id: `${ethrDID}#keys-1`,
+      id: `${ethrDID}#keys-bbs`,
       controller: ethrDID,
       type: Bls12381BBS23DockVerKeyName,
       keypair: bbsKeypair,
@@ -76,7 +76,7 @@ describe('BBS Verification with Real EthrDIDModule Resolver', () => {
     signedCredential = await issueCredential(keyDoc, unsignedCredential);
   });
 
-  test('resolver adds #keys-1 to assertionMethod', async () => {
+  test('resolver adds #keys-bbs to assertionMethod', async () => {
     if (!process.env.ETHR_NETWORK_RPC_URL) {
       console.log('Skipping - no RPC URL');
       return;
@@ -88,8 +88,8 @@ describe('BBS Verification with Real EthrDIDModule Resolver', () => {
     console.log('Resolved DID document:');
     console.log(JSON.stringify(document, null, 2));
 
-    // Check that #keys-1 is in assertionMethod
-    const bbsKeyId = `${ethrDID}#keys-1`;
+    // Check that #keys-bbs is in assertionMethod
+    const bbsKeyId = `${ethrDID}#keys-bbs`;
     expect(document.assertionMethod).toContain(bbsKeyId);
   }, 30000);
 

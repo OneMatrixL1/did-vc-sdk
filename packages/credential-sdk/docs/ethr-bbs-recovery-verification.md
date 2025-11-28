@@ -106,8 +106,15 @@ src/vc/crypto/
 src/vc/
 └── helpers.js                          # MODIFIED: Handle recovery method type
 
+src/modules/ethr-did/
+├── module.js                           # MODIFIED: Add #keys-bbs to default docs
+└── utils.js                            # MODIFIED: Added ETHR_BBS_KEY_ID constant
+
 tests/
-└── ethr-bbs-recovery.test.js           # NEW: Unit tests
+├── ethr-bbs-recovery.test.js           # NEW: Core recovery verification tests
+├── ethr-bbs-security.test.js           # NEW: Security and attack vector tests
+├── ethr-did-bbs-key-authorization.test.js  # NEW: On-chain data detection tests
+└── ethr-bbs-real-resolver.test.js      # NEW: Real resolver integration tests
 ```
 
 ### 1. Bls12381BBSRecoveryMethod2023 Class
@@ -155,7 +162,7 @@ const method = Bls12381BBSRecoveryMethod2023.fromProof(
   {
     type: 'Bls12381BBSSignatureDock2023',
     publicKeyBase58: 'base58EncodedKey...',
-    verificationMethod: 'did:ethr:0x123...#keys-1'
+    verificationMethod: 'did:ethr:0x123...#keys-bbs'
   },
   'did:ethr:0x123...'
 );
@@ -324,7 +331,7 @@ export function bbsPublicKeyToAddress(publicKeyBuffer) {
   "proof": {
     "type": "Bls12381BBSSignatureDock2023",
     "created": "2024-01-15T10:30:00Z",
-    "verificationMethod": "did:ethr:0x123...#keys-1",
+    "verificationMethod": "did:ethr:0x123...#keys-bbs",
     "proofPurpose": "assertionMethod",
     "proofValue": "base58EncodedSignature..."
   }
@@ -338,7 +345,7 @@ export function bbsPublicKeyToAddress(publicKeyBuffer) {
   "proof": {
     "type": "Bls12381BBSSignatureDock2023",
     "created": "2024-01-15T10:30:00Z",
-    "verificationMethod": "did:ethr:0x123...#keys-1",
+    "verificationMethod": "did:ethr:0x123...#keys-bbs",
     "proofPurpose": "assertionMethod",
     "proofValue": "base58EncodedSignature...",
     "publicKeyBase58": "base58EncodedBBSPublicKey..."
@@ -378,7 +385,7 @@ const ethrDID = addressToDID(address, 'mainnet'); // or specific network
 
 // Create key document for signing
 const keyDoc = {
-  id: `${ethrDID}#keys-1`,
+  id: `${ethrDID}#keys-bbs`,
   controller: ethrDID,
   type: Bls12381BBS23DockVerKeyName,
   keypair: bbsKeypair
@@ -454,7 +461,36 @@ For verification to succeed, the DID document needs:
 1. **Valid `assertionMethod`** that includes the verification method ID from the proof
 2. **Does NOT need** the BBS public key in `verificationMethod` array
 
+### Automatic BBS Key Authorization
+
+The `EthrDIDModule.getDocument()` method automatically adds `#keys-bbs` to `assertionMethod` for **default documents only** (DIDs with no on-chain modifications).
+
+```javascript
+// In EthrDIDModule.getDocument():
+const hasOnChainData = result.didDocumentMetadata?.versionId !== undefined;
+
+if (!hasOnChainData) {
+  // Add #keys-bbs for default documents only
+  document.assertionMethod = [...document.assertionMethod, bbsKeyId];
+}
+```
+
+**Behavior by scenario:**
+
+| Scenario | On-Chain Data | `#keys-bbs` Added | Reason |
+|----------|---------------|-------------------|--------|
+| Fresh DID (no transactions) | None | ✅ Yes | Default document, automatic authorization |
+| Modified DID (setAttribute, addDelegate, etc.) | Has events | ❌ No | Respect on-chain configuration |
+
+**Why this design?**
+
+- **Fresh DIDs**: Automatically support BBS without requiring on-chain transactions
+- **Modified DIDs**: Users explicitly configured their DID document, so we respect their choices
+- **Security**: Prevents permanently enabling BBS if user intentionally removed it on-chain
+
 ### Minimal DID Document Example
+
+For a fresh DID with no on-chain data, the resolved document looks like:
 
 ```json
 {
@@ -470,12 +506,12 @@ For verification to succeed, the DID document needs:
   ],
   "assertionMethod": [
     "did:ethr:0x123...#controller",
-    "did:ethr:0x123...#keys-1"
+    "did:ethr:0x123...#keys-bbs"
   ]
 }
 ```
 
-Note: `#keys-1` is listed in `assertionMethod` but there's no corresponding entry in `verificationMethod` with the BBS public key. The public key comes from the proof itself.
+Note: `#keys-bbs` is listed in `assertionMethod` but there's no corresponding entry in `verificationMethod` with the BBS public key. The public key comes from the proof itself.
 
 ## Security Considerations
 
@@ -500,6 +536,10 @@ Note: `#keys-1` is listed in `assertionMethod` but there's no corresponding entr
 | Use different keypair with same address | Requires keccak256 collision (infeasible) |
 | Modify credential content | BBS signature verification would fail |
 | Replay with different DID | Address comparison would fail |
+| Impersonate another DID | Attacker's key derives to different address |
+| Add BBS to secp256k1-only DID | Address mismatch + no `#keys-bbs` authorization |
+| Swap proof between credentials | Signature binds to credential content |
+| Use credential after key rotation | Old credentials remain valid for original DID |
 
 ## Backward Compatibility
 
@@ -512,7 +552,7 @@ Credentials from non-ethr DIDs (e.g., `did:dock:`, `did:example:`) continue to w
 const nonEthrCredential = {
   issuer: 'did:example:issuer123',
   proof: {
-    verificationMethod: 'did:example:issuer123#keys-1',
+    verificationMethod: 'did:example:issuer123#keys-bbs',
     // publicKeyBase58 is still included but not used for address verification
   }
 };
@@ -532,33 +572,59 @@ The recovery method is only used when:
 
 ## Test Coverage
 
-### Unit Tests (`tests/ethr-bbs-recovery.test.js`)
+### Test Files
 
-| Test Suite | Tests |
-|------------|-------|
-| Bls12381BBSRecoveryMethod2023 | 4 tests |
-| Credential Issuance with Embedded Public Key | 1 test |
-| Self-Contained Verification | 3 tests |
-| Address Derivation Validation | 2 tests |
-| Multi-Network Support | 2 tests |
-| Backward Compatibility | 1 test |
+| Test File | Description | Tests |
+|-----------|-------------|-------|
+| `ethr-bbs-recovery.test.js` | Core recovery verification tests | 13 |
+| `ethr-bbs-security.test.js` | Security and attack vector tests | 22 |
+| `ethr-did-bbs-key-authorization.test.js` | On-chain data detection tests | 8 |
+| `ethr-bbs-real-resolver.test.js` | Real resolver integration tests | 2 |
+| **Total** | | **45** |
 
-**Total**: 13 tests
+### Security Tests (`tests/ethr-bbs-security.test.js`)
+
+| Category | Tests |
+|----------|-------|
+| Impersonation Attacks | 2 |
+| Credential Tampering Attacks | 6 |
+| Proof Manipulation Attacks | 4 |
+| Cross-DID Attacks | 2 |
+| Key Rotation Scenarios | 2 |
+| No BBS Keypair Scenarios | 3 |
+| Invalid Public Key Attacks | 3 |
+
+### Key Authorization Tests (`tests/ethr-did-bbs-key-authorization.test.js`)
+
+| Category | Tests |
+|----------|-------|
+| No on-chain data (adds `#keys-bbs`) | 3 |
+| Has on-chain data (respects config) | 3 |
+| Edge cases | 2 |
 
 ### Key Test Cases
 
-1. **Constructor validation**: Public key, controller, address derivation
-2. **fromProof extraction**: Handles proof object correctly
-3. **Missing publicKeyBase58**: Throws appropriate error
-4. **Address mismatch rejection**: Wrong public key is rejected
-5. **Embedded public key in proof**: Issuance includes publicKeyBase58
-6. **Self-contained verification**: Works without BBS key in DID doc
-7. **Tampered credential detection**: Modified content fails verification
-8. **Wrong public key detection**: Replaced publicKeyBase58 fails
-9. **Address derivation correctness**: Derived matches DID address
-10. **Different keys = different addresses**: No collisions
-11. **Multi-network support**: Works on mainnet, sepolia, polygon
-12. **Backward compatibility**: Non-ethr DIDs still work
+**Recovery Verification:**
+1. Constructor validation: Public key, controller, address derivation
+2. fromProof extraction: Handles proof object correctly
+3. Missing publicKeyBase58: Throws appropriate error
+4. Address mismatch rejection: Wrong public key is rejected
+5. Embedded public key in proof: Issuance includes publicKeyBase58
+6. Self-contained verification: Works without BBS key in DID doc
+7. Multi-network support: Works on mainnet, sepolia, polygon, vietchain
+
+**Security:**
+8. Attacker cannot impersonate victim DID
+9. Replaced public key fails verification
+10. Tampered credential content fails
+11. Proof cannot be reused across credentials
+12. Key rotation: Old credentials valid, cannot claim for new DID
+13. BBS credential fails if DID has no BBS authorization
+
+**Key Authorization:**
+14. `#keys-bbs` added when `versionId` is undefined
+15. `#keys-bbs` NOT added when `versionId` exists
+16. Respects on-chain `assertionMethod` configuration
 
 ## Glossary
 

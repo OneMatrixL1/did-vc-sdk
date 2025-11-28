@@ -441,15 +441,27 @@ class EthrDIDModule extends AbstractDIDModule {
         throw new Error(`DID document not found: ${didString}`);
       }
 
-      // Add default BBS key authorization to assertionMethod
-      // This allows BBS credentials to be verified without on-chain key registration
-      // The BBS public key comes from the proof's publicKeyBase58 field and is validated
-      // by deriving the address and comparing with the DID's address
       const document = result.didDocument;
-      const bbsKeyId = `${didString}${ETHR_BBS_KEY_ID}`;
 
-      if (document.assertionMethod && !document.assertionMethod.includes(bbsKeyId)) {
-        document.assertionMethod = [...document.assertionMethod, bbsKeyId];
+      // Only add default BBS key authorization if there's NO on-chain data
+      // (i.e., the document is the default generated document)
+      // If the DID has on-chain modifications, respect the configured assertionMethod
+      //
+      // The ethr-did-resolver sets didDocumentMetadata.versionId when there are
+      // on-chain events (setAttribute, addDelegate, changeOwner, etc.)
+      // If versionId is not set, it means the document is the default (no chain data)
+      const hasOnChainData = result.didDocumentMetadata?.versionId !== undefined;
+
+      if (!hasOnChainData) {
+        // Add BBS key authorization for default documents only
+        // This allows BBS credentials to be verified without on-chain key registration
+        // The BBS public key comes from the proof's publicKeyBase58 field and is validated
+        // by deriving the address and comparing with the DID's address
+        const bbsKeyId = `${didString}${ETHR_BBS_KEY_ID}`;
+
+        if (document.assertionMethod && !document.assertionMethod.includes(bbsKeyId)) {
+          document.assertionMethod = [...document.assertionMethod, bbsKeyId];
+        }
       }
 
       return document;

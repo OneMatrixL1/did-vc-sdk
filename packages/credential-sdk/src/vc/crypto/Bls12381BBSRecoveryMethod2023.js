@@ -36,6 +36,11 @@ export default class Bls12381BBSRecoveryMethod2023 {
     this.controller = controller;
     this.publicKeyBuffer = b58.decode(publicKeyBase58);
 
+    // Validate BBS public key is 96 bytes
+    if (this.publicKeyBuffer.length !== 96) {
+      throw new Error(`Invalid BBS public key length: expected 96 bytes, got ${this.publicKeyBuffer.length}`);
+    }
+
     // Expected address from the DID (to compare against derived address)
     this.expectedAddress = expectedAddress;
 

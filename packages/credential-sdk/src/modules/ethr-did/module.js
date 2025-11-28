@@ -440,7 +440,18 @@ class EthrDIDModule extends AbstractDIDModule {
         throw new Error(`DID document not found: ${didString}`);
       }
 
-      return result.didDocument;
+      // Add default BBS key authorization to assertionMethod
+      // This allows BBS credentials to be verified without on-chain key registration
+      // The BBS public key comes from the proof's publicKeyBase58 field and is validated
+      // by deriving the address and comparing with the DID's address
+      const document = result.didDocument;
+      const bbsKeyId = `${didString}#keys-1`;
+
+      if (document.assertionMethod && !document.assertionMethod.includes(bbsKeyId)) {
+        document.assertionMethod = [...document.assertionMethod, bbsKeyId];
+      }
+
+      return document;
     } catch (error) {
       throw new Error(`Failed to get DID document: ${formatEthersError(error)}`);
     }

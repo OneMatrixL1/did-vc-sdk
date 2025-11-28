@@ -24,8 +24,6 @@ import {
 import { bbsPublicKeyToAddress } from '../../modules/ethr-did/utils';
 import { u8aToU8a } from '../../utils/types/bytes';
 
-export const Bls12381BBSRecoveryMethod2023Name = 'Bls12381BBSRecoveryMethod2023';
-
 export default class Bls12381BBSRecoveryMethod2023 {
   /**
    * Create a BBS recovery method instance

@@ -11,6 +11,7 @@ import DockCryptoSignature from './common/DockCryptoSignature';
 import Bls12381BBSRecoveryMethod2023 from './Bls12381BBSRecoveryMethod2023';
 import { isEthrDID } from '../../modules/ethr-did/utils';
 import { u8aToU8a } from '../../utils/types/bytes';
+import CustomLinkedDataSignature from './common/CustomLinkedDataSignature';
 
 /**
  * A BBS signature suite for use with BLS12-381 Dock key pairs
@@ -147,7 +148,6 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
   static extractSignatureBytes(proof) {
     const { proofValue } = proof;
     if (proofValue && typeof proofValue === 'string') {
-      const CustomLinkedDataSignature = require('./common/CustomLinkedDataSignature').default;
       return b58.decode(
         CustomLinkedDataSignature.fromJsigProofValue(proofValue),
       );

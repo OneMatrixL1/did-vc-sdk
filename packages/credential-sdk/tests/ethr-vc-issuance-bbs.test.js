@@ -4,10 +4,14 @@
  * These tests verify that credentials and presentations can be issued
  * and verified using ethr DID identifiers with BBS+ signatures for
  * selective disclosure capabilities.
+ *
+ * IMPORTANT: These tests use BBS address-based recovery verification.
+ * The DID documents do NOT contain the BBS public key - verification
+ * uses the embedded publicKeyBase58 in the proof and validates it
+ * by deriving the address and comparing with the DID.
  */
 
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import b58 from 'bs58';
 import mockFetch from './mocks/fetch';
 import networkCache from './utils/network-cache';
 import {
@@ -27,14 +31,22 @@ const VIETCHAIN_NETWORK = 'vietchain';
 const TEST_ISSUANCE_DATE = '2024-01-01T00:00:00Z';
 
 /**
- * Helper to create and register mock DID document for BBS keypair
+ * Helper to create key document and register minimal DID document for BBS keypair.
+ *
+ * IMPORTANT: This creates a minimal DID document that does NOT contain the BBS public key.
+ * Verification relies on the BBS address-based recovery mechanism:
+ * 1. The proof contains publicKeyBase58 (embedded during signing)
+ * 2. Verifier derives address from the embedded public key
+ * 3. Verifier compares derived address with DID's address
+ * 4. If match, verifies BBS signature using the embedded public key
+ *
  * @param {Bls12381BBSKeyPairDock2023} keypair - BBS keypair
  * @param {string} did - DID string
  * @returns {object} keyDoc for signing
  */
-function createBBSMockDIDDocument(keypair, did) {
-  const publicKeyBase58 = b58.encode(new Uint8Array(keypair.publicKeyBuffer));
+function createBBSKeyDocWithMinimalDIDDocument(keypair, did) {
   const keyId = `${did}#keys-1`;
+  const address = did.split(':').pop();
 
   const keyDoc = {
     id: keyId,
@@ -43,29 +55,23 @@ function createBBSMockDIDDocument(keypair, did) {
     keypair,
   };
 
-  // Register verification method
-  networkCache[keyId] = {
-    '@context': SECURITY_V2_CONTEXT,
-    id: keyId,
-    type: Bls12381BBS23DockVerKeyName,
-    controller: did,
-    publicKeyBase58,
-  };
-
-  // Register DID document
+  // Register minimal DID document - NO BBS public key here!
+  // The BBS public key comes from the proof's publicKeyBase58 field
   networkCache[did] = {
     '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
     id: did,
     verificationMethod: [
       {
-        id: keyId,
-        type: Bls12381BBS23DockVerKeyName,
+        // Default controller key (secp256k1 recovery method)
+        id: `${did}#controller`,
+        type: 'EcdsaSecp256k1RecoveryMethod2020',
         controller: did,
-        publicKeyBase58,
+        blockchainAccountId: `eip155:1:${address}`,
       },
     ],
-    assertionMethod: [keyId],
-    authentication: [keyId],
+    // Authorize both controller and BBS key ID for assertions
+    assertionMethod: [`${did}#controller`, keyId],
+    authentication: [`${did}#controller`],
   };
 
   return keyDoc;
@@ -105,8 +111,8 @@ describe('Ethr DID VC Issuance with BBS', () => {
     const issuerAddress = keypairToAddress(issuerKeypair);
     issuerDID = addressToDID(issuerAddress, VIETCHAIN_NETWORK);
 
-    // Create and register issuer DID document
-    issuerKeyDoc = createBBSMockDIDDocument(issuerKeypair, issuerDID);
+    // Create key document with minimal DID document (no BBS key in doc)
+    issuerKeyDoc = createBBSKeyDocWithMinimalDIDDocument(issuerKeypair, issuerDID);
 
     // Create holder identity with BBS keypair
     holderKeypair = Bls12381BBSKeyPairDock2023.generate({
@@ -116,8 +122,8 @@ describe('Ethr DID VC Issuance with BBS', () => {
     const holderAddress = keypairToAddress(holderKeypair);
     holderDID = addressToDID(holderAddress, VIETCHAIN_NETWORK);
 
-    // Create and register holder DID document
-    holderKeyDoc = createBBSMockDIDDocument(holderKeypair, holderDID);
+    // Create key document with minimal DID document (no BBS key in doc)
+    holderKeyDoc = createBBSKeyDocWithMinimalDIDDocument(holderKeypair, holderDID);
   });
 
   describe('Credential Issuance', () => {
@@ -159,7 +165,7 @@ describe('Ethr DID VC Issuance with BBS', () => {
       const mainnetAddress = keypairToAddress(mainnetKeypair);
       const mainnetDID = addressToDID(mainnetAddress); // No network = mainnet
 
-      const keyDoc = createBBSMockDIDDocument(mainnetKeypair, mainnetDID);
+      const keyDoc = createBBSKeyDocWithMinimalDIDDocument(mainnetKeypair, mainnetDID);
 
       const unsignedCredential = {
         '@context': [
@@ -204,7 +210,7 @@ describe('Ethr DID VC Issuance with BBS', () => {
         const did = addressToDID(address, network);
         createdDIDs.push(did);
 
-        const keyDoc = createBBSMockDIDDocument(keypair, did);
+        const keyDoc = createBBSKeyDocWithMinimalDIDDocument(keypair, did);
 
         const unsignedCredential = {
           '@context': [

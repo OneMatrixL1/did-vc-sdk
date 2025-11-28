@@ -6,6 +6,11 @@
  * - DID resolution (read-only operations)
  * - VC issuance and verification with BBS signatures
  *
+ * IMPORTANT: These tests use BBS address-based recovery verification.
+ * The DID documents do NOT contain the BBS public key - verification
+ * uses the embedded publicKeyBase58 in the proof and validates it
+ * by deriving the address and comparing with the DID.
+ *
  * NOTE: DID document modifications (setAttribute, addDelegate, changeOwner)
  * are NOT tested here because BBS transaction signing is not yet supported.
  * See ethr-did.integration.test.js for secp256k1 modification tests.
@@ -21,7 +26,6 @@
  */
 
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import b58 from 'bs58';
 import { EthrDIDModule, createVietChainConfig } from '../src/modules/ethr-did';
 import { keypairToAddress, parseDID, isEthrDID } from '../src/modules/ethr-did/utils';
 import { issueCredential, verifyCredential } from '../src/vc';
@@ -54,15 +58,22 @@ const BBS_V1_CONTEXT = 'https://ld.truvera.io/security/bbs/v1';
 const DID_V1_CONTEXT = 'https://www.w3.org/ns/did/v1';
 
 /**
- * Helper to create and register mock DID document for BBS keypair
- * Required because BBS keys cannot be registered on-chain yet
+ * Helper to create key document and register minimal DID document for BBS keypair.
+ *
+ * IMPORTANT: This creates a minimal DID document that does NOT contain the BBS public key.
+ * Verification relies on the BBS address-based recovery mechanism:
+ * 1. The proof contains publicKeyBase58 (embedded during signing)
+ * 2. Verifier derives address from the embedded public key
+ * 3. Verifier compares derived address with DID's address
+ * 4. If match, verifies BBS signature using the embedded public key
+ *
  * @param {Bls12381BBSKeyPairDock2023} keypair - BBS keypair
  * @param {string} did - DID string
  * @returns {object} keyDoc for signing
  */
-function createBBSMockDIDDocument(keypair, did) {
-  const publicKeyBase58 = b58.encode(new Uint8Array(keypair.publicKeyBuffer));
+function createBBSKeyDocWithMinimalDIDDocument(keypair, did) {
   const keyId = `${did}#keys-1`;
+  const address = did.split(':').pop();
 
   const keyDoc = {
     id: keyId,
@@ -71,29 +82,23 @@ function createBBSMockDIDDocument(keypair, did) {
     keypair,
   };
 
-  // Register verification method in mock cache
-  networkCache[keyId] = {
-    '@context': SECURITY_V2_CONTEXT,
-    id: keyId,
-    type: Bls12381BBS23DockVerKeyName,
-    controller: did,
-    publicKeyBase58,
-  };
-
-  // Register DID document in mock cache
+  // Register minimal DID document - NO BBS public key here!
+  // The BBS public key comes from the proof's publicKeyBase58 field
   networkCache[did] = {
     '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
     id: did,
     verificationMethod: [
       {
-        id: keyId,
-        type: Bls12381BBS23DockVerKeyName,
+        // Default controller key (secp256k1 recovery method)
+        id: `${did}#controller`,
+        type: 'EcdsaSecp256k1RecoveryMethod2020',
         controller: did,
-        publicKeyBase58,
+        blockchainAccountId: `eip155:1:${address}`,
       },
     ],
-    assertionMethod: [keyId],
-    authentication: [keyId],
+    // Authorize both controller and BBS key ID for assertions
+    assertionMethod: [`${did}#controller`, keyId],
+    authentication: [`${did}#controller`],
   };
 
   return keyDoc;
@@ -207,8 +212,8 @@ describe('EthrDID BBS Integration Tests', () => {
       });
       issuerDID = await module.createNewDID(issuerKeypair);
 
-      // Create mock DID document for credential verification
-      issuerKeyDoc = createBBSMockDIDDocument(issuerKeypair, issuerDID);
+      // Create key document with minimal DID document (no BBS key in doc)
+      issuerKeyDoc = createBBSKeyDocWithMinimalDIDDocument(issuerKeypair, issuerDID);
     });
 
     afterAll(() => {
@@ -345,7 +350,7 @@ describe('EthrDID BBS Integration Tests', () => {
         const did = await multiNetModule.createNewDID(bbsKeypair, network);
         createdDIDs.push(did);
 
-        const keyDoc = createBBSMockDIDDocument(bbsKeypair, did);
+        const keyDoc = createBBSKeyDocWithMinimalDIDDocument(bbsKeypair, did);
 
         const unsignedCredential = {
           '@context': [

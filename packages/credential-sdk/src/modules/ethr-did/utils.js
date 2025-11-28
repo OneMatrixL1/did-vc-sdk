@@ -6,11 +6,56 @@
 import { ethers } from 'ethers';
 
 /**
- * Extract Ethereum address from a Secp256k1Keypair
- * @param {import('../../keypairs/keypair-secp256k1').default} keypair - Secp256k1 keypair
+ * Derive Ethereum address from BBS public key
+ * @param {Uint8Array|Array<number>} bbsPublicKey - BBS public key (96 bytes, compressed G2 point)
+ * @returns {string} Ethereum address (0x prefixed, checksummed)
+ */
+export function bbsPublicKeyToAddress(bbsPublicKey) {
+  // Convert to Uint8Array if it's a plain array
+  const publicKeyBytes = bbsPublicKey instanceof Uint8Array
+    ? bbsPublicKey
+    : new Uint8Array(bbsPublicKey);
+
+  if (publicKeyBytes.length !== 96) {
+    throw new Error('BBS public key must be 96 bytes');
+  }
+
+  const hash = ethers.utils.keccak256(publicKeyBytes);
+  // hash is 0x-prefixed hex string, take last 40 chars (20 bytes)
+  const address = `0x${hash.slice(-40)}`;
+  return ethers.utils.getAddress(address); // Return checksummed
+}
+
+/**
+ * Detect keypair type for address derivation
+ * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
+ * @returns {'secp256k1' | 'bbs'} Keypair type
+ */
+export function detectKeypairType(keypair) {
+  // Check for BBS keypair (DockCryptoKeyPair with 96-byte publicKeyBuffer)
+  if (keypair.publicKeyBuffer && keypair.publicKeyBuffer.length === 96) {
+    return 'bbs';
+  }
+  // Check for Secp256k1Keypair (has privateKey method)
+  if (typeof keypair.privateKey === 'function') {
+    return 'secp256k1';
+  }
+  throw new Error('Unknown keypair type: must be Secp256k1Keypair or BBS keypair');
+}
+
+/**
+ * Extract Ethereum address from keypair (secp256k1 or BBS)
+ * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
  * @returns {string} Ethereum address (0x prefixed)
  */
 export function keypairToAddress(keypair) {
+  const keyType = detectKeypairType(keypair);
+
+  if (keyType === 'bbs') {
+    return bbsPublicKeyToAddress(keypair.publicKeyBuffer);
+  }
+
+  // Default: secp256k1
   return ethers.utils.computeAddress(keypair.privateKey());
 }
 
@@ -97,11 +142,19 @@ export function createProvider(networkConfig, providerOptions = {}) {
 
 /**
  * Create ethers signer from keypair and provider
- * @param {import('../../keypairs/keypair-secp256k1').default} keypair - Secp256k1 keypair
+ * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
  * @param {ethers.providers.Provider} provider - Ethers provider
  * @returns {ethers.Wallet} Ethers wallet (signer)
+ * @throws {Error} If BBS keypair is used (not yet supported)
  */
 export function createSigner(keypair, provider) {
+  const keyType = detectKeypairType(keypair);
+
+  if (keyType === 'bbs') {
+    // TODO: Implement BBS signer when contract supports it
+    throw new Error('BBS transaction signing not yet supported. Contract update required.');
+  }
+
   return new ethers.Wallet(keypair.privateKey(), provider);
 }
 

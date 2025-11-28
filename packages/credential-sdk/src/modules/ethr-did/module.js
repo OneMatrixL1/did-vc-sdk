@@ -202,9 +202,10 @@ class EthrDIDModule extends AbstractDIDModule {
 
   /**
    * Create EthrDID instance for operations
-   * @param {import('../../keypairs/keypair-secp256k1').default} keypair - Secp256k1 keypair
+   * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
    * @param {string} [networkName] - Network name
    * @returns {Promise<EthrDID>} EthrDID instance
+   * @throws {Error} If BBS keypair is used (transaction signing not yet supported)
    */
   async #createEthrDID(keypair, networkName = null) {
     const name = networkName || this.defaultNetwork;
@@ -293,7 +294,8 @@ class EthrDIDModule extends AbstractDIDModule {
 
   /**
    * Create a new ethr DID (convenience method)
-   * @param {import('../../keypairs/keypair-secp256k1').default} keypair - Secp256k1 keypair
+   * Supports both Secp256k1 and BBS keypairs for address derivation.
+   * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
    * @param {string} [networkName] - Network name (uses default if not specified)
    * @returns {Promise<string>} The created DID string
    */
@@ -315,6 +317,7 @@ class EthrDIDModule extends AbstractDIDModule {
    * @param {Object} didDocument - DID Document to create
    * @param {import('../../keypairs/did-keypair').default} didKeypair - DID keypair for signing
    * @returns {Promise<Object>} Transaction object
+   * @throws {Error} If BBS keypair is used (transaction signing not yet supported)
    */
   async createDocumentTx(didDocument, didKeypair) {
     const did = String(didDocument.id);

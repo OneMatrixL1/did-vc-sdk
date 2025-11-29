@@ -245,3 +245,42 @@ export function isEthrDID(did) {
   }
   return /^did:ethr:(?:[a-z0-9-]+:)?0x[0-9a-fA-F]{40}$/.test(did);
 }
+
+/**
+ * Generate a default ethr DID document without blockchain fetch.
+ * This is what ethr-did-resolver returns when there's no on-chain data.
+ *
+ * Used for optimistic DID resolution where we assume the DID has no
+ * on-chain modifications and use the default document structure.
+ *
+ * @param {string} did - DID string (did:ethr:[network:]0xAddress)
+ * @param {object} [options] - Options
+ * @param {number} [options.chainId=1] - Chain ID for blockchainAccountId
+ * @returns {object} Default DID document
+ * @throws {Error} If DID format is invalid
+ */
+export function generateDefaultDocument(did, options = {}) {
+  const { chainId = 1 } = options;
+
+  if (!isEthrDID(did)) {
+    throw new Error(`Invalid ethr DID: ${did}`);
+  }
+
+  const { address } = parseDID(did);
+
+  return {
+    '@context': [
+      'https://www.w3.org/ns/did/v1',
+      'https://w3id.org/security/suites/secp256k1recovery-2020/v2',
+    ],
+    id: did,
+    verificationMethod: [{
+      id: `${did}#controller`,
+      type: 'EcdsaSecp256k1RecoveryMethod2020',
+      controller: did,
+      blockchainAccountId: `eip155:${chainId}:${address}`,
+    }],
+    authentication: [`${did}#controller`],
+    assertionMethod: [`${did}#controller`, `${did}${ETHR_BBS_KEY_ID}`],
+  };
+}

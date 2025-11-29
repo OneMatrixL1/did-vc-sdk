@@ -6,3 +6,4 @@
 export { default as EthrDIDModule } from './module';
 export * from './config';
 export * from './utils';
+export * from './verify-optimistic';

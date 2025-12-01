@@ -21,7 +21,7 @@ import {
   BBSSignatureParams,
   BBS_SIGNATURE_PARAMS_LABEL_BYTES,
 } from '@docknetwork/crypto-wasm-ts';
-import { bbsPublicKeyToAddress } from '../../modules/ethr-did/utils';
+import { bbsPublicKeyToAddress, parseDID } from '../../modules/ethr-did/utils';
 import { u8aToU8a } from '../../utils/types/bytes';
 
 export default class Bls12381BBSRecoveryMethod2023 {
@@ -79,10 +79,8 @@ export default class Bls12381BBSRecoveryMethod2023 {
     }
 
     // Extract address from DID: did:ethr:[network:]0xAddress
-    const didParts = issuerDID.split(':');
-    const expectedAddress = didParts[didParts.length - 1];
-
-    const instance = new this(proof.publicKeyBase58, issuerDID, expectedAddress);
+    const did = parseDID(issuerDID);
+    const instance = new this(proof.publicKeyBase58, issuerDID, did.address);
 
     // Set the ID from the proof's verificationMethod for purpose validation
     const verificationMethodId = typeof proof.verificationMethod === 'object'

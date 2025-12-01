@@ -97,6 +97,34 @@ const result = await verifyCredentialOptimistic(credential, {
 });
 ```
 
+### verifyPresentationOptimistic()
+
+Helper function for verifying verifiable presentations with optimistic-first resolution. Handles multiple DIDs (presenter + all credential issuers) and uses granular failure detection to mark only the specific DIDs that fail:
+
+```javascript
+import {
+  EthrDIDModule,
+  verifyPresentationOptimistic,
+  createMemoryStorageAdapter,
+} from '@truvera/credential-sdk/modules/ethr-did';
+
+const module = new EthrDIDModule({ networks: [networkConfig] });
+
+const result = await verifyPresentationOptimistic(presentation, {
+  module,
+  storage: createMemoryStorageAdapter(), // optional
+  challenge: 'test-challenge',
+  domain: 'example.com', // optional
+});
+```
+
+**Key Features:**
+- Extracts all DIDs from the presentation (holder + all credential issuers)
+- Tries optimistic resolution first for all DIDs
+- On failure, identifies which specific DID(s) failed (granular detection)
+- Only marks the failed DIDs in storage
+- Falls back to blockchain resolution
+
 ---
 
 ## Usage Patterns
@@ -158,6 +186,34 @@ const result = await verifyCredentialOptimistic(credential, { module, storage })
 
 // Clear cache when needed
 storage.clear();
+```
+
+### Frontend - Verifiable Presentations
+
+Verify presentations with multiple credentials from different issuers:
+
+```javascript
+import {
+  EthrDIDModule,
+  verifyPresentationOptimistic,
+  createMemoryStorageAdapter,
+} from '@truvera/credential-sdk/modules/ethr-did';
+
+const module = new EthrDIDModule({ networks: [networkConfig] });
+const storage = createMemoryStorageAdapter();
+
+const result = await verifyPresentationOptimistic(presentation, {
+  module,
+  storage,
+  challenge: 'unique-challenge-from-verifier',
+  domain: 'verifier.example.com',
+});
+
+if (result.verified) {
+  console.log('Presentation and all credentials verified!');
+} else {
+  console.log('Verification failed:', result.error);
+}
 ```
 
 ### Backend - Manual Control with Redis
@@ -239,6 +295,7 @@ const indexedDBStorage = {
 |-----------|-------|-------------|
 | `ethr-did-optimistic.test.js` | 20 | EthrDIDModule optimistic option |
 | `ethr-did-verify-optimistic.test.js` | 18 | verifyCredentialOptimistic helper |
+| `ethr-did-verify-presentation-optimistic.test.js` | 16 | verifyPresentationOptimistic helper |
 
 ### Key Test Cases
 
@@ -250,6 +307,8 @@ const indexedDBStorage = {
 6. BBS verification works with optimistic document
 7. Storage adapter marks DIDs on verification failure
 8. Storage adapter skips optimistic for known modified DIDs
+9. VP verification with multiple credentials from different issuers
+10. Granular failure detection marks only failed issuer DIDs
 
 ---
 
@@ -259,10 +318,11 @@ const indexedDBStorage = {
 |------|--------|
 | `src/modules/ethr-did/module.js` | Added `optimistic` option, `getDefaultDocument()`, refactored `getDocument()` |
 | `src/modules/ethr-did/utils.js` | Added `generateDefaultDocument()` |
-| `src/modules/ethr-did/verify-optimistic.js` | New file: `verifyCredentialOptimistic()` and storage adapters |
+| `src/modules/ethr-did/verify-optimistic.js` | `verifyCredentialOptimistic()`, `verifyPresentationOptimistic()`, and storage adapters |
 | `src/modules/ethr-did/index.js` | Export new functions |
-| `tests/ethr-did-optimistic.test.js` | New: 20 tests for EthrDIDModule optimistic |
-| `tests/ethr-did-verify-optimistic.test.js` | New: 18 tests for verifyCredentialOptimistic |
+| `tests/ethr-did-optimistic.test.js` | 20 tests for EthrDIDModule optimistic |
+| `tests/ethr-did-verify-optimistic.test.js` | 18 tests for verifyCredentialOptimistic |
+| `tests/ethr-did-verify-presentation-optimistic.test.js` | 16 tests for verifyPresentationOptimistic |
 
 ---
 

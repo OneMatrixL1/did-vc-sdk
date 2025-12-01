@@ -76,6 +76,23 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
   }
 
   /**
+   * Override sign to include publicKeyBase58 in proof for ethr DID address verification.
+   * This enables self-contained credential verification without on-chain BBS key storage.
+   * @param {object} options - Options containing verifyData and proof
+   * @returns {Promise<object>} Proof object with signature and publicKeyBase58
+   */
+  async sign({ verifyData, proof }) {
+    const finalProof = await super.sign({ verifyData, proof });
+
+    // Add publicKeyBase58 for ethr DID address-based verification
+    if (this.signer?.publicKeyBase58) {
+      finalProof.publicKeyBase58 = this.signer.publicKeyBase58;
+    }
+
+    return finalProof;
+  }
+
+  /**
    * Override getVerificationMethod to use embedded public key for ethr DIDs
    * When proof contains publicKeyBase58 and verification method is an ethr DID,
    * use BBS recovery method instead of resolving from DID document

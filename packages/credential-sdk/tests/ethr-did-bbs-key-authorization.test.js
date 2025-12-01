@@ -1,9 +1,13 @@
 /**
  * Unit tests for BBS key authorization logic in EthrDIDModule.getDocument()
  *
- * Tests that #keys-bbs is:
- * - Added to assertionMethod when there's NO on-chain data (default document)
- * - NOT added when there IS on-chain data (modified document)
+ * Tests that #keys-bbs (implicit BBS key) is:
+ * - Added to assertionMethod when there's NO explicit BBS key registered
+ * - NOT added when there IS an explicit BBS key in verificationMethod
+ *
+ * This follows EOA-like behavior: the implicit BBS key is always valid unless
+ * explicitly overridden by registering a different BBS key on-chain.
+ * Adding delegates or other on-chain data does NOT disable implicit BBS support.
  */
 
 import { ETHR_BBS_KEY_ID } from '../src/modules/ethr-did/utils';
@@ -43,8 +47,8 @@ describe('EthrDIDModule BBS Key Authorization', () => {
     mockResolverResolve.mockReset();
   });
 
-  describe('No on-chain data (default document)', () => {
-    test('adds #keys-bbs to assertionMethod when versionId is undefined', async () => {
+  describe('No explicit BBS key (default document)', () => {
+    test('adds #keys-bbs to assertionMethod when no explicit BBS key exists', async () => {
       // Simulate default document (no on-chain changes)
       mockResolverResolve.mockResolvedValue({
         didDocument: {
@@ -57,7 +61,7 @@ describe('EthrDIDModule BBS Key Authorization', () => {
           authentication: [`${testDID}#controller`],
           assertionMethod: [`${testDID}#controller`],
         },
-        didDocumentMetadata: {}, // Empty - no versionId means no on-chain data
+        didDocumentMetadata: {},
         didResolutionMetadata: { contentType: 'application/did+ld+json' },
       });
 
@@ -109,9 +113,10 @@ describe('EthrDIDModule BBS Key Authorization', () => {
     });
   });
 
-  describe('Has on-chain data (modified document)', () => {
-    test('does NOT add #keys-bbs when versionId exists', async () => {
-      // Simulate modified document (has on-chain changes)
+  describe('Has on-chain data but NO explicit BBS key', () => {
+    test('STILL adds #keys-bbs when versionId exists but no explicit BBS key', async () => {
+      // Simulate modified document (has on-chain changes like delegates)
+      // But no explicit BBS key registered - should still allow implicit BBS
       mockResolverResolve.mockResolvedValue({
         didDocument: {
           id: testDID,
@@ -124,7 +129,7 @@ describe('EthrDIDModule BBS Key Authorization', () => {
           assertionMethod: [`${testDID}#controller`],
         },
         didDocumentMetadata: {
-          versionId: 12345, // Has versionId = has on-chain data
+          versionId: 12345, // Has on-chain data
           updated: '2024-01-15T10:30:00Z',
         },
         didResolutionMetadata: { contentType: 'application/did+ld+json' },
@@ -132,13 +137,14 @@ describe('EthrDIDModule BBS Key Authorization', () => {
 
       const document = await module.getDocument(testDID);
 
+      // Should STILL add implicit BBS key (EOA-like behavior)
       expect(document.assertionMethod).toContain(`${testDID}#controller`);
-      expect(document.assertionMethod).not.toContain(`${testDID}${ETHR_BBS_KEY_ID}`);
-      expect(document.assertionMethod).toHaveLength(1);
+      expect(document.assertionMethod).toContain(`${testDID}${ETHR_BBS_KEY_ID}`);
+      expect(document.assertionMethod).toHaveLength(2);
     });
 
-    test('respects on-chain assertionMethod without adding #keys-bbs', async () => {
-      // Simulate document with custom assertionMethod set on-chain
+    test('adds #keys-bbs even with delegates in verificationMethod', async () => {
+      // Simulate document with delegate added on-chain (but no BBS key)
       mockResolverResolve.mockResolvedValue({
         didDocument: {
           id: testDID,
@@ -166,42 +172,138 @@ describe('EthrDIDModule BBS Key Authorization', () => {
 
       const document = await module.getDocument(testDID);
 
-      // Should respect on-chain configuration
-      expect(document.assertionMethod).toEqual([
-        `${testDID}#controller`,
-        `${testDID}#delegate-1`,
-      ]);
-      expect(document.assertionMethod).not.toContain(`${testDID}${ETHR_BBS_KEY_ID}`);
+      // Should add implicit BBS key alongside delegates
+      expect(document.assertionMethod).toContain(`${testDID}#controller`);
+      expect(document.assertionMethod).toContain(`${testDID}#delegate-1`);
+      expect(document.assertionMethod).toContain(`${testDID}${ETHR_BBS_KEY_ID}`);
+      expect(document.assertionMethod).toHaveLength(3);
     });
+  });
 
-    test('does NOT add #keys-bbs even if versionId is 0 (falsy but defined)', async () => {
-      // Edge case: versionId = 0 should still be considered as "has data"
-      // because it's explicitly defined in the metadata
+  describe('Has explicit BBS key registered', () => {
+    test('does NOT add #keys-bbs when Bls12381BBSVerificationKeyDock2023 exists', async () => {
+      // Simulate document with explicit BBS key registered on-chain
       mockResolverResolve.mockResolvedValue({
         didDocument: {
           id: testDID,
-          verificationMethod: [{
-            id: `${testDID}#controller`,
-            type: 'EcdsaSecp256k1RecoveryMethod2020',
-            controller: testDID,
-          }],
-          assertionMethod: [`${testDID}#controller`],
+          verificationMethod: [
+            {
+              id: `${testDID}#controller`,
+              type: 'EcdsaSecp256k1RecoveryMethod2020',
+              controller: testDID,
+            },
+            {
+              id: `${testDID}#bbs-key-1`,
+              type: 'Bls12381BBSVerificationKeyDock2023',
+              controller: testDID,
+              publicKeyBase58: 'somePublicKeyBase58',
+            },
+          ],
+          authentication: [`${testDID}#controller`],
+          assertionMethod: [`${testDID}#controller`, `${testDID}#bbs-key-1`],
         },
         didDocumentMetadata: {
-          versionId: 0, // Explicitly set to 0
+          versionId: 99999,
         },
         didResolutionMetadata: {},
       });
 
       const document = await module.getDocument(testDID);
 
-      // versionId is defined (even if 0), so don't add #keys-bbs
+      // Should NOT add implicit BBS key - explicit one takes precedence
+      expect(document.assertionMethod).toContain(`${testDID}#controller`);
+      expect(document.assertionMethod).toContain(`${testDID}#bbs-key-1`);
+      expect(document.assertionMethod).not.toContain(`${testDID}${ETHR_BBS_KEY_ID}`);
+      expect(document.assertionMethod).toHaveLength(2);
+    });
+
+    test('does NOT add #keys-bbs when Bls12381G2VerificationKeyDock2022 exists', async () => {
+      mockResolverResolve.mockResolvedValue({
+        didDocument: {
+          id: testDID,
+          verificationMethod: [
+            {
+              id: `${testDID}#controller`,
+              type: 'EcdsaSecp256k1RecoveryMethod2020',
+              controller: testDID,
+            },
+            {
+              id: `${testDID}#bbs-key-2022`,
+              type: 'Bls12381G2VerificationKeyDock2022',
+              controller: testDID,
+              publicKeyBase58: 'anotherPublicKey',
+            },
+          ],
+          assertionMethod: [`${testDID}#controller`, `${testDID}#bbs-key-2022`],
+        },
+        didDocumentMetadata: {},
+        didResolutionMetadata: {},
+      });
+
+      const document = await module.getDocument(testDID);
+
+      expect(document.assertionMethod).not.toContain(`${testDID}${ETHR_BBS_KEY_ID}`);
+    });
+
+    test('does NOT add #keys-bbs when Bls12381PSVerificationKeyDock2023 exists', async () => {
+      mockResolverResolve.mockResolvedValue({
+        didDocument: {
+          id: testDID,
+          verificationMethod: [
+            {
+              id: `${testDID}#controller`,
+              type: 'EcdsaSecp256k1RecoveryMethod2020',
+              controller: testDID,
+            },
+            {
+              id: `${testDID}#ps-key`,
+              type: 'Bls12381PSVerificationKeyDock2023',
+              controller: testDID,
+              publicKeyBase58: 'psPublicKey',
+            },
+          ],
+          assertionMethod: [`${testDID}#controller`],
+        },
+        didDocumentMetadata: {},
+        didResolutionMetadata: {},
+      });
+
+      const document = await module.getDocument(testDID);
+
+      expect(document.assertionMethod).not.toContain(`${testDID}${ETHR_BBS_KEY_ID}`);
+    });
+
+    test('does NOT add #keys-bbs when Bls12381BBDT16VerificationKeyDock2024 exists', async () => {
+      mockResolverResolve.mockResolvedValue({
+        didDocument: {
+          id: testDID,
+          verificationMethod: [
+            {
+              id: `${testDID}#controller`,
+              type: 'EcdsaSecp256k1RecoveryMethod2020',
+              controller: testDID,
+            },
+            {
+              id: `${testDID}#bbdt16-key`,
+              type: 'Bls12381BBDT16VerificationKeyDock2024',
+              controller: testDID,
+              publicKeyBase58: 'bbdt16PublicKey',
+            },
+          ],
+          assertionMethod: [`${testDID}#controller`],
+        },
+        didDocumentMetadata: {},
+        didResolutionMetadata: {},
+      });
+
+      const document = await module.getDocument(testDID);
+
       expect(document.assertionMethod).not.toContain(`${testDID}${ETHR_BBS_KEY_ID}`);
     });
   });
 
   describe('Edge cases', () => {
-    test('does not duplicate #keys-bbs if already present in default doc', async () => {
+    test('does not duplicate #keys-bbs if already present', async () => {
       // Edge case: assertionMethod already contains #keys-bbs
       mockResolverResolve.mockResolvedValue({
         didDocument: {
@@ -245,6 +347,39 @@ describe('EthrDIDModule BBS Key Authorization', () => {
 
       // Should not throw, assertionMethod should remain undefined
       expect(document.assertionMethod).toBeUndefined();
+    });
+
+    test('handles document with empty verificationMethod array', async () => {
+      mockResolverResolve.mockResolvedValue({
+        didDocument: {
+          id: testDID,
+          verificationMethod: [],
+          assertionMethod: [`${testDID}#controller`],
+        },
+        didDocumentMetadata: {},
+        didResolutionMetadata: {},
+      });
+
+      const document = await module.getDocument(testDID);
+
+      // No explicit BBS key, should add implicit
+      expect(document.assertionMethod).toContain(`${testDID}${ETHR_BBS_KEY_ID}`);
+    });
+
+    test('handles document with undefined verificationMethod', async () => {
+      mockResolverResolve.mockResolvedValue({
+        didDocument: {
+          id: testDID,
+          assertionMethod: [`${testDID}#controller`],
+        },
+        didDocumentMetadata: {},
+        didResolutionMetadata: {},
+      });
+
+      const document = await module.getDocument(testDID);
+
+      // No verificationMethod, so no explicit BBS key, should add implicit
+      expect(document.assertionMethod).toContain(`${testDID}${ETHR_BBS_KEY_ID}`);
     });
   });
 });

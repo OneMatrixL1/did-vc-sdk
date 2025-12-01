@@ -443,17 +443,28 @@ class EthrDIDModule extends AbstractDIDModule {
 
       const document = result.didDocument;
 
-      // Only add default BBS key authorization if there's NO on-chain data
-      // (i.e., the document is the default generated document)
-      // If the DID has on-chain modifications, respect the configured assertionMethod
+      // Add implicit BBS key authorization unless an explicit BBS key is registered
       //
-      // The ethr-did-resolver sets didDocumentMetadata.versionId when there are
-      // on-chain events (setAttribute, addDelegate, changeOwner, etc.)
-      // If versionId is not set, it means the document is the default (no chain data)
-      const hasOnChainData = result.didDocumentMetadata?.versionId !== undefined;
+      // This works like EOA (Externally Owned Account) behavior:
+      // - The implicit BBS key (derived from the DID's address) is always valid
+      // - Adding delegates, attributes, or other on-chain data does NOT disable it
+      // - Only registering an EXPLICIT BBS key on-chain will override the implicit one
+      //
+      // This prevents the dangerous scenario where adding a delegate accidentally
+      // breaks all previously issued BBS credentials.
+      const bbsVerificationKeyTypes = [
+        'Bls12381G2VerificationKeyDock2022',
+        'Bls12381BBSVerificationKeyDock2023',
+        'Bls12381PSVerificationKeyDock2023',
+        'Bls12381BBDT16VerificationKeyDock2024',
+      ];
 
-      if (!hasOnChainData) {
-        // Add BBS key authorization for default documents only
+      const hasExplicitBBSKey = document.verificationMethod?.some(
+        (vm) => bbsVerificationKeyTypes.includes(vm.type),
+      );
+
+      if (!hasExplicitBBSKey) {
+        // Add implicit BBS key authorization
         // This allows BBS credentials to be verified without on-chain key registration
         // The BBS public key comes from the proof's publicKeyBase58 field and is validated
         // by deriving the address and comparing with the DID's address

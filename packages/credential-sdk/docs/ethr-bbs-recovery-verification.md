@@ -461,32 +461,46 @@ For verification to succeed, the DID document needs:
 1. **Valid `assertionMethod`** that includes the verification method ID from the proof
 2. **Does NOT need** the BBS public key in `verificationMethod` array
 
-### Automatic BBS Key Authorization
+### Automatic BBS Key Authorization (EOA-like Behavior)
 
-The `EthrDIDModule.getDocument()` method automatically adds `#keys-bbs` to `assertionMethod` for **default documents only** (DIDs with no on-chain modifications).
+The `EthrDIDModule.getDocument()` method automatically adds `#keys-bbs` to `assertionMethod` unless an **explicit BBS key** is registered on-chain.
 
 ```javascript
 // In EthrDIDModule.getDocument():
-const hasOnChainData = result.didDocumentMetadata?.versionId !== undefined;
+const bbsVerificationKeyTypes = [
+  'Bls12381G2VerificationKeyDock2022',
+  'Bls12381BBSVerificationKeyDock2023',
+  'Bls12381PSVerificationKeyDock2023',
+  'Bls12381BBDT16VerificationKeyDock2024',
+];
 
-if (!hasOnChainData) {
-  // Add #keys-bbs for default documents only
+const hasExplicitBBSKey = document.verificationMethod?.some(
+  (vm) => bbsVerificationKeyTypes.includes(vm.type),
+);
+
+if (!hasExplicitBBSKey) {
+  // Add implicit BBS key authorization
   document.assertionMethod = [...document.assertionMethod, bbsKeyId];
 }
 ```
 
 **Behavior by scenario:**
 
-| Scenario | On-Chain Data | `#keys-bbs` Added | Reason |
-|----------|---------------|-------------------|--------|
-| Fresh DID (no transactions) | None | ✅ Yes | Default document, automatic authorization |
-| Modified DID (setAttribute, addDelegate, etc.) | Has events | ❌ No | Respect on-chain configuration |
+| Scenario | Explicit BBS Key | `#keys-bbs` Added | Reason |
+|----------|------------------|-------------------|--------|
+| Fresh DID (no transactions) | No | ✅ Yes | Implicit BBS key authorized |
+| DID with delegates added | No | ✅ Yes | Delegates don't affect implicit BBS |
+| DID with attributes set | No | ✅ Yes | Attributes don't affect implicit BBS |
+| DID with explicit BBS key registered | Yes | ❌ No | Explicit key takes precedence |
 
-**Why this design?**
+**Why this EOA-like design?**
 
-- **Fresh DIDs**: Automatically support BBS without requiring on-chain transactions
-- **Modified DIDs**: Users explicitly configured their DID document, so we respect their choices
-- **Security**: Prevents permanently enabling BBS if user intentionally removed it on-chain
+This mirrors how Externally Owned Accounts (EOAs) work in Ethereum:
+
+- **Implicit key always valid**: The implicit BBS key (derived from the DID's address) is always authorized for signing unless explicitly overridden
+- **Safe DID modifications**: Adding delegates, attributes, or other on-chain data does NOT break existing BBS credentials
+- **Explicit override**: Only registering a different BBS key on-chain disables the implicit key
+- **Prevents accidents**: Users won't accidentally invalidate thousands of issued credentials by adding a delegate for unrelated purposes
 
 ### Minimal DID Document Example
 
@@ -578,9 +592,9 @@ The recovery method is only used when:
 |-----------|-------------|-------|
 | `ethr-bbs-recovery.test.js` | Core recovery verification tests | 13 |
 | `ethr-bbs-security.test.js` | Security and attack vector tests | 22 |
-| `ethr-did-bbs-key-authorization.test.js` | On-chain data detection tests | 8 |
+| `ethr-did-bbs-key-authorization.test.js` | EOA-like BBS key authorization tests | 13 |
 | `ethr-bbs-real-resolver.test.js` | Real resolver integration tests | 2 |
-| **Total** | | **45** |
+| **Total** | | **50** |
 
 ### Security Tests (`tests/ethr-bbs-security.test.js`)
 
@@ -598,9 +612,10 @@ The recovery method is only used when:
 
 | Category | Tests |
 |----------|-------|
-| No on-chain data (adds `#keys-bbs`) | 3 |
-| Has on-chain data (respects config) | 3 |
-| Edge cases | 2 |
+| No explicit BBS key (adds `#keys-bbs`) | 3 |
+| Has on-chain data but NO explicit BBS key (still adds `#keys-bbs`) | 2 |
+| Has explicit BBS key registered (does NOT add `#keys-bbs`) | 4 |
+| Edge cases | 4 |
 
 ### Key Test Cases
 
@@ -621,10 +636,11 @@ The recovery method is only used when:
 12. Key rotation: Old credentials valid, cannot claim for new DID
 13. BBS credential fails if DID has no BBS authorization
 
-**Key Authorization:**
-14. `#keys-bbs` added when `versionId` is undefined
-15. `#keys-bbs` NOT added when `versionId` exists
-16. Respects on-chain `assertionMethod` configuration
+**Key Authorization (EOA-like):**
+14. `#keys-bbs` added when no explicit BBS key exists
+15. `#keys-bbs` STILL added when on-chain data exists but no explicit BBS key
+16. `#keys-bbs` NOT added when explicit BBS key is registered
+17. Handles edge cases: empty verificationMethod, undefined assertionMethod, etc.
 
 ## Glossary
 

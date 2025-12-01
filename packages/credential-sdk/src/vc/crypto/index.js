@@ -17,6 +17,7 @@ export { default as EcdsaSecp256k1Signature2019 } from './EcdsaSecp256k1Signatur
 export { default as EcdsaSecp256k1VerificationKey2019 } from './EcdsaSecp256k1VerificationKey2019';
 export { default as EcdsaSecp256k1Signature2020 } from './EcdsaSecp256k1Signature2020';
 export { default as EcdsaSecp256k1RecoveryMethod2020 } from './EcdsaSecp256k1RecoveryMethod2020';
+export { default as Bls12381BBSRecoveryMethod2023 } from './Bls12381BBSRecoveryMethod2023';
 export { default as Ed25519Signature2018 } from './Ed25519Signature2018';
 export { default as Ed25519Signature2020 } from './Ed25519Signature2020';
 export { default as Ed25519VerificationKey2018 } from './Ed25519VerificationKey2018';

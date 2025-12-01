@@ -16,6 +16,7 @@ export const Bls12381BBDT16MacDockName = 'Bls12381BBDT16MACDock2024';
 export const Bls12381BBDT16MacProofDockName = 'Bls12381BBDT16MACProofDock2024';
 export const Bls12381BBS23SigProofDockSigName = 'Bls12381BBSSignatureProofDock2023';
 export const Bls12381BBS23DockVerKeyName = 'Bls12381BBSVerificationKeyDock2023';
+export const Bls12381BBSRecoveryMethod2023Name = 'Bls12381BBSRecoveryMethod2023';
 export const Bls12381BBDT16DockVerKeyName = 'Bls12381BBDT16VerificationKeyDock2024';
 export const Bls12381PSSigDockSigName = 'Bls12381PSSignatureDock2023';
 export const Bls12381PSSigProofDockSigName = 'Bls12381PSSignatureProofDock2023';

@@ -22,6 +22,7 @@ import {
   documentToAttributes,
   formatEthersError,
   isEthrDID,
+  ETHR_BBS_KEY_ID,
 } from './utils';
 
 /**
@@ -202,9 +203,10 @@ class EthrDIDModule extends AbstractDIDModule {
 
   /**
    * Create EthrDID instance for operations
-   * @param {import('../../keypairs/keypair-secp256k1').default} keypair - Secp256k1 keypair
+   * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
    * @param {string} [networkName] - Network name
    * @returns {Promise<EthrDID>} EthrDID instance
+   * @throws {Error} If BBS keypair is used (transaction signing not yet supported)
    */
   async #createEthrDID(keypair, networkName = null) {
     const name = networkName || this.defaultNetwork;
@@ -293,7 +295,8 @@ class EthrDIDModule extends AbstractDIDModule {
 
   /**
    * Create a new ethr DID (convenience method)
-   * @param {import('../../keypairs/keypair-secp256k1').default} keypair - Secp256k1 keypair
+   * Supports both Secp256k1 and BBS keypairs for address derivation.
+   * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
    * @param {string} [networkName] - Network name (uses default if not specified)
    * @returns {Promise<string>} The created DID string
    */
@@ -315,6 +318,7 @@ class EthrDIDModule extends AbstractDIDModule {
    * @param {Object} didDocument - DID Document to create
    * @param {import('../../keypairs/did-keypair').default} didKeypair - DID keypair for signing
    * @returns {Promise<Object>} Transaction object
+   * @throws {Error} If BBS keypair is used (transaction signing not yet supported)
    */
   async createDocumentTx(didDocument, didKeypair) {
     const did = String(didDocument.id);
@@ -437,7 +441,41 @@ class EthrDIDModule extends AbstractDIDModule {
         throw new Error(`DID document not found: ${didString}`);
       }
 
-      return result.didDocument;
+      const document = result.didDocument;
+
+      // Add implicit BBS key authorization unless an explicit BBS key is registered
+      //
+      // This works like EOA (Externally Owned Account) behavior:
+      // - The implicit BBS key (derived from the DID's address) is always valid
+      // - Adding delegates, attributes, or other on-chain data does NOT disable it
+      // - Only registering an EXPLICIT BBS key on-chain will override the implicit one
+      //
+      // This prevents the dangerous scenario where adding a delegate accidentally
+      // breaks all previously issued BBS credentials.
+      const bbsVerificationKeyTypes = [
+        'Bls12381G2VerificationKeyDock2022',
+        'Bls12381BBSVerificationKeyDock2023',
+        'Bls12381PSVerificationKeyDock2023',
+        'Bls12381BBDT16VerificationKeyDock2024',
+      ];
+
+      const hasExplicitBBSKey = document.verificationMethod?.some(
+        (vm) => bbsVerificationKeyTypes.includes(vm.type),
+      );
+
+      if (!hasExplicitBBSKey) {
+        // Add implicit BBS key authorization
+        // This allows BBS credentials to be verified without on-chain key registration
+        // The BBS public key comes from the proof's publicKeyBase58 field and is validated
+        // by deriving the address and comparing with the DID's address
+        const bbsKeyId = `${didString}${ETHR_BBS_KEY_ID}`;
+
+        if (document.assertionMethod && !document.assertionMethod.includes(bbsKeyId)) {
+          document.assertionMethod = [...document.assertionMethod, bbsKeyId];
+        }
+      }
+
+      return document;
     } catch (error) {
       throw new Error(`Failed to get DID document: ${formatEthersError(error)}`);
     }

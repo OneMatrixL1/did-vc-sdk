@@ -198,7 +198,21 @@ function extractAllDIDs(presentation) {
 
 /**
  * Identify which specific DIDs need blockchain resolution and mark them in storage.
- * Tests each credential individually, then tests presenter DID separately.
+ *
+ * This function marks ALL DIDs that require blockchain resolution, not just the root cause
+ * of failure. The process works in two phases:
+ *
+ * Phase 1: Test each credential's issuer DID individually with optimistic resolution.
+ *          If verification fails, that issuer DID is marked as requiring blockchain.
+ *
+ * Phase 2: Test the presenter DID by using blockchain resolution for presenter only
+ *          while keeping optimistic resolution for issuers. If this succeeds (but the
+ *          full optimistic attempt failed), the presenter DID needs blockchain resolution.
+ *
+ * Note: If both presenter and some issuers need blockchain, both will be marked across
+ * the two phases. This is not a root-cause analysis but rather identification of all
+ * DIDs that have been modified on-chain.
+ *
  * @param {object} presentation - Verifiable presentation
  * @param {object} module - EthrDIDModule instance
  * @param {StorageAdapter} storage - Storage adapter

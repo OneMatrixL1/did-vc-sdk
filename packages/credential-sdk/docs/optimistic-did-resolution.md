@@ -272,7 +272,7 @@ interface StorageAdapter {
 }
 ```
 
-**Example: IndexedDB Adapter**
+#### Example: IndexedDB Adapter
 
 ```javascript
 const indexedDBStorage = {

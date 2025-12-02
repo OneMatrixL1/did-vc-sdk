@@ -89,7 +89,7 @@ class EthrDIDModule extends AbstractDIDModule {
     // When true, getDocument() returns a locally-generated default document
     // instead of fetching from the blockchain. Useful for performance optimization
     // when most DIDs haven't been modified on-chain.
-    this.optimistic = config.optimistic || false;
+    this.optimistic = config.optimistic ?? false;
 
     // Initialize resolver
     this.#initializeResolver();

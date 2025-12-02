@@ -142,12 +142,12 @@ describe('Optimistic DID Resolution', () => {
     test('per-call option overrides constructor default', async () => {
       const did = `did:ethr:${VIETCHAIN_NETWORK}:0x742d35Cc6634C0532925a3b844Bc454e4438f44e`;
 
-      // Force optimistic: false on optimistic module - this will try RPC
-      // Since this is a test environment, we just verify the option is accepted
-      // The actual blockchain call would happen in a real environment
-      const doc = await optimisticModule.getDocument(did, { optimistic: true });
+      // module has optimistic: false by default (constructor)
+      // Per-call optimistic: true should override it and use default document
+      const doc = await module.getDocument(did, { optimistic: true });
 
       expect(doc.id).toBe(did);
+      expect(doc.assertionMethod).toContain(`${did}${ETHR_BBS_KEY_ID}`);
     });
 
     test('resolve() passes options to getDocument()', async () => {

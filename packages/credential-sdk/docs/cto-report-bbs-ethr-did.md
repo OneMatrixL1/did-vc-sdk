@@ -403,11 +403,14 @@ const signedCredential = await issueCredential(keyDoc, credential);
 
 In this approach, the issuer has an existing secp256k1-based ethr DID and wants to issue BBS credentials. The BBS public key must be registered on-chain.
 
+**Important:** The ethr-did-resolver auto-generates fragment IDs (like `#delegate-1`) based on the order of on-chain events. You must query the DID document after registration to find the assigned fragment.
+
 ```javascript
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import { issueCredential } from '@truvera/credential-sdk/vc';
 import Bls12381BBSKeyPairDock2023 from '@truvera/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
 import { Secp256k1Keypair } from '@truvera/credential-sdk/keypairs';
+import b58 from 'bs58';
 import { ethers } from 'ethers';
 
 // Initialize WASM
@@ -417,18 +420,31 @@ await initializeWasm();
 const secp256k1Keypair = Secp256k1Keypair.random();
 const address = ethers.utils.computeAddress(secp256k1Keypair.privateKey());
 const issuerDID = `did:ethr:${address}`;
-// Result: did:ethr:0x7Ee52099dDd382eF1fD6216a2E2a0D1997edCD79
 
 // Generate separate BBS keypair for signing credentials
 const bbsKeypair = Bls12381BBSKeyPairDock2023.generate();
+const publicKeyBase58 = b58.encode(bbsKeypair.publicKeyBuffer);
 
-// NOTE: For this approach, the BBS public key MUST be registered on-chain
-// using EthrDIDModule.addKey() before credentials can be verified
-// await ethrModule.addKey(issuerDID, bbsKeypair, secp256k1Keypair);
+// Step 1: Register BBS public key on-chain via setAttribute
+// Key format: did/pub/<algorithm>/<purpose>/<encoding>
+await ethrModule.setAttribute(
+  issuerDID,
+  'did/pub/Bls12381G2Key2020/veriKey/base58',
+  publicKeyBase58,
+  secp256k1Keypair
+);
 
-// Create key document for signing
+// Step 2: Resolve DID document to find the assigned fragment ID
+// The resolver auto-generates IDs like #delegate-1, #delegate-2, etc.
+const didDocument = await ethrModule.getDocument(issuerDID);
+const bbsKey = didDocument.verificationMethod.find(
+  vm => vm.publicKeyBase58 === publicKeyBase58
+);
+const keyId = bbsKey.id; // e.g., "did:ethr:0x...#delegate-1"
+
+// Step 3: Create key document using the assigned fragment
 const keyDoc = {
-  id: `${issuerDID}#keys-bbs-1`,
+  id: keyId,
   controller: issuerDID,
   type: 'Bls12381BBSVerificationKeyDock2023',
   keypair: bbsKeypair
@@ -454,7 +470,7 @@ const signedCredential = await issueCredential(keyDoc, credential);
 ```
 
 **Pros**: Use existing DID, can sign Ethereum transactions
-**Cons**: Requires on-chain BBS key registration (gas cost)
+**Cons**: Requires on-chain BBS key registration (gas cost), must query for assigned fragment ID
 
 ---
 
@@ -467,6 +483,8 @@ const signedCredential = await issueCredential(keyDoc, credential);
 | Gas cost | $0 | $5-50 |
 | Ethereum transactions | Not possible* | Yes |
 | Single keypair | Yes | No (need both) |
+| Key ID matching | Address derivation | Fragment lookup (auto-generated) |
+| Optimistic resolution | Yes | No (requires blockchain) |
 
 *BBS keys cannot sign Ethereum transactions directly
 

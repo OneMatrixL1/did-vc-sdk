@@ -357,10 +357,8 @@ import { keypairToAddress, addressToDID, ETHR_BBS_KEY_ID } from '@truvera/creden
 // Initialize WASM (required for BBS operations)
 await initializeWasm();
 
-// Generate BBS keypair
-const bbsKeypair = Bls12381BBSKeyPairDock2023.generate({
-  controller: 'temp'
-});
+// Generate BBS keypair (controller is set later in keyDoc)
+const bbsKeypair = Bls12381BBSKeyPairDock2023.generate();
 
 // Derive ethr DID from BBS public key
 // Address = keccak256(bbsPublicKey).slice(-20)
@@ -422,9 +420,7 @@ const issuerDID = `did:ethr:${address}`;
 // Result: did:ethr:0x7Ee52099dDd382eF1fD6216a2E2a0D1997edCD79
 
 // Generate separate BBS keypair for signing credentials
-const bbsKeypair = Bls12381BBSKeyPairDock2023.generate({
-  controller: issuerDID
-});
+const bbsKeypair = Bls12381BBSKeyPairDock2023.generate();
 
 // NOTE: For this approach, the BBS public key MUST be registered on-chain
 // using EthrDIDModule.addKey() before credentials can be verified

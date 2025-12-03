@@ -69,6 +69,10 @@ export default class Bls12381BBSRecoveryMethod2023 {
   /**
    * Construct the recovery method from a proof object and issuer DID
    * This is used during verification when the public key is embedded in the proof
+   *
+   * For dual-address DIDs (did:ethr:[network:]0xSecp:0xBBS), uses the BBS address
+   * for strict validation. For single-address DIDs, uses the main address.
+   *
    * @param {object} proof - Proof object containing publicKeyBase58 and verificationMethod
    * @param {string} issuerDID - The issuer's DID (to extract expected address)
    * @returns {Bls12381BBSRecoveryMethod2023}
@@ -78,9 +82,15 @@ export default class Bls12381BBSRecoveryMethod2023 {
       throw new Error('proof.publicKeyBase58 required for BBS address verification');
     }
 
-    // Extract address from DID: did:ethr:[network:]0xAddress
-    const did = parseDID(issuerDID);
-    const instance = new this(proof.publicKeyBase58, issuerDID, did.address);
+    // Extract expected BBS address from DID
+    const parsed = parseDID(issuerDID);
+
+    // For dual-address DIDs, use bbsAddress; for single-address, use address
+    const expectedBBSAddress = parsed.isDualAddress
+      ? parsed.bbsAddress
+      : parsed.address;
+
+    const instance = new this(proof.publicKeyBase58, issuerDID, expectedBBSAddress);
 
     // Set the ID from the proof's verificationMethod for purpose validation
     const verificationMethodId = typeof proof.verificationMethod === 'object'

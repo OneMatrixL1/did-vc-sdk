@@ -115,13 +115,11 @@ describe('BBS Security Tests - Bad Actor Scenarios', () => {
         },
       };
 
-      const signedFakeCredential = await issueCredential(attackerKeyDoc, fakeCredential);
-
-      // Verification should FAIL because:
-      // The publicKeyBase58 in proof derives to attacker's address, not victim's
-      const result = await verifyCredential(signedFakeCredential);
-
-      expect(result.verified).toBe(false);
+      // Signing should fail because attacker's keypair derives to different address than victim's DID
+      // This is caught at signing time for better security (fail fast)
+      await expect(issueCredential(attackerKeyDoc, fakeCredential)).rejects.toThrow(
+        /BBS keypair does not match DID's BBS address/,
+      );
     });
 
     test('attacker cannot use victim credential with replaced public key', async () => {
@@ -612,13 +610,11 @@ describe('BBS Security Tests - Bad Actor Scenarios', () => {
         },
       };
 
-      const signedFake = await issueCredential(attackerKeyDoc, fakeCredential);
-
-      // Verification should fail because:
-      // 1. #keys-bbs is not in victim's assertionMethod
-      // 2. Even if it was, attacker's BBS key derives to different address
-      const result = await verifyCredential(signedFake);
-      expect(result.verified).toBe(false);
+      // Signing should fail because attacker's BBS key derives to different address than victim's DID
+      // This is caught at signing time for better security (fail fast)
+      await expect(issueCredential(attackerKeyDoc, fakeCredential)).rejects.toThrow(
+        /BBS keypair does not match DID's BBS address/,
+      );
 
       // Cleanup
       delete networkCache[victimSecp256k1DID];
@@ -671,11 +667,11 @@ describe('BBS Security Tests - Bad Actor Scenarios', () => {
         },
       };
 
-      const signedByAttacker = await issueCredential(attackerKeyDoc, credential);
-
-      // Should fail - attacker's publicKeyBase58 derives to different address
-      const result = await verifyCredential(signedByAttacker);
-      expect(result.verified).toBe(false);
+      // Signing should fail - attacker's keypair derives to different address than the DID
+      // This is caught at signing time for better security (fail fast)
+      await expect(issueCredential(attackerKeyDoc, credential)).rejects.toThrow(
+        /BBS keypair does not match DID's BBS address/,
+      );
 
       // Cleanup
       delete networkCache[legitimateDID];

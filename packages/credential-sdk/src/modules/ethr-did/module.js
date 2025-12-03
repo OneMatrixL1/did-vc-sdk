@@ -25,6 +25,7 @@ import {
   isEthrDID,
   ETHR_BBS_KEY_ID,
   generateDefaultDocument,
+  createDualDID,
 } from './utils';
 
 /**
@@ -320,6 +321,33 @@ class EthrDIDModule extends AbstractDIDModule {
 
     const address = keypairToAddress(keypair);
     return addressToDID(address, name !== 'mainnet' ? name : null);
+  }
+
+  /**
+   * Create a new dual-address ethr DID
+   * Combines secp256k1 (for Ethereum transactions) and BBS (for privacy-preserving signatures)
+   * addresses in a single DID: did:ethr:[network:]0xSecp256k1Address:0xBBSAddress
+   *
+   * @param {Object} secp256k1Keypair - Secp256k1 keypair for Ethereum transactions
+   * @param {Object} bbsKeypair - BBS keypair for privacy-preserving signatures
+   * @param {string} [networkName] - Network name (uses default if not specified)
+   * @returns {Promise<string>} The created dual-address DID string
+   *
+   * @example
+   * const secp256k1Keypair = Secp256k1Keypair.random();
+   * const bbsKeypair = Bls12381BBSKeyPairDock2023.generate();
+   * const did = await module.createDualAddressDID(secp256k1Keypair, bbsKeypair);
+   * // Result: did:ethr:0xSecp256k1Address:0xBBSAddress
+   */
+  async createDualAddressDID(secp256k1Keypair, bbsKeypair, networkName = null) {
+    const name = networkName || this.defaultNetwork;
+
+    // Validate network exists
+    if (!this.networks.has(name)) {
+      throw new Error(`Unknown network: ${name}`);
+    }
+
+    return createDualDID(secp256k1Keypair, bbsKeypair, name !== 'mainnet' ? name : null);
   }
 
   /**

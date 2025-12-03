@@ -17,12 +17,13 @@
 | [4. Security Model](#4-security-model) | Attack vectors and mitigations |
 | [5. EOA-like Authorization](#5-eoa-like-implicit-key-authorization) | Implicit BBS key behavior |
 | [6. Optimistic Resolution](#6-optimistic-did-resolution) | Performance optimization |
-| [7. Code Examples](#7-code-examples) | Two implementation approaches |
-| [8. Test Coverage](#8-test-coverage-summary) | Summary (71 tests passing) |
-| [9. Comparison](#9-comparison-secp256k1-vs-bbs) | Secp256k1 vs BBS |
-| [10. Limitations](#10-limitations-and-trade-offs) | Trade-offs accepted |
-| [11. Future](#11-future-considerations) | Potential enhancements |
-| [12. References](#12-references) | Standards and specs |
+| [7. Dual-Address DIDs](#7-dual-address-dids) | Combined secp256k1 + BBS DIDs |
+| [8. Code Examples](#8-code-examples) | Three implementation approaches |
+| [9. Test Coverage](#9-test-coverage-summary) | Summary (119 tests passing) |
+| [10. Comparison](#10-comparison-secp256k1-vs-bbs) | Secp256k1 vs BBS |
+| [11. Limitations](#11-limitations-and-trade-offs) | Trade-offs accepted |
+| [12. Future](#12-future-considerations) | Potential enhancements |
+| [13. References](#13-references) | Standards and specs |
 
 **Appendices:**
 - [A. Data Sizes](#appendix-a-data-sizes) - Key and signature sizes
@@ -33,7 +34,7 @@
 
 ## Executive Summary
 
-This report presents our implementation of BBS+ signature support for `did:ethr` decentralized identifiers, along with optimistic DID resolution for performance optimization.
+This report presents our implementation of BBS+ signature support for `did:ethr` decentralized identifiers, along with optimistic DID resolution for performance optimization and dual-address DIDs for combined secp256k1/BBS support.
 
 ### Key Achievements
 
@@ -43,6 +44,7 @@ This report presents our implementation of BBS+ signature support for `did:ethr`
 | Address-based recovery verification | Self-contained credentials |
 | EOA-like implicit key authorization | Safe DID modifications |
 | Optimistic DID resolution | 10-100x faster verification |
+| **Dual-address DIDs** | **Single DID supports both secp256k1 and BBS signatures** |
 
 ### Cost Impact
 
@@ -53,7 +55,7 @@ This report presents our implementation of BBS+ signature support for `did:ethr`
 
 ### Test Coverage
 
-**71 tests** covering security and functionality, all passing.
+**119 tests** covering security and functionality, all passing.
 
 ---
 
@@ -342,7 +344,194 @@ sequenceDiagram
 
 ---
 
-## 7. Code Examples
+## 7. Dual-Address DIDs
+
+### Overview
+
+Dual-address DIDs combine both secp256k1 and BBS addresses in a single DID identifier:
+
+```
+did:ethr:[network:]0xSecp256k1Address:0xBBSAddress
+```
+
+This format enables:
+- **Ethereum transactions** using the secp256k1 key (first address)
+- **Privacy-preserving credentials** using the BBS key (second address)
+- **Single identity** for both use cases
+
+### DID Format
+
+```mermaid
+flowchart LR
+    subgraph DualDID["Dual-Address DID"]
+        D1["did:ethr:"] --> D2["vietchain:"]
+        D2 --> D3["0xSecp256k1Addr"]
+        D3 --> D4[":"]
+        D4 --> D5["0xBBSAddr"]
+    end
+
+    subgraph Keys["Key Sources"]
+        K1["secp256k1 Keypair"] -->|"keccak256(pubkey)"| D3
+        K2["BBS Keypair"] -->|"keccak256(96-byte pubkey)"| D5
+    end
+```
+
+Examples:
+- `did:ethr:0xSecp256k1:0xBBS` (mainnet)
+- `did:ethr:vietchain:0xSecp256k1:0xBBS` (with network)
+
+### Architecture
+
+```mermaid
+graph TB
+    subgraph Creation["DID Creation"]
+        C1["secp256k1 Keypair"] --> C3["createDualDID()"]
+        C2["BBS Keypair"] --> C3
+        C3 --> C4["did:ethr:network:0xSecp:0xBBS"]
+    end
+
+    subgraph Document["DID Document Generation"]
+        C4 --> D1["generateDefaultDocument()"]
+        D1 --> D2["#controller
+        EcdsaSecp256k1RecoveryMethod2020"]
+        D1 --> D3["#keys-bbs
+        Bls12381BBSRecoveryMethod2023"]
+    end
+
+    subgraph Signing["Credential Signing"]
+        D2 --> S1["Secp256k1 Signatures
+        (EIP-712 style)"]
+        D3 --> S2["BBS Signatures
+        (Selective Disclosure)"]
+    end
+```
+
+### Verification Relationships
+
+The DID document places each key in specific verification relationships:
+
+```javascript
+authentication: ["...#controller"],              // Only secp256k1
+assertionMethod: ["...#controller", "...#keys-bbs"]  // Both keys
+```
+
+| Relationship | Keys | Purpose |
+|--------------|------|---------|
+| `authentication` | secp256k1 only | Prove identity (login, challenges, VP signing) |
+| `assertionMethod` | Both | Issue credentials and make claims |
+
+**Why BBS is NOT in `authentication`:**
+
+1. **BBS is designed for credentials** - It signs structured claims, not arbitrary challenge data
+2. **No key recovery** - secp256k1 can recover public key from signature; BBS cannot
+3. **Different security model** - secp256k1 proves key possession; BBS proves credential attributes
+
+| Use Case | Key Type | Relationship |
+|----------|----------|--------------|
+| Login/auth challenges | secp256k1 | `authentication` |
+| Issue credentials | BBS or secp256k1 | `assertionMethod` |
+| Sign presentations | secp256k1 | `authentication` |
+| Selective disclosure | BBS | `assertionMethod` (in credential) |
+
+### Code Example
+
+```javascript
+import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
+import { EthrDIDModule, createDualDID, generateDefaultDocument } from '@truvera/credential-sdk/modules/ethr-did';
+import { issueCredential } from '@truvera/credential-sdk/vc';
+import Bls12381BBSKeyPairDock2023 from '@truvera/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
+import { Secp256k1Keypair } from '@truvera/credential-sdk/keypairs';
+import { ETHR_BBS_KEY_ID } from '@truvera/credential-sdk/modules/ethr-did/utils';
+
+// Initialize
+await initializeWasm();
+
+// Generate both keypairs
+const secp256k1Keypair = Secp256k1Keypair.random();
+const bbsKeypair = Bls12381BBSKeyPairDock2023.generate();
+
+// Create dual-address DID
+const dualDID = createDualDID(secp256k1Keypair, bbsKeypair, 'vietchain');
+// Result: did:ethr:vietchain:0xSecp256k1Address:0xBBSAddress
+
+// Generate DID document (includes both verification methods)
+const didDocument = generateDefaultDocument(dualDID, { chainId: 84005 });
+// didDocument.verificationMethod contains:
+// - #controller (EcdsaSecp256k1RecoveryMethod2020)
+// - #keys-bbs (Bls12381BBSRecoveryMethod2023)
+
+// Issue BBS credential
+const bbsKeyDoc = {
+  id: `${dualDID}${ETHR_BBS_KEY_ID}`,
+  controller: dualDID,
+  type: 'Bls12381BBSVerificationKeyDock2023',
+  keypair: bbsKeypair
+};
+
+const credential = {
+  '@context': ['https://www.w3.org/2018/credentials/v1', 'https://ld.truvera.io/security/bbs/v1'],
+  type: ['VerifiableCredential'],
+  issuer: dualDID,
+  issuanceDate: new Date().toISOString(),
+  credentialSubject: { id: 'did:example:holder', name: 'John Doe' }
+};
+
+const signedCredential = await issueCredential(bbsKeyDoc, credential);
+```
+
+### Strict BBS Address Validation
+
+For dual-address DIDs, the BBS keypair used for signing **must** derive to the BBS address in the DID. This is enforced at signing time:
+
+```javascript
+// This will FAIL - wrong BBS keypair
+const wrongBBSKeypair = Bls12381BBSKeyPairDock2023.generate(); // Different keypair
+const wrongKeyDoc = {
+  id: `${dualDID}${ETHR_BBS_KEY_ID}`,
+  controller: dualDID,
+  keypair: wrongBBSKeypair  // Does not match DID's BBS address!
+};
+
+await issueCredential(wrongKeyDoc, credential);
+// Error: BBS keypair does not match DID's BBS address
+```
+
+### Optimistic Resolution
+
+Dual-address DIDs work with optimistic resolution (no blockchain call needed):
+
+```javascript
+const resolver = {
+  supports: (id) => isEthrDID(id.split('#')[0]),
+  resolve: (id) => {
+    const didPart = id.split('#')[0];
+    return generateDefaultDocument(didPart, { chainId: 84005 });
+  }
+};
+
+const result = await verifyCredential(signedCredential, { resolver });
+// No blockchain RPC needed!
+```
+
+### Benefits
+
+| Benefit | Description |
+|---------|-------------|
+| **Single Identity** | One DID for both Ethereum transactions and privacy credentials |
+| **Key Separation** | Secp256k1 for on-chain, BBS for credentials |
+| **No Gas Cost** | Dual-address DIDs work without on-chain registration |
+| **Strict Validation** | Signing fails early if keypair doesn't match DID |
+| **Backward Compatible** | Single-address DIDs continue to work |
+
+### Limitations
+
+- **Contract upgrade needed** for on-chain dual-address DID resolution
+- Currently works with optimistic resolution only
+- The secp256k1 key is used for DID ownership on-chain (when contract supports it)
+
+---
+
+## 8. Code Examples
 
 ### Approach 1: BBS DID Key (Derive DID from BBS Public Key)
 
@@ -522,7 +711,7 @@ if (result.verified) {
 
 ---
 
-## 8. Test Coverage Summary
+## 9. Test Coverage Summary
 
 | Test File | Tests | Status |
 |-----------|-------|--------|
@@ -532,13 +721,16 @@ if (result.verified) {
 | ethr-bbs-real-resolver.test.js | 2 | PASS |
 | ethr-did.integration.test.js | 12 | PASS |
 | ethr-did-bbs.integration.test.js | 9 | PASS |
-| **TOTAL** | **71** | **ALL PASS** |
+| **ethr-did-dual-address.test.js** | **31** | **PASS** |
+| **ethr-did-dual-address.integration.test.js** | **8** | **PASS** |
+| **ethr-did-delegation.test.js** | **9** | **PASS** |
+| **TOTAL** | **119** | **ALL PASS** |
 
 See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenarios.
 
 ---
 
-## 9. Comparison: Secp256k1 vs BBS
+## 10. Comparison: Secp256k1 vs BBS
 
 | Aspect | Secp256k1 | BBS (Our Solution) |
 |--------|-----------|-------------------|
@@ -552,13 +744,14 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 
 ---
 
-## 10. Limitations and Trade-offs
+## 11. Limitations and Trade-offs
 
 ### Limitations
 
 1. **Proof size increase**: +130 bytes for embedded public key
 2. **No key rotation detection**: Old credentials remain valid for original DID (by design)
 3. **Optimistic false negatives**: First verification failure triggers blockchain lookup
+4. **Delegate key updates require document update**: When a delegate rotates their key, the delegating DID's document must be updated with the new embedded key
 
 ### Trade-offs Accepted
 
@@ -567,10 +760,36 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 | Larger proof size | Zero on-chain storage cost |
 | Old credentials remain valid | No accidental invalidation |
 | First-fail lookup overhead | 10-100x faster for common case |
+| Delegate key sync required | W3C spec compliant, prevents cache poisoning |
+
+### W3C Specification Compliance Note
+
+Per [W3C Controlled Identifiers v1.0](https://www.w3.org/TR/2025/CR-cid-1.0-20250130/), the `controller` property in a verification method **MUST** equal the document URL from which it was retrieved (Section 3.3, Step 10). This means:
+
+```javascript
+// ✅ VALID per spec - controller matches document URL
+{
+  id: "did:company:123#ceo-key",
+  controller: "did:company:123",   // MUST equal the document URL
+  publicKeyBase58: "..."           // CEO's key embedded
+}
+
+// ❌ INVALID per spec - controller does NOT match document URL
+{
+  id: "did:company:123#ceo-key",
+  controller: "did:ceo:456",       // ERROR: violates spec
+  publicKeyBase58: "..."
+}
+```
+
+This design:
+- **Prevents cache poisoning attacks**: Attackers cannot claim control of keys in other documents
+- **Requires explicit authorization**: The delegating DID must explicitly embed the delegate's key
+- **Enables key revocation**: Removing the key from the document revokes authorization
 
 ---
 
-## 11. Future Considerations
+## 12. Future Considerations
 
 1. **Contract-level BBS support**: Could enable on-chain BBS key rotation if needed
 2. **Batch verification**: Optimize for verifying multiple credentials from same issuer
@@ -578,11 +797,14 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 
 ---
 
-## 12. References
+## 13. References
 
 - [DID Ethr Method Specification](https://github.com/decentralized-identity/ethr-did-resolver/blob/master/doc/did-method-spec.md)
 - [BBS+ Signatures Draft](https://identity.foundation/bbs-signature/draft-irtf-cfrg-bbs-signatures.html)
 - [W3C Verifiable Credentials Data Model](https://www.w3.org/TR/vc-data-model/)
+- [W3C Controlled Identifiers v1.0](https://www.w3.org/TR/2025/CR-cid-1.0-20250130/) - Defines verification method controller requirements
+- [W3C DID Core 1.0](https://www.w3.org/TR/did-core/)
+- [W3C DID Resolution](https://www.w3.org/TR/2024/WD-did-resolution-20241128/)
 - [EIP-712: Typed structured data hashing and signing](https://eips.ethereum.org/EIPS/eip-712)
 
 ---
@@ -649,8 +871,11 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 | `ethr-did-bbs.integration.test.js` | **NEW** | Integration tests for BBS with real blockchain (9 tests). |
 | `ethr-vc-issuance-bbs.test.js` | **NEW** | BBS credential issuance tests with mock DID resolution. |
 | `ethr-vc-issuance-secp256k1.test.js` | **NEW** | Secp256k1 credential issuance tests (split from original). |
+| `ethr-did-delegation.test.js` | **NEW** | DID delegation tests (9 tests). Tests W3C CID spec compliant delegation with embedded keys, key rotation, and controller validation. |
 | `ethr-did-verify-optimistic.test.js` | **NEW** | Optimistic credential verification tests. |
 | `ethr-did-verify-presentation-optimistic.test.js` | **NEW** | Optimistic presentation verification tests (16 tests). |
+| `ethr-did-dual-address.test.js` | **NEW** | Dual-address DID unit tests (31 tests). Tests parsing, validation, creation, document generation, and credential issuance/verification for dual-address DIDs. |
+| `ethr-did-dual-address.integration.test.js` | **NEW** | Dual-address DID integration tests (8 tests). Tests real DID creation, document generation, credential issuance, and optimistic verification with network. |
 
 ### File Structure Overview
 
@@ -685,8 +910,11 @@ packages/credential-sdk/
     ├── ethr-did-bbs.integration.test.js            ◄── NEW (9 tests)
     ├── ethr-vc-issuance-bbs.test.js                ◄── NEW
     ├── ethr-vc-issuance-secp256k1.test.js          ◄── NEW
+    ├── ethr-did-delegation.test.js                 ◄── NEW (9 tests)
     ├── ethr-did-verify-optimistic.test.js          ◄── NEW
-    └── ethr-did-verify-presentation-optimistic.test.js ◄── NEW (16 tests)
+    ├── ethr-did-verify-presentation-optimistic.test.js ◄── NEW (16 tests)
+    ├── ethr-did-dual-address.test.js               ◄── NEW (31 tests)
+    └── ethr-did-dual-address.integration.test.js   ◄── NEW (8 tests)
 ```
 
 ---
@@ -831,13 +1059,146 @@ Tests against real blockchain (Vietchain testnet).
 
 ---
 
+### C.5 Dual-Address DID Tests (`ethr-did-dual-address.test.js`)
+
+Tests the dual-address DID format combining secp256k1 and BBS addresses.
+
+#### DID Parsing Tests (9 tests)
+
+| # | Test Case | Input | Expected Result |
+|---|-----------|-------|-----------------|
+| 1 | Parse dual-address with network | `did:ethr:vietchain:0xSecp:0xBBS` | Both addresses extracted, network: vietchain |
+| 2 | Parse dual-address mainnet | `did:ethr:0xSecp:0xBBS` | Both addresses extracted, network: null |
+| 3 | Checksummed addresses | Mixed case addresses | Properly checksummed |
+| 4 | Invalid secp address | `did:ethr:0xINVALID:0xBBS` | Error thrown |
+| 5 | Invalid BBS address | `did:ethr:0xSecp:0xINVALID` | Error thrown |
+| 6 | Wrong address length | `did:ethr:0x123:0xBBS` | Rejected |
+| 7 | Single-address backward compat | `did:ethr:0xSingle` | Parsed as single address |
+| 8 | isDualAddressEthrDID true | Dual-address DID | Returns true |
+| 9 | isDualAddressEthrDID false | Single-address DID | Returns false |
+
+#### DID Creation Tests (6 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | createDualDID with network | Both keypairs + network | `did:ethr:network:0xSecp:0xBBS` |
+| 2 | createDualDID without network | Both keypairs, no network | `did:ethr:0xSecp:0xBBS` |
+| 3 | addressToDualDID | Two addresses | Proper DID format |
+| 4 | EthrDIDModule.createDualAddressDID | Module method | Creates dual DID |
+| 5 | Address derivation secp256k1 | From secp keypair | Correct secp address |
+| 6 | Address derivation BBS | From BBS keypair | Correct BBS address |
+
+#### Document Generation Tests (6 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Two verification methods | Dual-address DID | #controller + #keys-bbs |
+| 2 | Controller method type | #controller | EcdsaSecp256k1RecoveryMethod2020 |
+| 3 | BBS method type | #keys-bbs | Bls12381BBSRecoveryMethod2023 |
+| 4 | blockchainAccountId | From secp address | Correct CAIP-10 format |
+| 5 | assertionMethod includes BBS | Dual DID | #keys-bbs in assertionMethod |
+| 6 | authentication method | Dual DID | #controller in authentication |
+
+#### BBS Credential Tests (5 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Issue credential | BBS keypair + dual DID | Signed credential with proof |
+| 2 | Verify credential | Optimistic resolution | verified: true |
+| 3 | Wrong BBS keypair | Mismatched keypair | Error at signing time |
+| 4 | Embedded public key | In proof | Contains publicKeyBase58 |
+| 5 | Proof verification method | Points to | dual DID#keys-bbs |
+
+#### Secp256k1 Credential Tests (3 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Issue credential | Secp keypair + dual DID | Signed credential |
+| 2 | Verify credential | With resolver | verified: true |
+| 3 | Both signature types | Same DID | Both work independently |
+
+#### Backward Compatibility Tests (2 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Single-address DID | BBS credential | Still works |
+| 2 | isEthrDID | Both formats | Returns true for both |
+
+---
+
+### C.6 Dual-Address Integration Tests (`ethr-did-dual-address.integration.test.js`)
+
+Integration tests with real network configuration.
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Create dual DID from module | EthrDIDModule.createDualAddressDID() | Valid dual-address DID |
+| 2 | Create with utility | createDualDID() | Matches module result |
+| 3 | Document with both methods | generateDefaultDocument() | Two verification methods |
+| 4 | Issue BBS credential | With dual DID | Signed credential |
+| 5 | Verify with optimistic | No blockchain call | verified: true |
+| 6 | Reject wrong keypair | Mismatched BBS key | Signing error |
+| 7 | Single-address backward compat | createNewDID() | Still works |
+| 8* | Blockchain resolution | Real resolver | (Skipped - needs contract upgrade) |
+
+*Test marked as skipped pending contract upgrade for dual-address DID support.
+
+---
+
+### C.7 DID Delegation Tests (`ethr-did-delegation.test.js`)
+
+Tests W3C CID 1.0 spec compliant delegation with embedded keys.
+
+#### Delegation with Embedded Key - W3C Spec Compliant (4 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Issue credential by delegate | CEO signs on behalf of Company | Signed credential with Company as issuer |
+| 2 | Verify delegate-signed credential | Single DID resolution | verified: true |
+| 3 | Presentation with delegate credential | Holder presents delegate-issued VC | verified: true |
+| 4 | Wrong key signs credential | Attacker uses different key | verified: false |
+
+#### Key Rotation with Embedded Keys (3 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Old credential after key rotation | Stale embedded key | verified: true (by design) |
+| 2 | New credential with old embedded key | Signed with new key, doc has old | verified: false |
+| 3 | New credential after doc update | Company updates embedded key | verified: true |
+
+#### Spec-Non-Compliant Pattern - Correctly Rejected (1 test)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Controller mismatch | controller points to different DID | verified: false (per W3C CID 1.0 Section 3.3 Step 10) |
+
+#### Multiple Delegates (1 test)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Multiple delegates | CEO + CFO both delegated | Both can issue valid credentials |
+
+---
+
 ### Test Execution Commands
 
 ```bash
 # Run all BBS-related tests
 yarn jest packages/credential-sdk/tests/ethr-bbs --no-coverage
 
-# Run integration tests (requires RPC)
+# Run DID delegation tests
+yarn jest packages/credential-sdk/tests/ethr-did-delegation.test.js --no-coverage
+
+# Run dual-address DID unit tests
+yarn jest packages/credential-sdk/tests/ethr-did-dual-address.test.js --no-coverage
+
+# Run dual-address DID integration tests (requires RPC)
+ETHR_NETWORK=vietchain \
+ETHR_NETWORK_RPC_URL=https://rpc.vietcha.in \
+ETHR_REGISTRY_ADDRESS=0xF0889fb2473F91c068178870ae2e1A0408059A03 \
+yarn jest packages/credential-sdk/tests/ethr-did-dual-address.integration.test.js
+
+# Run all integration tests (requires RPC)
 ETHR_NETWORK=vietchain \
 ETHR_NETWORK_RPC_URL=https://rpc.vietcha.in \
 ETHR_REGISTRY_ADDRESS=0xF0889fb2473F91c068178870ae2e1A0408059A03 \

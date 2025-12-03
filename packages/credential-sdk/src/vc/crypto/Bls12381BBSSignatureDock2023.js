@@ -39,7 +39,8 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
   }
 
   /**
-   * Override signerFactory to include publicKeyBase58 for ethr DID address verification
+   * Override signerFactory to include publicKeyBase58 for ethr DID address verification.
+   * Also validates that BBS keypair matches the DID's BBS address for ethr DIDs.
    * @param keypair - BBS keypair
    * @param verificationMethod - Verification method ID
    * @returns {object} Signer object with id, publicKeyBase58, and sign method
@@ -47,6 +48,30 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
   static signerFactory(keypair, verificationMethod) {
     const { KeyPair } = this;
     const paramGetter = this.paramGenerator;
+
+    // Extract DID from verification method if available
+    const verificationMethodId = typeof verificationMethod === 'object'
+      ? verificationMethod.id || verificationMethod
+      : verificationMethod;
+    const didPart = verificationMethodId?.split('#')[0];
+
+    // Validate BBS keypair matches DID's BBS address (for ethr DIDs)
+    if (didPart && isEthrDID(didPart) && keypair?.publicKeyBuffer) {
+      const parsed = parseDID(didPart);
+      const derivedBBSAddress = bbsPublicKeyToAddress(keypair.publicKeyBuffer);
+
+      // Determine expected BBS address based on DID type
+      const expectedBBSAddress = parsed.isDualAddress
+        ? parsed.bbsAddress
+        : parsed.address;
+
+      if (derivedBBSAddress.toLowerCase() !== expectedBBSAddress.toLowerCase()) {
+        throw new Error(
+          `BBS keypair does not match DID's BBS address. `
+          + `Derived: ${derivedBBSAddress}, Expected: ${expectedBBSAddress}`,
+        );
+      }
+    }
 
     // Get base signer from parent
     const baseSigner = {

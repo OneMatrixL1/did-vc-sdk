@@ -93,9 +93,74 @@ export function addressToDID(address, network = null) {
 }
 
 /**
- * Parse DID string to extract network and address
+ * Create dual-address DID string from secp256k1 and BBS addresses
+ * @param {string} secp256k1Address - Ethereum address for secp256k1 key
+ * @param {string} bbsAddress - Ethereum address derived from BBS key
+ * @param {string} [network] - Network name (if not mainnet)
+ * @returns {string} DID string (e.g., 'did:ethr:0xSecp:0xBBS')
+ */
+export function addressToDualDID(secp256k1Address, bbsAddress, network = null) {
+  if (!secp256k1Address || typeof secp256k1Address !== 'string') {
+    throw new Error('Valid secp256k1 address is required');
+  }
+  if (!bbsAddress || typeof bbsAddress !== 'string') {
+    throw new Error('Valid BBS address is required');
+  }
+
+  // Validate address formats
+  if (!ethers.utils.isAddress(secp256k1Address)) {
+    throw new Error(`Invalid secp256k1 address: ${secp256k1Address}`);
+  }
+  if (!ethers.utils.isAddress(bbsAddress)) {
+    throw new Error(`Invalid BBS address: ${bbsAddress}`);
+  }
+
+  // Normalize addresses to checksum format
+  const checksumSecp = ethers.utils.getAddress(secp256k1Address);
+  const checksumBBS = ethers.utils.getAddress(bbsAddress);
+
+  // Include network in DID if specified and not mainnet
+  if (network && network !== 'mainnet') {
+    return `did:ethr:${network}:${checksumSecp}:${checksumBBS}`;
+  }
+
+  return `did:ethr:${checksumSecp}:${checksumBBS}`;
+}
+
+/**
+ * Create dual-address DID from both keypairs
+ * @param {Object} secp256k1Keypair - Secp256k1 keypair for Ethereum transactions
+ * @param {Object} bbsKeypair - BBS keypair for privacy-preserving signatures
+ * @param {string} [network] - Network name (if not mainnet)
+ * @returns {string} Dual-address DID string
+ */
+export function createDualDID(secp256k1Keypair, bbsKeypair, network = null) {
+  // Validate keypair types
+  const secp256k1Type = detectKeypairType(secp256k1Keypair);
+  if (secp256k1Type !== 'secp256k1') {
+    throw new Error('First keypair must be secp256k1');
+  }
+
+  const bbsType = detectKeypairType(bbsKeypair);
+  if (bbsType !== 'bbs') {
+    throw new Error('Second keypair must be BBS');
+  }
+
+  // Derive addresses
+  const secp256k1Address = ethers.utils.computeAddress(secp256k1Keypair.privateKey());
+  const bbsAddress = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+
+  return addressToDualDID(secp256k1Address, bbsAddress, network);
+}
+
+/**
+ * Parse DID string to extract network and address(es)
+ * Supports both single-address and dual-address formats:
+ * - Single: did:ethr:[network:]0xAddress
+ * - Dual: did:ethr:[network:]0xSecp256k1Address:0xBBSAddress
+ *
  * @param {string} did - DID string
- * @returns {{network: string|null, address: string}} Parsed DID components
+ * @returns {{network: string|null, address: string, secp256k1Address?: string, bbsAddress?: string, isDualAddress: boolean}} Parsed DID components
  * @throws {Error} If DID format is invalid
  */
 export function parseDID(did) {
@@ -103,15 +168,43 @@ export function parseDID(did) {
     throw new Error('DID must be a string');
   }
 
-  // Match did:ethr:[network:]address pattern
-  const match = did.match(/^did:ethr:(?:([a-z0-9-]+):)?(0x[0-9a-fA-F]{40})$/);
+  // Try dual-address format first: did:ethr:[network:]0xSecp:0xBBS
+  const dualMatch = did.match(
+    /^did:ethr:(?:([a-z0-9-]+):)?(0x[0-9a-fA-F]{40}):(0x[0-9a-fA-F]{40})$/,
+  );
 
-  if (!match) {
+  if (dualMatch) {
+    const network = dualMatch[1] || null;
+    const secp256k1Address = dualMatch[2];
+    const bbsAddress = dualMatch[3];
+
+    // Validate both addresses
+    if (!ethers.utils.isAddress(secp256k1Address)) {
+      throw new Error(`Invalid secp256k1 address in DID: ${secp256k1Address}`);
+    }
+    if (!ethers.utils.isAddress(bbsAddress)) {
+      throw new Error(`Invalid BBS address in DID: ${bbsAddress}`);
+    }
+
+    return {
+      network,
+      secp256k1Address: ethers.utils.getAddress(secp256k1Address),
+      bbsAddress: ethers.utils.getAddress(bbsAddress),
+      // Backward compatibility: primary address is secp256k1
+      address: ethers.utils.getAddress(secp256k1Address),
+      isDualAddress: true,
+    };
+  }
+
+  // Fall back to single-address format: did:ethr:[network:]0xAddress
+  const singleMatch = did.match(/^did:ethr:(?:([a-z0-9-]+):)?(0x[0-9a-fA-F]{40})$/);
+
+  if (!singleMatch) {
     throw new Error(`Invalid ethr DID format: ${did}`);
   }
 
-  const network = match[1] || null;
-  const address = match[2];
+  const network = singleMatch[1] || null;
+  const address = singleMatch[2];
 
   // Validate address
   if (!ethers.utils.isAddress(address)) {
@@ -121,6 +214,7 @@ export function parseDID(did) {
   return {
     network,
     address: ethers.utils.getAddress(address), // Return checksum address
+    isDualAddress: false,
   };
 }
 
@@ -235,7 +329,7 @@ export function formatEthersError(error) {
 }
 
 /**
- * Check if a string is a valid ethr DID
+ * Check if a string is a valid ethr DID (single or dual address)
  * @param {string} did - DID string to check
  * @returns {boolean} True if valid ethr DID
  */
@@ -243,7 +337,20 @@ export function isEthrDID(did) {
   if (!did || typeof did !== 'string') {
     return false;
   }
-  return /^did:ethr:(?:[a-z0-9-]+:)?0x[0-9a-fA-F]{40}$/.test(did);
+  // Match single OR dual address format
+  return /^did:ethr:(?:[a-z0-9-]+:)?0x[0-9a-fA-F]{40}(?::0x[0-9a-fA-F]{40})?$/.test(did);
+}
+
+/**
+ * Check if a string is a dual-address ethr DID
+ * @param {string} did - DID string to check
+ * @returns {boolean} True if dual-address ethr DID
+ */
+export function isDualAddressEthrDID(did) {
+  if (!did || typeof did !== 'string') {
+    return false;
+  }
+  return /^did:ethr:(?:[a-z0-9-]+:)?0x[0-9a-fA-F]{40}:0x[0-9a-fA-F]{40}$/.test(did);
 }
 
 /**
@@ -253,7 +360,11 @@ export function isEthrDID(did) {
  * Used for optimistic DID resolution where we assume the DID has no
  * on-chain modifications and use the default document structure.
  *
- * @param {string} did - DID string (did:ethr:[network:]0xAddress)
+ * Supports both single-address and dual-address DIDs:
+ * - Single: did:ethr:[network:]0xAddress - generates controller + implicit BBS
+ * - Dual: did:ethr:[network:]0xSecp:0xBBS - generates both controller and BBS verification methods
+ *
+ * @param {string} did - DID string (did:ethr:[network:]0xAddress or did:ethr:[network:]0xSecp:0xBBS)
  * @param {object} [options] - Options
  * @param {number} [options.chainId=1] - Chain ID for blockchainAccountId
  * @returns {object} Default DID document
@@ -266,8 +377,37 @@ export function generateDefaultDocument(did, options = {}) {
     throw new Error(`Invalid ethr DID: ${did}`);
   }
 
-  const { address } = parseDID(did);
+  const parsed = parseDID(did);
 
+  if (parsed.isDualAddress) {
+    // Dual-address DID: include both secp256k1 and BBS verification methods
+    return {
+      '@context': [
+        'https://www.w3.org/ns/did/v1',
+        'https://w3id.org/security/suites/secp256k1recovery-2020/v2',
+        'https://ld.truvera.io/security/bbs23/v1',
+      ],
+      id: did,
+      verificationMethod: [
+        {
+          id: `${did}#controller`,
+          type: 'EcdsaSecp256k1RecoveryMethod2020',
+          controller: did,
+          blockchainAccountId: `eip155:${chainId}:${parsed.secp256k1Address}`,
+        },
+        {
+          id: `${did}${ETHR_BBS_KEY_ID}`,
+          type: 'Bls12381BBSRecoveryMethod2023',
+          controller: did,
+          blockchainAccountId: `eip155:${chainId}:${parsed.bbsAddress}`,
+        },
+      ],
+      authentication: [`${did}#controller`],
+      assertionMethod: [`${did}#controller`, `${did}${ETHR_BBS_KEY_ID}`],
+    };
+  }
+
+  // Single-address DID: backward compatible behavior
   return {
     '@context': [
       'https://www.w3.org/ns/did/v1',
@@ -278,7 +418,7 @@ export function generateDefaultDocument(did, options = {}) {
       id: `${did}#controller`,
       type: 'EcdsaSecp256k1RecoveryMethod2020',
       controller: did,
-      blockchainAccountId: `eip155:${chainId}:${address}`,
+      blockchainAccountId: `eip155:${chainId}:${parsed.address}`,
     }],
     authentication: [`${did}#controller`],
     assertionMethod: [`${did}#controller`, `${did}${ETHR_BBS_KEY_ID}`],

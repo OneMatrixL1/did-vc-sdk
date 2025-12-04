@@ -16,13 +16,20 @@
 | [3. Component Architecture](#3-component-architecture) | Modified files and data flow |
 | [4. Security Model](#4-security-model) | Attack vectors and mitigations |
 | [5. EOA-like Authorization](#5-eoa-like-implicit-key-authorization) | Implicit BBS key behavior |
-| [6. Optimistic Resolution](#6-optimistic-did-resolution) | Performance optimization |
+| [6. Optimistic Resolution](#6-optimistic-did-resolution) | VC/VP verification without blockchain |
 | [7. Code Examples](#7-code-examples) | Two implementation approaches |
 | [8. Test Coverage](#8-test-coverage-summary) | Summary (71 tests passing) |
 | [9. Comparison](#9-comparison-secp256k1-vs-bbs) | Secp256k1 vs BBS |
 | [10. Limitations](#10-limitations-and-trade-offs) | Trade-offs accepted |
 | [11. Future](#11-future-considerations) | Potential enhancements |
 | [12. References](#12-references) | Standards and specs |
+
+**Section 6 Subsections:**
+- [6.1 VC Optimistic Verification](#61-verifiable-credential-vc-optimistic-verification) - Credential verification flow
+- [6.2 VP Optimistic Verification](#62-verifiable-presentation-vp-optimistic-verification) - Presentation verification with granular detection
+- [6.3 Storage Adapters](#63-storage-adapters) - Memory, localStorage, sessionStorage
+- [6.4 Performance Impact](#64-performance-impact) - Speedup metrics
+- [6.5 When Optimistic Fails](#65-when-optimistic-fails) - Failure conditions
 
 **Appendices:**
 - [A. Data Sizes](#appendix-a-data-sizes) - Key and signature sizes
@@ -293,52 +300,349 @@ flowchart TB
 
 ## 6. Optimistic DID Resolution
 
-### Performance Optimization
+### Overview
 
-For DIDs that haven't been modified on-chain, we can generate the default DID document locally without any RPC calls.
+Optimistic resolution is a performance optimization that avoids blockchain RPC calls for DIDs that haven't been modified on-chain. Since most `did:ethr` DIDs never have on-chain transactions (keys, delegates, or attributes), we can generate the default DID document locally.
+
+### Core Concept
 
 ```mermaid
-sequenceDiagram
-    participant App
-    participant SDK
-    participant Storage
-    participant Blockchain
+flowchart LR
+    subgraph Traditional["Traditional Resolution"]
+        T1[Every verification] --> T2[RPC call to blockchain]
+        T2 --> T3[500-2000ms latency]
+    end
 
-    App->>SDK: verifyCredentialOptimistic(credential)
-    SDK->>Storage: has(issuerDID)?
-
-    alt DID not in storage (optimistic path)
-        Storage-->>SDK: false
-        SDK->>SDK: Generate default DID doc locally
-        SDK->>SDK: Verify credential
-        alt Verification succeeds
-            SDK-->>App: verified (no RPC call!)
-        else Verification fails
-            SDK->>Storage: set(issuerDID)
-            SDK->>Blockchain: resolve(issuerDID)
-            Blockchain-->>SDK: DID document
-            SDK->>SDK: Verify with real doc
-            SDK-->>App: result
-        end
-    else DID in storage (needs blockchain)
-        Storage-->>SDK: true
-        SDK->>Blockchain: resolve(issuerDID)
-        Blockchain-->>SDK: DID document
-        SDK->>SDK: Verify credential
-        SDK-->>App: result
+    subgraph Optimistic["Optimistic Resolution"]
+        O1[Check storage] --> O2{DID marked?}
+        O2 -->|No| O3[Generate doc locally]
+        O3 --> O4[~50ms latency]
+        O2 -->|Yes| O5[RPC call]
+        O5 --> O6[500-2000ms latency]
     end
 ```
 
-### Performance Impact
+**Key insight**: For DIDs using BBS address-based recovery (Approach 1), the DID document never needs on-chain data - the public key is embedded in the credential proof.
 
-| Scenario | Traditional | Optimistic |
-|----------|-------------|------------|
-| Fresh DID verification | 500-2000ms (RPC) | ~50ms (local) |
-| Unchanged DID | 500-2000ms (RPC) | ~50ms (local) |
-| Modified DID (first fail) | 500-2000ms | 500-2000ms + mark |
-| Modified DID (subsequent) | 500-2000ms | 500-2000ms |
+---
 
-**Result**: **10-100x faster** for unchanged DIDs (majority of cases)
+### 6.1 Verifiable Credential (VC) Optimistic Verification
+
+#### Algorithm
+
+1. Extract issuer DID from credential
+2. Check if issuer DID is marked in storage as needing blockchain
+3. If not marked: try optimistic verification (local DID doc generation)
+4. If optimistic fails: mark DID in storage, retry with blockchain
+5. If marked: go directly to blockchain resolution
+
+#### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant SDK as verifyCredentialOptimistic()
+    participant Storage as Storage Adapter
+    participant Resolver as Optimistic Resolver
+    participant Chain as Blockchain RPC
+
+    App->>SDK: verifyCredentialOptimistic(credential, {module, storage})
+    SDK->>SDK: Extract issuerDID from credential
+
+    SDK->>Storage: has(issuerDID)?
+
+    alt DID NOT in storage (optimistic path)
+        Storage-->>SDK: false
+
+        Note over SDK,Resolver: Create optimistic resolver
+        SDK->>Resolver: resolve(issuerDID, {optimistic: true})
+        Resolver->>Resolver: generateDefaultDocument(issuerDID)
+        Note over Resolver: No RPC call - local generation
+        Resolver-->>SDK: Default DID Document
+
+        SDK->>SDK: verifyCredential(credential, resolver)
+        Note over SDK: BBS: Extract publicKeyBase58 from proof<br/>Derive address, compare with DID<br/>Verify BBS signature
+
+        alt Verification SUCCEEDS
+            SDK-->>App: {verified: true}
+            Note over App: Total time: ~50ms
+        else Verification FAILS
+            SDK->>Storage: set(issuerDID)
+            Note over Storage: Mark DID for future blockchain resolution
+
+            SDK->>Chain: resolve(issuerDID)
+            Note over Chain: Actual RPC call
+            Chain-->>SDK: On-chain DID Document
+
+            SDK->>SDK: verifyCredential(credential, chainResolver)
+            SDK-->>App: {verified: true/false}
+        end
+
+    else DID IS in storage (known modified)
+        Storage-->>SDK: true
+
+        SDK->>Chain: resolve(issuerDID)
+        Chain-->>SDK: On-chain DID Document
+
+        SDK->>SDK: verifyCredential(credential, chainResolver)
+        SDK-->>App: {verified: true/false}
+    end
+```
+
+#### Why Optimistic Works for BBS Credentials
+
+For BBS credentials with address-based recovery:
+
+```mermaid
+flowchart TB
+    subgraph Credential["Credential Proof"]
+        P1["publicKeyBase58: 'rRG1eV...'"]
+        P2["proofValue: 'z2SLyY...'"]
+        P3["verificationMethod: 'did:ethr:0x...#keys-bbs'"]
+    end
+
+    subgraph Verification["Verification Process"]
+        V1["1. Decode publicKeyBase58 → 96-byte BBS key"]
+        V2["2. keccak256(bbsPublicKey) → address"]
+        V3["3. Compare address with DID"]
+        V4["4. Verify BBS signature with public key"]
+    end
+
+    P1 --> V1
+    V1 --> V2
+    V2 --> V3
+    V3 -->|Match| V4
+    V4 -->|Valid| V5["VERIFIED"]
+
+    Note1["No blockchain data needed!<br/>Everything is in the credential itself"]
+```
+
+---
+
+### 6.2 Verifiable Presentation (VP) Optimistic Verification
+
+Presentation verification is more complex because it involves multiple DIDs:
+- **Presenter DID**: The holder presenting the credentials
+- **Issuer DIDs**: One or more issuers of the contained credentials
+
+#### Algorithm
+
+1. Extract all DIDs (presenter + all issuers)
+2. Check if ANY DID is marked in storage
+3. If none marked: try optimistic for all DIDs
+4. If optimistic fails: granular failure detection
+   - Test each credential's issuer individually
+   - Test presenter DID separately
+   - Mark only the DIDs that actually failed
+5. Retry with blockchain resolution
+
+#### Sequence Diagram - Happy Path (All Optimistic)
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant SDK as verifyPresentationOptimistic()
+    participant Storage as Storage Adapter
+    participant Resolver as Optimistic Resolver
+
+    App->>SDK: verifyPresentationOptimistic(presentation, {module, storage, challenge})
+
+    SDK->>SDK: Extract all DIDs
+    Note over SDK: presenterDID = presentation.holder<br/>issuerDIDs = [cred1.issuer, cred2.issuer, ...]
+
+    SDK->>Storage: has(presenterDID)?
+    Storage-->>SDK: false
+    SDK->>Storage: has(issuer1DID)?
+    Storage-->>SDK: false
+    SDK->>Storage: has(issuer2DID)?
+    Storage-->>SDK: false
+
+    Note over SDK: No DIDs marked - try optimistic
+
+    SDK->>Resolver: Create optimistic resolver
+
+    loop For each DID resolution
+        Resolver->>Resolver: generateDefaultDocument(did)
+        Note over Resolver: Local generation, no RPC
+    end
+
+    SDK->>SDK: verifyPresentation(presentation, resolver)
+    Note over SDK: 1. Verify presentation proof (presenter)<br/>2. Verify each credential (issuers)
+
+    SDK-->>App: {verified: true}
+    Note over App: Total time: ~50-100ms<br/>(no blockchain calls!)
+```
+
+#### Sequence Diagram - Failure with Granular Detection
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant SDK as verifyPresentationOptimistic()
+    participant Storage as Storage Adapter
+    participant Resolver as Optimistic Resolver
+    participant Chain as Blockchain RPC
+
+    App->>SDK: verifyPresentationOptimistic(presentation, {module, storage, challenge})
+
+    SDK->>SDK: Extract all DIDs (presenter, issuer1, issuer2)
+
+    SDK->>Storage: Check all DIDs
+    Storage-->>SDK: None marked
+
+    SDK->>Resolver: Try optimistic verification
+    Resolver-->>SDK: Verification FAILS
+
+    Note over SDK: Begin granular failure detection
+
+    rect rgb(255, 240, 240)
+        Note over SDK: Phase 1: Test each credential issuer
+
+        SDK->>Resolver: verifyCredential(cred1, optimistic)
+        Resolver-->>SDK: PASS
+        Note over SDK: issuer1 is OK
+
+        SDK->>Resolver: verifyCredential(cred2, optimistic)
+        Resolver-->>SDK: FAIL
+        SDK->>Storage: set(issuer2DID)
+        Note over Storage: Mark issuer2 as needing blockchain
+    end
+
+    rect rgb(240, 240, 255)
+        Note over SDK: Phase 2: Test presenter DID
+
+        SDK->>SDK: Create hybrid resolver
+        Note over SDK: Blockchain for presenter<br/>Optimistic for issuers
+
+        SDK->>Chain: resolve(presenterDID)
+        Chain-->>SDK: Presenter DID doc
+
+        SDK->>SDK: verifyPresentation(hybrid resolver)
+        SDK-->>SDK: PASS
+        SDK->>Storage: set(presenterDID)
+        Note over Storage: Mark presenter as needing blockchain
+    end
+
+    Note over SDK: Retry with blockchain resolution
+
+    SDK->>Chain: resolve(all marked DIDs)
+    Chain-->>SDK: DID documents
+
+    SDK->>SDK: verifyPresentation(blockchain resolver)
+    SDK-->>App: {verified: true/false}
+```
+
+#### Granular Detection Algorithm Detail
+
+```mermaid
+flowchart TB
+    Start[Optimistic VP verification failed] --> Phase1
+
+    subgraph Phase1["Phase 1: Test Issuer DIDs"]
+        P1A[For each credential] --> P1B{Verify with<br/>optimistic resolver}
+        P1B -->|FAIL| P1C[Mark issuer DID]
+        P1B -->|PASS| P1D[Issuer OK]
+        P1C --> P1E{More credentials?}
+        P1D --> P1E
+        P1E -->|Yes| P1A
+        P1E -->|No| Phase2
+    end
+
+    subgraph Phase2["Phase 2: Test Presenter DID"]
+        P2A[Create hybrid resolver]
+        P2A --> P2B["Blockchain for presenter<br/>Optimistic for issuers"]
+        P2B --> P2C{Verify presentation}
+        P2C -->|PASS| P2D[Mark presenter DID]
+        P2C -->|FAIL| P2E[Presenter OK]
+    end
+
+    Phase2 --> Retry[Retry with blockchain for marked DIDs]
+```
+
+**Why granular detection matters**: Without it, a single modified DID would force blockchain resolution for ALL DIDs in the presentation. With granular detection, only the actually-modified DIDs are marked, keeping optimistic resolution for the others.
+
+---
+
+### 6.3 Storage Adapters
+
+Storage adapters track which DIDs need blockchain resolution:
+
+| Adapter | Persistence | Use Case |
+|---------|-------------|----------|
+| `createMemoryStorageAdapter()` | Page refresh clears | Testing, short-lived apps |
+| `createLocalStorageAdapter()` | Browser data clear | Production web apps |
+| `createSessionStorageAdapter()` | Tab close clears | Per-session caching |
+
+```mermaid
+flowchart LR
+    subgraph Memory["Memory Storage"]
+        M1[Set] --> M2[In-memory cache]
+        M2 --> M3[Lost on refresh]
+    end
+
+    subgraph Local["Local Storage"]
+        L1[Set] --> L2[localStorage]
+        L2 --> L3[Persists across sessions]
+    end
+
+    subgraph Session["Session Storage"]
+        S1[Set] --> S2[sessionStorage]
+        S2 --> S3[Cleared on tab close]
+    end
+```
+
+#### Storage API
+
+```typescript
+interface StorageAdapter {
+  has(did: string): Promise<boolean>;  // Check if DID needs blockchain
+  set(did: string): Promise<void>;     // Mark DID as needing blockchain
+  clear?(): void;                      // Optional: clear all entries
+}
+```
+
+---
+
+### 6.4 Performance Impact
+
+| Scenario | Traditional | Optimistic | Speedup |
+|----------|-------------|------------|---------|
+| Fresh DID (VC) | 500-2000ms | ~50ms | **10-40x** |
+| Fresh DID (VP, 3 creds) | 1500-6000ms | ~100ms | **15-60x** |
+| Unchanged DID | 500-2000ms | ~50ms | **10-40x** |
+| Modified DID (first) | 500-2000ms | ~550-2050ms | 1x (+ detection) |
+| Modified DID (subsequent) | 500-2000ms | 500-2000ms | 1x |
+| Mixed VP (1 modified) | 1500-6000ms | ~600-2100ms | **2-3x** |
+
+**Result**: **10-100x faster** for unchanged DIDs (majority of real-world cases)
+
+### 6.5 When Optimistic Fails
+
+Optimistic verification will fail and trigger blockchain resolution when:
+
+1. **DID has on-chain modifications**: Delegates, attributes, or key rotations
+2. **Explicit BBS key registered**: On-chain BBS key takes precedence over implicit
+3. **DID deactivated**: Owner has revoked the DID on-chain
+4. **Key rotation**: Different key registered than the one that signed
+
+```mermaid
+flowchart TB
+    subgraph Optimistic["Optimistic Assumes"]
+        O1["Default DID document"]
+        O2["No delegates"]
+        O3["No attributes"]
+        O4["Implicit #keys-bbs authorized"]
+    end
+
+    subgraph Reality["When Reality Differs"]
+        R1["Delegates added"] --> Fail
+        R2["Attributes set"] --> Fail
+        R3["Explicit BBS key"] --> Fail
+        R4["DID deactivated"] --> Fail
+    end
+
+    Fail["Optimistic fails → Blockchain fallback"]
+```
 
 ---
 

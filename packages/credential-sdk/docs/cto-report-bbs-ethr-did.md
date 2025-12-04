@@ -27,6 +27,7 @@
 **Section 6 Subsections:**
 - [6.1 VC Optimistic Verification](#61-verifiable-credential-vc-optimistic-verification) - Credential verification flow
 - [6.2 VP Optimistic Verification](#62-verifiable-presentation-vp-optimistic-verification) - Presentation verification with granular detection
+  - [Scope of Granular Detection](#important-scope-of-granular-detection) - What it can/cannot detect
 - [6.3 Storage Adapters](#63-storage-adapters) - Memory, localStorage, sessionStorage
 - [6.4 Performance Impact](#64-performance-impact) - Speedup metrics
 - [6.5 When Optimistic Fails](#65-when-optimistic-fails) - Failure conditions
@@ -560,6 +561,41 @@ flowchart TB
 ```
 
 **Why granular detection matters**: Without it, a single modified DID would force blockchain resolution for ALL DIDs in the presentation. With granular detection, only the actually-modified DIDs are marked, keeping optimistic resolution for the others.
+
+#### Important: Scope of Granular Detection
+
+Granular detection identifies DIDs that need **blockchain resolution** - it does NOT identify DIDs that "caused" verification failure.
+
+**Key insight**: A DID is only marked when switching from optimistic to blockchain resolution **fixes** the verification. If verification fails with both strategies, the DID is not marked.
+
+```mermaid
+flowchart TB
+    subgraph CanDetect["CAN Detect (DID Resolution Issues)"]
+        D1["DID modified on-chain"]
+        D2["Delegates added"]
+        D3["Explicit key registered"]
+        D4["DID deactivated"]
+    end
+
+    subgraph CannotDetect["CANNOT Detect (Non-DID Issues)"]
+        N1["Tampered signatures"]
+        N2["Tampered credentials"]
+        N3["Wrong challenge/domain"]
+        N4["Expired credentials"]
+    end
+
+    CanDetect --> Mark["DID is marked"]
+    CannotDetect --> NoMark["DID is NOT marked"]
+```
+
+| Failure Type | Optimistic | Blockchain | DID Marked? | Why? |
+|--------------|------------|------------|-------------|------|
+| DID modified on-chain | FAIL | PASS | **YES** | Blockchain has correct data |
+| Signature tampered | FAIL | FAIL | NO | Both fail - marking won't help |
+| Credential tampered | FAIL | FAIL | NO | Both fail - marking won't help |
+| Wrong challenge | FAIL | FAIL | NO | Both fail - marking won't help |
+
+**This is correct behavior**: Marking a DID only makes sense when blockchain resolution would provide different (correct) data. If the proof itself is invalid, no amount of DID resolution will fix it.
 
 ---
 

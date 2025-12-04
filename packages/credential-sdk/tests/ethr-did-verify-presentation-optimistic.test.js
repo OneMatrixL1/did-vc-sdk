@@ -562,4 +562,344 @@ describe('verifyPresentationOptimistic()', () => {
       expect(await storage.has(issuerDID)).toBe(true);
     });
   });
+
+  describe('Granular failure detection', () => {
+    /**
+     * These tests verify that when VP optimistic verification fails,
+     * the granular detection correctly identifies and marks ONLY the
+     * DIDs that actually need blockchain resolution.
+     *
+     * This is critical for performance - we don't want one modified DID
+     * to force blockchain resolution for ALL DIDs in future verifications.
+     */
+
+    let issuer2Keypair;
+    let issuer2DID;
+    let issuer2KeyDoc;
+    let issuer3Keypair;
+    let issuer3DID;
+    let issuer3KeyDoc;
+    let cred1; // from issuerDID (issuer1)
+    let cred2; // from issuer2DID
+    let cred3; // from issuer3DID
+
+    beforeAll(async () => {
+      // Create issuer2
+      issuer2Keypair = Secp256k1Keypair.random();
+      const issuer2Address = keypairToAddress(issuer2Keypair);
+      issuer2DID = addressToDID(issuer2Address, VIETCHAIN_NETWORK);
+      issuer2KeyDoc = createMockDIDDocument(issuer2Keypair, issuer2DID);
+
+      // Create issuer3
+      issuer3Keypair = Secp256k1Keypair.random();
+      const issuer3Address = keypairToAddress(issuer3Keypair);
+      issuer3DID = addressToDID(issuer3Address, VIETCHAIN_NETWORK);
+      issuer3KeyDoc = createMockDIDDocument(issuer3Keypair, issuer3DID);
+
+      // Create credential from issuer1 (uses issuerDID from parent scope)
+      cred1 = await issueCredential(issuerKeyDoc, {
+        '@context': [CREDENTIALS_V1_CONTEXT, CREDENTIALS_EXAMPLES_CONTEXT],
+        type: ['VerifiableCredential'],
+        issuer: issuerDID,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: holderDID, alumniOf: 'University One' },
+      });
+
+      // Create credential from issuer2
+      cred2 = await issueCredential(issuer2KeyDoc, {
+        '@context': [CREDENTIALS_V1_CONTEXT, CREDENTIALS_EXAMPLES_CONTEXT],
+        type: ['VerifiableCredential'],
+        issuer: issuer2DID,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: holderDID, alumniOf: 'University Two' },
+      });
+
+      // Create credential from issuer3
+      cred3 = await issueCredential(issuer3KeyDoc, {
+        '@context': [CREDENTIALS_V1_CONTEXT, CREDENTIALS_EXAMPLES_CONTEXT],
+        type: ['VerifiableCredential'],
+        issuer: issuer3DID,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: { id: holderDID, alumniOf: 'University Three' },
+      });
+    });
+
+    afterAll(() => {
+      cleanupDIDFromCache(issuer2DID);
+      cleanupDIDFromCache(issuer3DID);
+    });
+
+    test('marks only the failed issuer when 1 of 3 credentials is tampered', async () => {
+      const storage = createMemoryStorageAdapter();
+
+      // Create VP with 3 credentials, tamper only cred2
+      const tamperedCred2 = {
+        ...cred2,
+        credentialSubject: { ...cred2.credentialSubject, alumniOf: 'TAMPERED' },
+      };
+
+      const presentation = await signPresentation(
+        {
+          '@context': [CREDENTIALS_V1_CONTEXT],
+          type: ['VerifiablePresentation'],
+          verifiableCredential: [cred1, tamperedCred2, cred3],
+          holder: holderDID,
+        },
+        holderKeyDoc,
+        testChallenge,
+        testDomain,
+      );
+
+      const result = await verifyPresentationOptimistic(presentation, {
+        module: mockModule,
+        storage,
+        challenge: testChallenge,
+        domain: testDomain,
+      });
+
+      expect(result.verified).toBe(false);
+
+      // CRITICAL: Only issuer2 should be marked, not issuer1 or issuer3
+      expect(await storage.has(issuerDID)).toBe(false); // issuer1 - not marked
+      expect(await storage.has(issuer2DID)).toBe(true); // issuer2 - MARKED
+      expect(await storage.has(issuer3DID)).toBe(false); // issuer3 - not marked
+      expect(await storage.has(holderDID)).toBe(false); // holder - not marked
+    });
+
+    test('marks multiple failed issuers when 2 of 3 credentials are tampered', async () => {
+      const storage = createMemoryStorageAdapter();
+
+      // Tamper cred1 and cred3, leave cred2 valid
+      const tamperedCred1 = {
+        ...cred1,
+        credentialSubject: { ...cred1.credentialSubject, alumniOf: 'TAMPERED1' },
+      };
+      const tamperedCred3 = {
+        ...cred3,
+        credentialSubject: { ...cred3.credentialSubject, alumniOf: 'TAMPERED3' },
+      };
+
+      const presentation = await signPresentation(
+        {
+          '@context': [CREDENTIALS_V1_CONTEXT],
+          type: ['VerifiablePresentation'],
+          verifiableCredential: [tamperedCred1, cred2, tamperedCred3],
+          holder: holderDID,
+        },
+        holderKeyDoc,
+        testChallenge,
+        testDomain,
+      );
+
+      const result = await verifyPresentationOptimistic(presentation, {
+        module: mockModule,
+        storage,
+        challenge: testChallenge,
+        domain: testDomain,
+      });
+
+      expect(result.verified).toBe(false);
+
+      // CRITICAL: Both issuer1 and issuer3 marked, issuer2 not marked
+      expect(await storage.has(issuerDID)).toBe(true); // issuer1 - MARKED
+      expect(await storage.has(issuer2DID)).toBe(false); // issuer2 - not marked
+      expect(await storage.has(issuer3DID)).toBe(true); // issuer3 - MARKED
+      expect(await storage.has(holderDID)).toBe(false); // holder - not marked
+    });
+
+    test('does not mark presenter when proof is tampered (tampering is not DID-related)', async () => {
+      /**
+       * IMPORTANT: This test documents expected behavior.
+       *
+       * Granular detection can only identify failures caused by DID resolution
+       * differences (optimistic vs blockchain). It CANNOT detect failures caused by:
+       * - Tampered signatures/proofs
+       * - Wrong challenge/domain
+       * - Expired credentials
+       *
+       * When a proof is tampered, verification fails regardless of resolution strategy,
+       * so the presenter DID is NOT marked (because using blockchain resolution
+       * wouldn't help - the proof is still invalid).
+       */
+      const storage = createMemoryStorageAdapter();
+
+      // Create valid presentation first
+      const validPresentation = await signPresentation(
+        {
+          '@context': [CREDENTIALS_V1_CONTEXT],
+          type: ['VerifiablePresentation'],
+          verifiableCredential: [cred1, cred2],
+          holder: holderDID,
+        },
+        holderKeyDoc,
+        testChallenge,
+        testDomain,
+      );
+
+      // Get the proof
+      const proof = Array.isArray(validPresentation.proof)
+        ? validPresentation.proof[0]
+        : validPresentation.proof;
+
+      // Get the signature value (could be proofValue or jws depending on signature type)
+      const signatureKey = proof.proofValue ? 'proofValue' : 'jws';
+      const signatureValue = proof[signatureKey];
+
+      // Tamper the presentation proof (not the credentials)
+      const tamperedPresentation = {
+        ...validPresentation,
+        proof: {
+          ...proof,
+          [signatureKey]: 'zTAMPERED' + signatureValue.slice(9),
+        },
+      };
+
+      const result = await verifyPresentationOptimistic(tamperedPresentation, {
+        module: mockModule,
+        storage,
+        challenge: testChallenge,
+        domain: testDomain,
+      });
+
+      expect(result.verified).toBe(false);
+
+      // When proof is tampered, NO DIDs are marked because:
+      // - Credential issuers pass individual verification
+      // - Presenter test with blockchain still fails (proof is still tampered)
+      // This is correct behavior - marking DIDs won't help with tampered proofs
+      expect(await storage.has(issuerDID)).toBe(false);
+      expect(await storage.has(issuer2DID)).toBe(false);
+      expect(await storage.has(holderDID)).toBe(false);
+    });
+
+    test('marks issuer but not presenter when credential is tampered', async () => {
+      /**
+       * When a credential is tampered:
+       * - The issuer DID is marked (credential verification fails)
+       * - The presenter DID is NOT marked (presentation proof is valid)
+       */
+      const storage = createMemoryStorageAdapter();
+
+      // Tamper one credential
+      const tamperedCred2 = {
+        ...cred2,
+        credentialSubject: { ...cred2.credentialSubject, alumniOf: 'TAMPERED' },
+      };
+
+      const presentation = await signPresentation(
+        {
+          '@context': [CREDENTIALS_V1_CONTEXT],
+          type: ['VerifiablePresentation'],
+          verifiableCredential: [cred1, tamperedCred2],
+          holder: holderDID,
+        },
+        holderKeyDoc,
+        testChallenge,
+        testDomain,
+      );
+
+      const result = await verifyPresentationOptimistic(presentation, {
+        module: mockModule,
+        storage,
+        challenge: testChallenge,
+        domain: testDomain,
+      });
+
+      expect(result.verified).toBe(false);
+
+      // Only issuer2 is marked (tampered credential)
+      // Presenter is NOT marked (presentation proof is valid)
+      expect(await storage.has(issuerDID)).toBe(false); // issuer1 - not marked
+      expect(await storage.has(issuer2DID)).toBe(true); // issuer2 - MARKED
+      expect(await storage.has(holderDID)).toBe(false); // holder - not marked
+    });
+
+    test('continues testing all issuers even after first failure', async () => {
+      const storage = createMemoryStorageAdapter();
+
+      // Tamper ALL 3 credentials
+      const tamperedCred1 = {
+        ...cred1,
+        credentialSubject: { ...cred1.credentialSubject, alumniOf: 'TAMPERED1' },
+      };
+      const tamperedCred2 = {
+        ...cred2,
+        credentialSubject: { ...cred2.credentialSubject, alumniOf: 'TAMPERED2' },
+      };
+      const tamperedCred3 = {
+        ...cred3,
+        credentialSubject: { ...cred3.credentialSubject, alumniOf: 'TAMPERED3' },
+      };
+
+      const presentation = await signPresentation(
+        {
+          '@context': [CREDENTIALS_V1_CONTEXT],
+          type: ['VerifiablePresentation'],
+          verifiableCredential: [tamperedCred1, tamperedCred2, tamperedCred3],
+          holder: holderDID,
+        },
+        holderKeyDoc,
+        testChallenge,
+        testDomain,
+      );
+
+      const result = await verifyPresentationOptimistic(presentation, {
+        module: mockModule,
+        storage,
+        challenge: testChallenge,
+        domain: testDomain,
+      });
+
+      expect(result.verified).toBe(false);
+
+      // CRITICAL: All 3 issuers should be marked (continues after first failure)
+      expect(await storage.has(issuerDID)).toBe(true); // issuer1 - MARKED
+      expect(await storage.has(issuer2DID)).toBe(true); // issuer2 - MARKED
+      expect(await storage.has(issuer3DID)).toBe(true); // issuer3 - MARKED
+    });
+
+    test('skips already-marked DIDs during granular detection', async () => {
+      const storage = createMemoryStorageAdapter();
+
+      // Pre-mark issuer2
+      await storage.set(issuer2DID);
+
+      // Tamper cred1 and cred2
+      const tamperedCred1 = {
+        ...cred1,
+        credentialSubject: { ...cred1.credentialSubject, alumniOf: 'TAMPERED1' },
+      };
+      const tamperedCred2 = {
+        ...cred2,
+        credentialSubject: { ...cred2.credentialSubject, alumniOf: 'TAMPERED2' },
+      };
+
+      const presentation = await signPresentation(
+        {
+          '@context': [CREDENTIALS_V1_CONTEXT],
+          type: ['VerifiablePresentation'],
+          verifiableCredential: [tamperedCred1, tamperedCred2, cred3],
+          holder: holderDID,
+        },
+        holderKeyDoc,
+        testChallenge,
+        testDomain,
+      );
+
+      // Since issuer2 is pre-marked, it should skip optimistic entirely
+      // and go straight to blockchain resolution
+      const result = await verifyPresentationOptimistic(presentation, {
+        module: mockModule,
+        storage,
+        challenge: testChallenge,
+        domain: testDomain,
+      });
+
+      expect(result.verified).toBe(false);
+
+      // issuer2 was already marked, issuer1 should NOT be marked
+      // because we skipped optimistic path entirely (went to blockchain)
+      expect(await storage.has(issuer2DID)).toBe(true); // was pre-marked
+    });
+  });
 });

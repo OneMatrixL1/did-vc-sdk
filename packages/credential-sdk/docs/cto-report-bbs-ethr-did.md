@@ -61,7 +61,7 @@ This report presents our implementation of BBS+ signature support for `did:ethr`
 
 ### Test Coverage
 
-**71 tests** covering security and functionality, all passing.
+**93 tests** covering security and functionality, all passing.
 
 ---
 
@@ -872,7 +872,8 @@ if (result.verified) {
 | ethr-bbs-real-resolver.test.js | 2 | PASS |
 | ethr-did.integration.test.js | 12 | PASS |
 | ethr-did-bbs.integration.test.js | 9 | PASS |
-| **TOTAL** | **71** | **ALL PASS** |
+| ethr-did-verify-presentation-optimistic.test.js | 22 | PASS |
+| **TOTAL** | **93** | **ALL PASS** |
 
 See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenarios.
 
@@ -990,7 +991,7 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 | `ethr-vc-issuance-bbs.test.js` | **NEW** | BBS credential issuance tests with mock DID resolution. |
 | `ethr-vc-issuance-secp256k1.test.js` | **NEW** | Secp256k1 credential issuance tests (split from original). |
 | `ethr-did-verify-optimistic.test.js` | **NEW** | Optimistic credential verification tests. |
-| `ethr-did-verify-presentation-optimistic.test.js` | **NEW** | Optimistic presentation verification tests (16 tests). |
+| `ethr-did-verify-presentation-optimistic.test.js` | **NEW** | Optimistic presentation verification tests (22 tests). |
 
 ### File Structure Overview
 
@@ -1026,7 +1027,7 @@ packages/credential-sdk/
     ├── ethr-vc-issuance-bbs.test.js                ◄── NEW
     ├── ethr-vc-issuance-secp256k1.test.js          ◄── NEW
     ├── ethr-did-verify-optimistic.test.js          ◄── NEW
-    └── ethr-did-verify-presentation-optimistic.test.js ◄── NEW (16 tests)
+    └── ethr-did-verify-presentation-optimistic.test.js ◄── NEW (22 tests)
 ```
 
 ---
@@ -1171,11 +1172,85 @@ Tests against real blockchain (Vietchain testnet).
 
 ---
 
+### C.5 VP Optimistic Verification Tests (`ethr-did-verify-presentation-optimistic.test.js`)
+
+Tests the optimistic verification helper for verifiable presentations.
+
+#### Basic Functionality (5 tests)
+
+| # | Test Case | Scenario |
+|---|-----------|----------|
+| 1 | Module required | Throws if module is not provided |
+| 2 | Presentation required | Throws if presentation is not provided |
+| 3 | Valid presentation | Verifies valid presentation without storage |
+| 4 | Tampered credential | Fails verification for tampered credential |
+| 5 | Wrong challenge | Fails verification for wrong challenge |
+
+#### With Memory Storage (3 tests)
+
+| # | Test Case | Scenario |
+|---|-----------|----------|
+| 1 | Success doesn't mark | Verifies presentation and does not mark DIDs on success |
+| 2 | Skip when issuer marked | Skips optimistic when issuer DID is in storage |
+| 3 | Skip when holder marked | Skips optimistic when holder DID is in storage |
+
+#### DID Extraction (2 tests)
+
+| # | Test Case | Scenario |
+|---|-----------|----------|
+| 1 | String holder | Extracts holder DID from string holder field |
+| 2 | Mark on failure | Extracts issuer DID from credentials and marks on failure |
+
+#### Multiple Credentials (2 tests)
+
+| # | Test Case | Scenario |
+|---|-----------|----------|
+| 1 | Different issuers | Verifies VP with multiple credentials from different issuers |
+| 2 | Self-issued | Deduplicates DIDs when presenter is also an issuer |
+
+#### Pass-through Options (2 tests)
+
+| # | Test Case | Scenario |
+|---|-----------|----------|
+| 1 | Challenge and domain | Passes challenge and domain to verifyPresentation |
+| 2 | Skip revocation | Passes skipRevocationCheck option |
+
+#### Edge Cases (2 tests)
+
+| # | Test Case | Scenario |
+|---|-----------|----------|
+| 1 | Empty credentials | Handles presentation with empty credentials array |
+| 2 | Object issuer | Handles credentials with object issuer format |
+
+#### Granular Failure Detection (6 tests)
+
+These tests verify that granular detection correctly identifies DIDs that need blockchain resolution.
+
+| # | Test Case | Scenario | Expected Marking |
+|---|-----------|----------|------------------|
+| 1 | 1 of 3 tampered | VP with 3 credentials, only cred2 tampered | Only issuer2 marked |
+| 2 | 2 of 3 tampered | Cred1 and cred3 tampered, cred2 valid | issuer1 and issuer3 marked |
+| 3 | Proof tampered | Presentation proof tampered (not credentials) | **No DIDs marked** (see note) |
+| 4 | Credential tampered | One credential tampered | Issuer marked, presenter NOT marked |
+| 5 | All 3 tampered | All credentials tampered | All 3 issuers marked (continues after first) |
+| 6 | Pre-marked DID | DID already in storage | Skips optimistic, goes to blockchain |
+
+**Important Note on Test #3**: When a proof is tampered, NO DIDs are marked because:
+- Granular detection only identifies DIDs needing **blockchain resolution**
+- A tampered proof fails with BOTH optimistic and blockchain resolution
+- Marking the DID wouldn't help - the proof is still invalid
+- This is **correct behavior** - see [Scope of Granular Detection](#important-scope-of-granular-detection)
+
+---
+
 ### Test Execution Commands
 
 ```bash
 # Run all BBS-related tests
 yarn jest packages/credential-sdk/tests/ethr-bbs --no-coverage
+
+# Run VP optimistic verification tests
+yarn jest packages/credential-sdk/tests/ethr-did-verify-presentation-optimistic.test.js --no-coverage
 
 # Run integration tests (requires RPC)
 ETHR_NETWORK=vietchain \

@@ -7,6 +7,7 @@ import { ethers } from 'ethers';
 import { EthrDID } from 'ethr-did';
 import { getResolver } from 'ethr-did-resolver';
 import { Resolver as DIDResolver } from 'did-resolver';
+import b58 from 'bs58';
 import AbstractDIDModule from '../abstract/did/module';
 import {
   validateModuleConfig,
@@ -23,6 +24,7 @@ import {
   formatEthersError,
   isEthrDID,
   ETHR_BBS_KEY_ID,
+  generateDefaultDocument,
 } from './utils';
 
 /**
@@ -83,6 +85,12 @@ class EthrDIDModule extends AbstractDIDModule {
     // Initialize providers cache
     this.providers = new Map();
 
+    // Optimistic mode: return default document without blockchain fetch
+    // When true, getDocument() returns a locally-generated default document
+    // instead of fetching from the blockchain. Useful for performance optimization
+    // when most DIDs haven't been modified on-chain.
+    this.optimistic = config.optimistic ?? false;
+
     // Initialize resolver
     this.#initializeResolver();
   }
@@ -141,9 +149,11 @@ class EthrDIDModule extends AbstractDIDModule {
   /**
    * Resolve a DID or DID URL - used by document loader
    * @param {string} id - DID string or DID URL (with fragment) to resolve
+   * @param {object} [options] - Resolution options
+   * @param {boolean} [options.optimistic] - Use optimistic resolution (no blockchain)
    * @returns {Promise<Object>} DID Document or Verification Method
    */
-  async resolve(id) {
+  async resolve(id, options = {}) {
     // Check if there's a fragment (verification method reference)
     const fragmentIndex = id.indexOf('#');
     if (fragmentIndex !== -1) {
@@ -151,7 +161,7 @@ class EthrDIDModule extends AbstractDIDModule {
       const fragment = id.substring(fragmentIndex);
 
       // Get the full DID document
-      const didDocument = await this.getDocument(did);
+      const didDocument = await this.getDocument(did, options);
 
       // Find the verification method with matching ID
       const verificationMethod = didDocument.verificationMethod?.find(
@@ -173,7 +183,7 @@ class EthrDIDModule extends AbstractDIDModule {
     }
 
     // No fragment, return full DID document
-    return this.getDocument(id);
+    return this.getDocument(id, options);
   }
 
   /**
@@ -419,15 +429,56 @@ class EthrDIDModule extends AbstractDIDModule {
   /**
    * Retrieve a DID document
    * @param {string} did - DID to retrieve
+   * @param {object} [options] - Resolution options
+   * @param {boolean} [options.optimistic] - Use optimistic resolution (no blockchain)
    * @returns {Promise<Object>} DID Document
    */
-  async getDocument(did) {
+  async getDocument(did, options = {}) {
     const didString = String(did);
 
     if (!isEthrDID(didString)) {
       throw new Error(`Not an ethr DID: ${didString}`);
     }
 
+    // Determine if optimistic mode should be used
+    // Per-call option takes precedence over constructor default
+    const useOptimistic = options.optimistic ?? this.optimistic;
+
+    if (useOptimistic) {
+      return this.getDefaultDocument(didString);
+    }
+
+    // Fetch from blockchain
+    return this.#getDocumentFromChain(didString);
+  }
+
+  /**
+   * Get default DID document without blockchain fetch
+   * Used for optimistic resolution when we assume no on-chain modifications.
+   * @param {string} did - DID string
+   * @returns {object} Default DID document
+   */
+  getDefaultDocument(did) {
+    const didString = String(did);
+
+    if (!isEthrDID(didString)) {
+      throw new Error(`Not an ethr DID: ${didString}`);
+    }
+
+    const { network } = parseDID(didString);
+    const networkConfig = this.networks.get(network || this.defaultNetwork);
+    const chainId = networkConfig?.chainId || 1;
+
+    return generateDefaultDocument(didString, { chainId });
+  }
+
+  /**
+   * Get document from blockchain (original behavior)
+   * @private
+   * @param {string} didString - DID string (already validated)
+   * @returns {Promise<Object>} DID Document from blockchain
+   */
+  async #getDocumentFromChain(didString) {
     try {
       const result = await this.resolver.resolve(didString);
 
@@ -442,6 +493,20 @@ class EthrDIDModule extends AbstractDIDModule {
       }
 
       const document = result.didDocument;
+
+      // Normalize verification methods: convert publicKeyHex to publicKeyBase58
+      if (document.verificationMethod) {
+        document.verificationMethod = document.verificationMethod.map((vm) => {
+          if (vm.publicKeyHex && !vm.publicKeyBase58) {
+            const { publicKeyHex, ...rest } = vm;
+            return {
+              ...rest,
+              publicKeyBase58: b58.encode(Buffer.from(publicKeyHex, 'hex')),
+            };
+          }
+          return vm;
+        });
+      }
 
       // Add implicit BBS key authorization unless an explicit BBS key is registered
       //
@@ -547,6 +612,24 @@ class EthrDIDModule extends AbstractDIDModule {
     const txHash = expiresIn
       ? await ethrDid.setAttribute(key, value, expiresIn)
       : await ethrDid.setAttribute(key, value);
+    return await waitForTransaction(txHash, provider);
+  }
+
+  /**
+   * Revoke an attribute from a DID
+   * @param {string} did - DID to update
+   * @param {string} key - Attribute name (e.g., 'did/pub/Bls12381G2Key2020/veriKey/base58')
+   * @param {string} value - Attribute value to revoke
+   * @param {import('../../keypairs/keypair-secp256k1').default} keypair - Owner's keypair
+   * @returns {Promise<Object>} Transaction receipt
+   */
+  async revokeAttribute(did, key, value, keypair) {
+    const { network } = parseDID(did);
+    const networkName = network || this.defaultNetwork;
+    const provider = this.#getProvider(networkName);
+
+    const ethrDid = await this.#createEthrDID(keypair, networkName);
+    const txHash = await ethrDid.revokeAttribute(key, value);
     return await waitForTransaction(txHash, provider);
   }
 

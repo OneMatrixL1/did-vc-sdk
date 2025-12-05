@@ -9,7 +9,7 @@ import { Bls12381BBS23SigDockSigName } from './constants';
 import Bls12381BBSKeyPairDock2023 from './Bls12381BBSKeyPairDock2023';
 import DockCryptoSignature from './common/DockCryptoSignature';
 import Bls12381BBSRecoveryMethod2023 from './Bls12381BBSRecoveryMethod2023';
-import { isEthrDID } from '../../modules/ethr-did/utils';
+import { isEthrDID, bbsPublicKeyToAddress, parseDID } from '../../modules/ethr-did/utils';
 import { u8aToU8a } from '../../utils/types/bytes';
 import CustomLinkedDataSignature from './common/CustomLinkedDataSignature';
 
@@ -93,48 +93,51 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
   }
 
   /**
-   * Override getVerificationMethod to use embedded public key for ethr DIDs
-   * When proof contains publicKeyBase58 and verification method is an ethr DID,
-   * use BBS recovery method instead of resolving from DID document
+   * Override getVerificationMethod to use embedded public key for ethr DIDs.
+   *
+   * For ethr DIDs with embedded publicKeyBase58 in proof:
+   * - If key derives to DID's address: use recovery method (no on-chain lookup needed)
+   * - Otherwise: fall back to standard DID document resolution (for delegate keys)
+   *
    * @param {object} options - Options containing proof and documentLoader
    * @returns {Promise<object>} Verification method object
    */
   async getVerificationMethod({ proof, documentLoader }) {
-    // Check if proof has embedded public key and verification method is ethr DID
     const verificationMethodId = typeof proof.verificationMethod === 'object'
       ? proof.verificationMethod.id
       : proof.verificationMethod;
 
-    if (proof.publicKeyBase58 && verificationMethodId) {
-      // Extract DID from verification method (format: did:ethr:...:0xAddress#keys-1)
+    if (verificationMethodId && proof.publicKeyBase58) {
       const didPart = verificationMethodId.split('#')[0];
 
       if (isEthrDID(didPart)) {
-        // Use BBS recovery method for ethr DIDs with embedded public key
-        return Bls12381BBSRecoveryMethod2023.fromProof(proof, didPart);
+        const publicKeyBuffer = b58.decode(proof.publicKeyBase58);
+        const derivedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
+        const didParts = parseDID(didPart);
+
+        if (derivedAddress.toLowerCase() === didParts.address.toLowerCase()) {
+          // Address-based: BBS key derives to DID's address - use recovery method
+          return Bls12381BBSRecoveryMethod2023.fromProof(proof, didPart);
+        }
       }
     }
 
-    // Fall back to standard verification method resolution
+    // Fall back to standard DID document resolution
     return super.getVerificationMethod({ proof, documentLoader });
   }
 
   /**
    * Override verifySignature to handle BBS recovery method
-   * When verificationMethod is a Bls12381BBSRecoveryMethod2023 instance,
-   * use its verifier directly instead of constructing from LDKeyClass
    * @param {object} options - Options containing verifyData, verificationMethod, and proof
    * @returns {Promise<boolean>} Verification result
    */
   async verifySignature({ verifyData, verificationMethod, proof }) {
-    // Check if verificationMethod is a BBS recovery method instance
     if (verificationMethod instanceof Bls12381BBSRecoveryMethod2023) {
       const signatureBytes = this.constructor.extractSignatureBytes(proof);
       const verifier = verificationMethod.verifier();
       return verifier.verify({ data: verifyData, signature: signatureBytes });
     }
 
-    // Fall back to standard verification
     return super.verifySignature({ verifyData, verificationMethod, proof });
   }
 

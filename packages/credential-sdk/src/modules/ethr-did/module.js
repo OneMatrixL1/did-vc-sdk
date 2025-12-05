@@ -7,6 +7,7 @@ import { ethers } from 'ethers';
 import { EthrDID } from 'ethr-did';
 import { getResolver } from 'ethr-did-resolver';
 import { Resolver as DIDResolver } from 'did-resolver';
+import b58 from 'bs58';
 import AbstractDIDModule from '../abstract/did/module';
 import {
   validateModuleConfig,
@@ -443,6 +444,20 @@ class EthrDIDModule extends AbstractDIDModule {
 
       const document = result.didDocument;
 
+      // Normalize verification methods: convert publicKeyHex to publicKeyBase58
+      if (document.verificationMethod) {
+        document.verificationMethod = document.verificationMethod.map((vm) => {
+          if (vm.publicKeyHex && !vm.publicKeyBase58) {
+            const { publicKeyHex, ...rest } = vm;
+            return {
+              ...rest,
+              publicKeyBase58: b58.encode(Buffer.from(publicKeyHex, 'hex')),
+            };
+          }
+          return vm;
+        });
+      }
+
       // Add implicit BBS key authorization unless an explicit BBS key is registered
       //
       // This works like EOA (Externally Owned Account) behavior:
@@ -547,6 +562,24 @@ class EthrDIDModule extends AbstractDIDModule {
     const txHash = expiresIn
       ? await ethrDid.setAttribute(key, value, expiresIn)
       : await ethrDid.setAttribute(key, value);
+    return await waitForTransaction(txHash, provider);
+  }
+
+  /**
+   * Revoke an attribute from a DID
+   * @param {string} did - DID to update
+   * @param {string} key - Attribute name (e.g., 'did/pub/Bls12381G2Key2020/veriKey/base58')
+   * @param {string} value - Attribute value to revoke
+   * @param {import('../../keypairs/keypair-secp256k1').default} keypair - Owner's keypair
+   * @returns {Promise<Object>} Transaction receipt
+   */
+  async revokeAttribute(did, key, value, keypair) {
+    const { network } = parseDID(did);
+    const networkName = network || this.defaultNetwork;
+    const provider = this.#getProvider(networkName);
+
+    const ethrDid = await this.#createEthrDID(keypair, networkName);
+    const txHash = await ethrDid.revokeAttribute(key, value);
     return await waitForTransaction(txHash, provider);
   }
 

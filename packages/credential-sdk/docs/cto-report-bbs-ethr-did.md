@@ -17,12 +17,13 @@
 | [4. Security Model](#4-security-model) | Attack vectors and mitigations |
 | [5. EOA-like Authorization](#5-eoa-like-implicit-key-authorization) | Implicit BBS key behavior |
 | [6. Optimistic Resolution](#6-optimistic-did-resolution) | VC/VP verification without blockchain |
-| [7. Code Examples](#7-code-examples) | Two implementation approaches |
-| [8. Test Coverage](#8-test-coverage-summary) | Summary (71 tests passing) |
-| [9. Comparison](#9-comparison-secp256k1-vs-bbs) | Secp256k1 vs BBS |
-| [10. Limitations](#10-limitations-and-trade-offs) | Trade-offs accepted |
-| [11. Future](#11-future-considerations) | Potential enhancements |
-| [12. References](#12-references) | Standards and specs |
+| [7. DID Document Updates](#7-did-document-updates) | On-chain DID modifications |
+| [8. Code Examples](#8-code-examples) | Two implementation approaches |
+| [9. Test Coverage](#9-test-coverage-summary) | Summary (100 tests passing) |
+| [10. Comparison](#10-comparison-secp256k1-vs-bbs) | Secp256k1 vs BBS |
+| [11. Limitations](#11-limitations-and-trade-offs) | Trade-offs accepted |
+| [12. Future](#12-future-considerations) | Potential enhancements |
+| [13. References](#13-references) | Standards and specs |
 
 **Section 6 Subsections:**
 - [6.1 VC Optimistic Verification](#61-verifiable-credential-vc-optimistic-verification) - Credential verification flow
@@ -31,6 +32,13 @@
 - [6.3 Storage Adapters](#63-storage-adapters) - Memory, localStorage, sessionStorage
 - [6.4 Performance Impact](#64-performance-impact) - Speedup metrics
 - [6.5 When Optimistic Fails](#65-when-optimistic-fails) - Failure conditions
+
+**Section 7 Subsections:**
+- [7.1 Architecture Overview](#71-architecture-overview) - Module capabilities and transaction flow
+- [7.2 Delegate Management](#72-delegate-management) - Add/revoke delegates
+- [7.3 Attribute Management](#73-attribute-management) - Set/revoke attributes (BBS keys)
+- [7.4 Owner Transfer](#74-owner-transfer) - Change DID ownership
+- [7.5 Transaction Processing](#75-transaction-processing) - Signing and confirmation
 
 **Appendices:**
 - [A. Data Sizes](#appendix-a-data-sizes) - Key and signature sizes
@@ -682,7 +690,688 @@ flowchart TB
 
 ---
 
-## 7. Code Examples
+## 7. DID Document Updates
+
+This section covers the architecture and capabilities for modifying `did:ethr` DID documents on-chain. The `EthrDIDModule` provides methods for managing delegates, attributes, and ownership.
+
+### Limitations Compared to W3C DID Specification
+
+**In comparison to the W3C DID Core specification, the `did:ethr` module can only:**
+
+1. **Have a single owner** - Only one Ethereum address can control the DID at a time (no multi-sig or multi-controller support)
+2. **Use secp256k1 keys for ownership** - The owner must be able to sign Ethereum transactions (BBS/Ed25519 keys cannot be owners)
+3. **Add delegates as secp256k1 addresses** - `addDelegate()` only stores Ethereum addresses, always resolving as `EcdsaSecp256k1RecoveryMethod2020`
+4. **Add other key types via attributes** - BBS, Ed25519, and other keys must use `setAttribute()` with the appropriate key format
+5. **Auto-generate fragment IDs** - The resolver assigns IDs like `#delegate-1`, `#delegate-2` based on event order (cannot specify custom IDs)
+6. **Set expiration on delegates/attributes** - All on-chain data has a validity period
+
+```mermaid
+flowchart TB
+    subgraph W3C["W3C DID Spec Allows"]
+        W1["Multiple controllers"]
+        W2["Any key type as controller"]
+        W3["Custom verification method IDs"]
+        W4["Arbitrary verification methods"]
+    end
+
+    subgraph Ethr["did:ethr Supports"]
+        E1["Single owner (secp256k1 only)"]
+        E2["Delegates (secp256k1 addresses)"]
+        E3["Attributes (any key type)"]
+        E4["Auto-generated fragment IDs"]
+    end
+
+    W1 -.->|"Limited to"| E1
+    W2 -.->|"Split into"| E2
+    W2 -.->|"Split into"| E3
+    W3 -.->|"Restricted to"| E4
+```
+
+### Delegate vs Attribute: Key Differences
+
+| Aspect | `addDelegate()` | `setAttribute()` |
+|--------|-----------------|------------------|
+| **What it stores** | Ethereum address only | Arbitrary key-value data |
+| **Resulting key type** | Always `EcdsaSecp256k1RecoveryMethod2020` | Depends on attribute key format |
+| **Can store BBS keys** | No | Yes |
+| **Can store Ed25519 keys** | No | Yes |
+| **Use case** | Authorize another Ethereum wallet | Register any verification key |
+
+### 7.1 Architecture Overview
+
+#### Module Capabilities
+
+The `EthrDIDModule` supports the following on-chain operations:
+
+| Operation | Method | Description | Gas Cost |
+|-----------|--------|-------------|----------|
+| Add delegate | `addDelegate()` | Add signing authority | ~50,000 |
+| Revoke delegate | `revokeDelegate()` | Remove signing authority | ~30,000 |
+| Set attribute | `setAttribute()` | Register key/service endpoint | ~50,000 |
+| Revoke attribute | `revokeAttribute()` | Remove key/service endpoint | ~30,000 |
+| Change owner | `changeOwner()` | Transfer DID ownership | ~30,000 |
+
+#### Component Architecture
+
+```mermaid
+graph TB
+    subgraph Application["Application Layer"]
+        App[Application Code]
+    end
+
+    subgraph SDK["EthrDIDModule"]
+        Module[EthrDIDModule]
+        Provider[JsonRpcProvider]
+        Signer[Wallet/Signer]
+        EthrDID[EthrDID Library]
+    end
+
+    subgraph Blockchain["Ethereum Network"]
+        Registry[EthrDIDRegistry Contract]
+        Events[DIDAttributeChanged Events]
+    end
+
+    App --> Module
+    Module --> Provider
+    Module --> Signer
+    Module --> EthrDID
+    EthrDID --> Registry
+    Registry --> Events
+
+    style Registry fill:#f9f,stroke:#333
+    style Events fill:#bbf,stroke:#333
+```
+
+#### Transaction Flow
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Module as EthrDIDModule
+    participant EthrDID as EthrDID Library
+    participant Signer as Wallet/Signer
+    participant Registry as EthrDIDRegistry
+    participant Resolver as DID Resolver
+
+    App->>Module: setAttribute(did, key, value, keypair)
+    Module->>Module: parseDID(did) → network
+    Module->>Module: #getProvider(network)
+    Module->>Module: #createEthrDID(keypair, network)
+    Module->>EthrDID: setAttribute(key, value)
+    EthrDID->>Signer: Sign transaction
+    Signer-->>EthrDID: Signed tx
+    EthrDID->>Registry: Submit transaction
+    Registry-->>EthrDID: Transaction hash
+    EthrDID-->>Module: txHash
+    Module->>Module: waitForTransaction(txHash)
+    Module-->>App: Receipt {txHash, blockNumber, success}
+
+    Note over App,Resolver: Later: Resolve updated document
+    App->>Module: getDocument(did)
+    Module->>Resolver: resolve(did)
+    Resolver->>Registry: Query events
+    Registry-->>Resolver: DID events
+    Resolver-->>Module: DID Document
+    Module-->>App: Updated document with new attribute
+```
+
+---
+
+### 7.2 Delegate Management
+
+Delegates are additional addresses authorized to act on behalf of the DID.
+
+#### What `addDelegate()` Can Do
+
+| Capability | Supported |
+|------------|-----------|
+| Add another Ethereum address as authorized signer | ✓ Yes |
+| Set expiration time for the delegate | ✓ Yes |
+| Revoke delegate before expiration | ✓ Yes |
+| Specify delegate type (`veriKey`, `sigAuth`) | ✓ Yes |
+
+#### What `addDelegate()` Cannot Do
+
+| Limitation | Reason |
+|------------|--------|
+| Store BBS/Ed25519 public keys | Only stores Ethereum addresses |
+| Specify custom fragment ID | Auto-generated by resolver |
+| Add multiple key types | Always `EcdsaSecp256k1RecoveryMethod2020` |
+| Store the actual public key | Only stores 20-byte address |
+
+**Common use cases:**
+- Adding a hot wallet as a signing delegate
+- Authorizing a service to sign on behalf of the DID
+- Multi-key setups for different purposes (secp256k1 only)
+
+#### Add Delegate Flow
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Module as EthrDIDModule
+    participant Registry as EthrDIDRegistry
+
+    App->>Module: addDelegate(did, delegateAddress, keypair, options)
+    Note over Module: options = {delegateType: 'veriKey', expiresIn: 86400}
+
+    Module->>Module: Parse DID → network
+    Module->>Module: Create EthrDID instance with owner keypair
+    Module->>Registry: addDelegate(delegateAddress, delegateType, expiresIn)
+
+    Note over Registry: Emits DIDDelegateChanged event
+    Registry-->>Module: Transaction hash
+
+    Module->>Module: Wait for confirmation
+    Module-->>App: Receipt
+
+    Note over App: Delegate is now authorized for 24 hours (86400s)
+```
+
+#### Revoke Delegate Flow
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Module as EthrDIDModule
+    participant Registry as EthrDIDRegistry
+
+    App->>Module: revokeDelegate(did, delegateAddress, keypair, delegateType)
+
+    Module->>Module: Parse DID → network
+    Module->>Module: Create EthrDID instance with owner keypair
+    Module->>Registry: revokeDelegate(delegateAddress, delegateType)
+
+    Note over Registry: Marks delegate as revoked
+    Registry-->>Module: Transaction hash
+
+    Module->>Module: Wait for confirmation
+    Module-->>App: Receipt
+
+    Note over App: Delegate is immediately revoked
+```
+
+#### Delegate Types
+
+| Type | Purpose | Use Case |
+|------|---------|----------|
+| `veriKey` | Verification key | General signing authority |
+| `sigAuth` | Signature authentication | Authentication purposes |
+
+#### Code Example
+
+```javascript
+import EthrDIDModule from '@truvera/credential-sdk/modules/ethr-did';
+import { Secp256k1Keypair } from '@truvera/credential-sdk/keypairs';
+
+const module = new EthrDIDModule({
+  networks: [{
+    name: 'mainnet',
+    rpcUrl: 'https://mainnet.infura.io/v3/YOUR_KEY',
+    registry: '0xdca7ef03e98e0dc2b855be647c39abe984fcf21b'
+  }]
+});
+
+// Owner's keypair
+const ownerKeypair = Secp256k1Keypair.fromPrivateKey(privateKeyHex);
+const did = `did:ethr:${ownerKeypair.address()}`;
+
+// Add delegate for 7 days
+const delegateAddress = '0x1234...';
+await module.addDelegate(did, delegateAddress, ownerKeypair, {
+  delegateType: 'veriKey',
+  expiresIn: 604800  // 7 days in seconds
+});
+
+// Later: revoke delegate
+await module.revokeDelegate(did, delegateAddress, ownerKeypair, 'veriKey');
+```
+
+#### DID Document After `addDelegate()`
+
+When you add a delegate, the DID document includes a new verification method with type `EcdsaSecp256k1RecoveryMethod2020`:
+
+```json
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/suites/secp256k1recovery-2020/v2"
+  ],
+  "id": "did:ethr:0xAlice...",
+  "verificationMethod": [
+    {
+      "id": "did:ethr:0xAlice...#controller",
+      "type": "EcdsaSecp256k1RecoveryMethod2020",
+      "controller": "did:ethr:0xAlice...",
+      "blockchainAccountId": "eip155:1:0xAlice..."
+    },
+    {
+      "id": "did:ethr:0xAlice...#delegate-1",
+      "type": "EcdsaSecp256k1RecoveryMethod2020",
+      "controller": "did:ethr:0xAlice...",
+      "blockchainAccountId": "eip155:1:0xBobDelegate..."
+    }
+  ],
+  "authentication": [
+    "did:ethr:0xAlice...#controller",
+    "did:ethr:0xAlice...#delegate-1"
+  ],
+  "assertionMethod": [
+    "did:ethr:0xAlice...#controller",
+    "did:ethr:0xAlice...#delegate-1"
+  ]
+}
+```
+
+**Key points:**
+- Delegate is stored as `blockchainAccountId` (Ethereum address)
+- Type is always `EcdsaSecp256k1RecoveryMethod2020`
+- Fragment ID is auto-generated (`#delegate-1`)
+- Cannot store BBS or Ed25519 public keys this way
+
+---
+
+### 7.3 Attribute Management
+
+Attributes store arbitrary data in the DID document.
+
+#### What `setAttribute()` Can Do
+
+| Capability | Supported |
+|------------|-----------|
+| Store BBS public keys (96 bytes) | ✓ Yes |
+| Store Ed25519 public keys | ✓ Yes |
+| Store any key type via key format string | ✓ Yes |
+| Store service endpoints | ✓ Yes |
+| Set expiration time | ✓ Yes |
+| Revoke attribute before expiration | ✓ Yes |
+
+#### What `setAttribute()` Cannot Do
+
+| Limitation | Reason |
+|------------|--------|
+| Specify custom fragment ID | Auto-generated by resolver |
+| Update existing attribute | Must revoke and re-add |
+| Store keys without owner signature | Owner secp256k1 key required |
+
+**Common use cases:**
+- Registering verification keys (including BBS+ keys)
+- Adding service endpoints
+- Storing metadata
+
+#### Set Attribute Flow (BBS Key Registration)
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Module as EthrDIDModule
+    participant Registry as EthrDIDRegistry
+    participant Resolver as DID Resolver
+
+    App->>Module: setAttribute(did, key, value, keypair)
+    Note over Module: key = 'did/pub/Bls12381G2Key2020/veriKey/base58'<br/>value = publicKeyBase58
+
+    Module->>Module: Parse DID → network
+    Module->>Module: Create EthrDID instance
+    Module->>Registry: setAttribute(key, value)
+
+    Note over Registry: Emits DIDAttributeChanged event<br/>name: key<br/>value: encoded publicKey
+
+    Registry-->>Module: Transaction hash
+    Module->>Module: Wait for confirmation
+    Module-->>App: Receipt
+
+    Note over App: Query for assigned key ID
+
+    App->>Module: getDocument(did)
+    Module->>Resolver: resolve(did)
+    Resolver->>Registry: Query all DID events
+    Registry-->>Resolver: Events including setAttribute
+
+    Note over Resolver: Resolver auto-generates ID<br/>e.g., #delegate-1, #delegate-2
+
+    Resolver-->>Module: DID Document with new verificationMethod
+    Module-->>App: Document
+
+    Note over App: Find the registered key by publicKeyBase58<br/>to get its auto-assigned fragment ID
+```
+
+#### Revoke Attribute Flow
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Module as EthrDIDModule
+    participant Registry as EthrDIDRegistry
+
+    App->>Module: revokeAttribute(did, key, value, keypair)
+    Note over Module: Must provide exact key and value<br/>that were originally set
+
+    Module->>Module: Parse DID → network
+    Module->>Module: Create EthrDID instance
+    Module->>Registry: revokeAttribute(key, value)
+
+    Note over Registry: Marks attribute as revoked<br/>(sets validity to 0)
+
+    Registry-->>Module: Transaction hash
+    Module->>Module: Wait for confirmation
+    Module-->>App: Receipt
+
+    Note over App: Key is removed from DID document<br/>Credentials signed with this key<br/>will fail verification
+```
+
+#### Attribute Key Formats
+
+The `did:ethr` method uses a specific key format for attributes:
+
+```
+did/pub/<keyAlgorithm>/<purpose>/<encoding>
+```
+
+| Component | Options | Description |
+|-----------|---------|-------------|
+| `keyAlgorithm` | `Secp256k1`, `Ed25519`, `Bls12381G2Key2020` | Cryptographic algorithm |
+| `purpose` | `veriKey`, `sigAuth`, `enc` | Key purpose |
+| `encoding` | `hex`, `base64`, `base58` | Value encoding |
+
+**Common attribute keys:**
+
+| Key | Description |
+|-----|-------------|
+| `did/pub/Secp256k1/veriKey/hex` | Secp256k1 verification key |
+| `did/pub/Ed25519/veriKey/base64` | Ed25519 verification key |
+| `did/pub/Bls12381G2Key2020/veriKey/base58` | BBS+ public key |
+| `did/svc/MessagingService` | Service endpoint |
+
+#### Code Example
+
+```javascript
+import b58 from 'bs58';
+import Bls12381BBSKeyPairDock2023 from '@truvera/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
+
+// Generate BBS keypair
+const bbsKeypair = Bls12381BBSKeyPairDock2023.generate();
+const publicKeyBase58 = b58.encode(bbsKeypair.publicKeyBuffer);
+
+// Register BBS key on-chain
+await module.setAttribute(
+  did,
+  'did/pub/Bls12381G2Key2020/veriKey/base58',
+  publicKeyBase58,
+  ownerKeypair
+);
+
+// Get the assigned key ID from DID document
+const document = await module.getDocument(did);
+const bbsKey = document.verificationMethod.find(
+  vm => vm.publicKeyBase58 === publicKeyBase58
+);
+console.log('Assigned key ID:', bbsKey.id);
+// Output: did:ethr:0x...#delegate-1
+
+// Later: revoke the BBS key
+await module.revokeAttribute(
+  did,
+  'did/pub/Bls12381G2Key2020/veriKey/base58',
+  publicKeyBase58,
+  ownerKeypair
+);
+```
+
+#### DID Document After `setAttribute()` with BBS Key
+
+When you add a BBS key via setAttribute, the DID document includes a verification method with the actual public key:
+
+```json
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/suites/secp256k1recovery-2020/v2"
+  ],
+  "id": "did:ethr:0xAlice...",
+  "verificationMethod": [
+    {
+      "id": "did:ethr:0xAlice...#controller",
+      "type": "EcdsaSecp256k1RecoveryMethod2020",
+      "controller": "did:ethr:0xAlice...",
+      "blockchainAccountId": "eip155:1:0xAlice..."
+    },
+    {
+      "id": "did:ethr:0xAlice...#delegate-1",
+      "type": "Bls12381G2Key2020",
+      "controller": "did:ethr:0xAlice...",
+      "publicKeyBase58": "rRG1eVLKZMk9XKBS8pLaitBSfJQnXpNKzYFkqBCFMEMJxpSwLTkBnnP8ZJTL..."
+    }
+  ],
+  "authentication": [
+    "did:ethr:0xAlice...#controller"
+  ],
+  "assertionMethod": [
+    "did:ethr:0xAlice...#controller",
+    "did:ethr:0xAlice...#delegate-1"
+  ]
+}
+```
+
+**Key points:**
+- BBS key is stored as `publicKeyBase58` (full 96-byte public key)
+- Type matches the algorithm: `Bls12381G2Key2020`
+- Fragment ID is auto-generated (`#delegate-1`)
+- This method supports any key type (BBS, Ed25519, etc.)
+
+#### Comparison: Delegate vs Attribute DID Document
+
+| Field | After `addDelegate()` | After `setAttribute()` (BBS) |
+|-------|----------------------|------------------------------|
+| `type` | `EcdsaSecp256k1RecoveryMethod2020` | `Bls12381G2Key2020` |
+| Key material | `blockchainAccountId` (address) | `publicKeyBase58` (full key) |
+| Key size | 20 bytes (address) | 96 bytes (BBS public key) |
+| Can verify BBS signatures | No | Yes |
+
+---
+
+### 7.4 Owner Transfer
+
+Ownership transfer allows complete control of a DID to be transferred to a new address.
+
+#### What `changeOwner()` Can Do
+
+| Capability | Supported |
+|------------|-----------|
+| Transfer full control to another Ethereum address | ✓ Yes |
+| Transfer to any valid Ethereum address | ✓ Yes |
+| Executed by current owner only | ✓ Yes |
+
+#### What `changeOwner()` Cannot Do
+
+| Limitation | Reason |
+|------------|--------|
+| Transfer to BBS/Ed25519 key | New owner must be secp256k1 address |
+| Undo the transfer | Irreversible operation |
+| Set up multi-owner | Only single owner supported |
+| Transfer without current owner's signature | Security requirement |
+
+**⚠️ Warning:** This is an irreversible operation. The current owner loses all control.
+
+#### Change Owner Flow
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Module as EthrDIDModule
+    participant Registry as EthrDIDRegistry
+
+    App->>Module: changeOwner(did, newOwnerAddress, currentOwnerKeypair)
+
+    Module->>Module: Parse DID → network
+    Module->>Module: Checksum new owner address
+    Module->>Module: Create EthrDID with current owner
+
+    Module->>Registry: changeOwner(newOwnerAddress)
+
+    Note over Registry: Emits DIDOwnerChanged event<br/>previousOwner: currentOwner<br/>newOwner: newOwnerAddress
+
+    Registry-->>Module: Transaction hash
+    Module->>Module: Wait for confirmation
+    Module-->>App: Receipt
+
+    Note over App: ⚠️ Current owner loses all control<br/>Only newOwnerAddress can now modify DID
+```
+
+#### Security Considerations
+
+```mermaid
+flowchart TB
+    subgraph Before["Before Transfer"]
+        B1["Owner: 0xAlice"]
+        B2["Can: add delegates, set attributes, change owner"]
+    end
+
+    subgraph After["After Transfer"]
+        A1["Owner: 0xBob"]
+        A2["Alice: No permissions"]
+        A3["Bob: Full control"]
+    end
+
+    Before -->|changeOwner| After
+
+    Warning["⚠️ IRREVERSIBLE<br/>Alice cannot undo this"]
+    After --> Warning
+```
+
+#### Code Example
+
+```javascript
+// Current owner transfers to new owner
+const currentOwnerKeypair = Secp256k1Keypair.fromPrivateKey(alicePrivateKey);
+const newOwnerAddress = '0xBob...';
+
+await module.changeOwner(did, newOwnerAddress, currentOwnerKeypair);
+
+// After transfer, Alice can no longer modify the DID
+// Only Bob can perform operations now
+```
+
+---
+
+### 7.5 Transaction Processing
+
+All DID document modifications require blockchain transactions. The module handles transaction signing, submission, and confirmation.
+
+#### Transaction Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Module as EthrDIDModule
+    participant Signer as Wallet
+    participant Node as RPC Node
+    participant Network as Blockchain
+
+    App->>Module: Operation (e.g., setAttribute)
+
+    Module->>Signer: Create transaction
+    Signer->>Signer: Sign with private key
+    Signer-->>Module: Signed transaction
+
+    Module->>Node: eth_sendRawTransaction
+    Node->>Network: Broadcast to mempool
+    Network-->>Node: Transaction hash
+    Node-->>Module: txHash
+
+    Module->>Module: waitForTransaction(txHash)
+
+    loop Poll for confirmation
+        Module->>Node: eth_getTransactionReceipt(txHash)
+        Node-->>Module: null (pending)
+    end
+
+    Note over Network: Transaction mined in block
+
+    Module->>Node: eth_getTransactionReceipt(txHash)
+    Node-->>Module: Receipt {blockNumber, status}
+
+    Module-->>App: {txHash, blockNumber, success: true}
+```
+
+#### Error Handling
+
+```mermaid
+flowchart TB
+    subgraph Errors["Common Transaction Errors"]
+        E1["Insufficient gas"]
+        E2["Nonce too low"]
+        E3["Reverted: unauthorized"]
+        E4["Network timeout"]
+    end
+
+    subgraph Handling["Error Handling"]
+        H1["formatEthersError() extracts message"]
+        H2["Throws Error with clear description"]
+    end
+
+    E1 --> H1
+    E2 --> H1
+    E3 --> H1
+    E4 --> H1
+    H1 --> H2
+```
+
+#### Sequential Transaction Processing
+
+When multiple attributes need to be set, transactions are processed sequentially to avoid nonce conflicts:
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Module as EthrDIDModule
+    participant Network as Blockchain
+
+    App->>Module: createDocumentTx(doc with 3 attributes)
+
+    Note over Module: #setAttributesSequentially()
+
+    Module->>Network: setAttribute(attr1) - nonce: 0
+    Network-->>Module: Confirmed
+    Module->>Network: setAttribute(attr2) - nonce: 1
+    Network-->>Module: Confirmed
+    Module->>Network: setAttribute(attr3) - nonce: 2
+    Network-->>Module: Confirmed
+
+    Module-->>App: All attributes set
+
+    Note over Module: Sequential processing ensures<br/>correct nonce ordering
+```
+
+#### Code Example
+
+```javascript
+// Using signAndSend for transaction handling
+const tx = await module.createDocumentTx(didDocument, didKeypair);
+
+// signAndSend handles the entire flow
+const receipt = await module.signAndSend(tx, {
+  confirmations: 1  // Wait for 1 block confirmation
+});
+
+console.log('Transaction hash:', receipt.txHash);
+console.log('Block number:', receipt.blockNumber);
+console.log('Success:', receipt.success);
+```
+
+#### Transaction Receipt Structure
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `txHash` | string | Transaction hash |
+| `blockNumber` | number | Block where tx was mined |
+| `success` | boolean | Transaction status |
+| `gasUsed` | BigNumber | Gas consumed |
+| `events` | array | Emitted events |
+
+---
+
+## 8. Code Examples
 
 ### Approach 1: BBS DID Key (Derive DID from BBS Public Key)
 
@@ -862,7 +1551,7 @@ if (result.verified) {
 
 ---
 
-## 8. Test Coverage Summary
+## 9. Test Coverage Summary
 
 | Test File | Tests | Status |
 |-----------|-------|--------|
@@ -872,15 +1561,16 @@ if (result.verified) {
 | ethr-bbs-real-resolver.test.js | 2 | PASS |
 | ethr-did.integration.test.js | 12 | PASS |
 | ethr-did-bbs.integration.test.js | 9 | PASS |
+| ethr-did-verify-optimistic.integration.test.js | 7 | PASS |
 | ethr-did-verify-presentation-optimistic.test.js | 22 | PASS |
 | ethr-did-bbs-delegation.integration.test.js | 7 | PASS |
-| **TOTAL** | **100** | **ALL PASS** |
+| **TOTAL** | **107** | **ALL PASS** |
 
 See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenarios.
 
 ---
 
-## 9. Comparison: Secp256k1 vs BBS
+## 10. Comparison: Secp256k1 vs BBS
 
 | Aspect | Secp256k1 | BBS (Our Solution) |
 |--------|-----------|-------------------|
@@ -894,9 +1584,117 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 
 ---
 
-## 10. Limitations and Trade-offs
+## 11. Limitations and Trade-offs
 
-### Limitations
+### W3C DID Spec vs did:ethr Implementation
+
+The `did:ethr` method has contract-level limitations that are more restrictive than what the W3C DID Core specification allows.
+
+#### W3C DID Core Specification (Flexible)
+
+The W3C spec allows flexible controller configurations:
+
+```json
+{
+  "id": "did:example:123",
+  "controller": ["did:example:456", "did:key:z6Mk..."],
+  "verificationMethod": [...],
+  "authentication": [...]
+}
+```
+
+| Feature | W3C DID Spec |
+|---------|--------------|
+| Controller | Can be any DID |
+| Multiple controllers | Supported (array) |
+| Controller omitted | Defaults to DID subject |
+| Key types | Any cryptographic scheme |
+
+#### did:ethr Implementation (Restricted)
+
+The EthrDIDRegistry smart contract enforces stricter rules:
+
+```solidity
+// EthrDIDRegistry.sol - Simplified
+contract EthrDIDRegistry {
+    mapping(address => address) public owners;  // Single owner per DID
+
+    modifier onlyOwner(address identity) {
+        require(msg.sender == identityOwner(identity));
+        _;
+    }
+}
+```
+
+| Limitation | did:ethr Reality | Reason |
+|------------|------------------|--------|
+| Single owner only | Yes | Contract design |
+| Owner must be secp256k1 | Yes | Must sign Ethereum transactions |
+| Multi-controller | Not supported | Single `owners` mapping |
+| BBS/Ed25519 as owner | Not supported | Cannot sign Ethereum tx |
+
+#### The Gap Visualized
+
+```mermaid
+flowchart TB
+    subgraph Spec["W3C DID Core Specification"]
+        S1["✓ Multiple controllers"]
+        S2["✓ Any DID as controller"]
+        S3["✓ Any key type"]
+        S4["✓ Flexible authentication"]
+    end
+
+    subgraph Ethr["did:ethr Contract Limitations"]
+        E1["✗ Single owner only"]
+        E2["✗ Must be Ethereum address"]
+        E3["✗ Must be secp256k1 key"]
+        E4["✗ Must sign on-chain tx"]
+    end
+
+    Spec -->|"Restricted by"| Ethr
+```
+
+#### Impact on BBS-Derived DIDs
+
+| Approach | Can Issue Credentials | Can Modify DID On-Chain | Owner |
+|----------|----------------------|------------------------|-------|
+| BBS-derived DID (`did:ethr:0xBBSaddr`) | Yes | **No** (immutable) | None (no secp256k1 key exists) |
+| Secp256k1 DID + BBS key | Yes | **Yes** | Secp256k1 address |
+
+**Key insight**: A BBS-derived address has no corresponding secp256k1 private key, so no one can sign Ethereum transactions for that address. The DID is effectively **immutable** - it cannot be modified on-chain.
+
+```mermaid
+flowchart LR
+    subgraph BBS["BBS Keypair"]
+        B1["BLS12-381 curve"]
+        B2["96-byte public key"]
+        B3["keccak256 → address"]
+    end
+
+    subgraph Result["Result"]
+        R1["Address: 0xBBSderived"]
+        R2["No secp256k1 private key"]
+        R3["Cannot sign Ethereum tx"]
+    end
+
+    BBS --> Result
+    Result -->|"❌"| Registry["EthrDIDRegistry"]
+
+    Note["DID is read-only / immutable"]
+    Registry --> Note
+```
+
+#### When This Matters
+
+| Scenario | BBS-Derived DID | Secp256k1 + BBS |
+|----------|-----------------|-----------------|
+| Issue credentials | ✓ Works | ✓ Works |
+| Revoke BBS key | ✗ Not possible | ✓ `revokeAttribute()` |
+| Rotate BBS key | ✗ Not possible | ✓ Add new, revoke old |
+| Add delegates | ✗ Not possible | ✓ `addDelegate()` |
+| Transfer ownership | ✗ Not possible | ✓ `changeOwner()` |
+
+### Other Limitations
 
 1. **Proof size increase**: +130 bytes for embedded public key
 2. **No key rotation detection**: Old credentials remain valid for original DID (by design)
@@ -909,10 +1707,11 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 | Larger proof size | Zero on-chain storage cost |
 | Old credentials remain valid | No accidental invalidation |
 | First-fail lookup overhead | 10-100x faster for common case |
+| BBS DIDs are immutable | No gas costs, simple setup |
 
 ---
 
-## 11. Future Considerations
+## 12. Future Considerations
 
 1. **Contract-level BBS support**: Could enable on-chain BBS key rotation if needed
 2. **Batch verification**: Optimize for verifying multiple credentials from same issuer
@@ -920,9 +1719,11 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 
 ---
 
-## 12. References
+## 13. References
 
+- [W3C DID Core Specification](https://www.w3.org/TR/did-core/) - Controller and verification method definitions
 - [DID Ethr Method Specification](https://github.com/decentralized-identity/ethr-did-resolver/blob/master/doc/did-method-spec.md)
+- [EthrDIDRegistry Contract](https://github.com/uport-project/ethr-did-registry) - On-chain identity registry
 - [BBS+ Signatures Draft](https://identity.foundation/bbs-signature/draft-irtf-cfrg-bbs-signatures.html)
 - [W3C Verifiable Credentials Data Model](https://www.w3.org/TR/vc-data-model/)
 - [EIP-712: Typed structured data hashing and signing](https://eips.ethereum.org/EIPS/eip-712)
@@ -991,7 +1792,8 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 | `ethr-did-bbs.integration.test.js` | **NEW** | Integration tests for BBS with real blockchain (9 tests). |
 | `ethr-vc-issuance-bbs.test.js` | **NEW** | BBS credential issuance tests with mock DID resolution. |
 | `ethr-vc-issuance-secp256k1.test.js` | **NEW** | Secp256k1 credential issuance tests (split from original). |
-| `ethr-did-verify-optimistic.test.js` | **NEW** | Optimistic credential verification tests. |
+| `ethr-did-verify-optimistic.test.js` | **NEW** | Optimistic credential verification unit tests with mocked blockchain. |
+| `ethr-did-verify-optimistic.integration.test.js` | **NEW** | True fallback integration tests (7 tests). Tests optimistic failure → blockchain success path against live testnet. Validates core optimistic verification mechanism. |
 | `ethr-did-verify-presentation-optimistic.test.js` | **NEW** | Optimistic presentation verification tests (22 tests). |
 | `ethr-did-bbs-delegation.integration.test.js` | **NEW** | BBS delegation lifecycle tests (7 tests). Tests setAttribute/revokeAttribute for BBS key registration and revocation. |
 
@@ -1029,6 +1831,7 @@ packages/credential-sdk/
     ├── ethr-vc-issuance-bbs.test.js                ◄── NEW
     ├── ethr-vc-issuance-secp256k1.test.js          ◄── NEW
     ├── ethr-did-verify-optimistic.test.js          ◄── NEW
+    ├── ethr-did-verify-optimistic.integration.test.js ◄── NEW (7 tests)
     ├── ethr-did-verify-presentation-optimistic.test.js ◄── NEW (22 tests)
     └── ethr-did-bbs-delegation.integration.test.js ◄── NEW (7 tests)
 ```
@@ -1246,7 +2049,77 @@ These tests verify that granular detection correctly identifies DIDs that need b
 
 ---
 
-### C.6 BBS Delegation Lifecycle Tests (`ethr-did-bbs-delegation.integration.test.js`)
+### C.6 True Fallback Integration Tests (`ethr-did-verify-optimistic.integration.test.js`)
+
+Tests the core optimistic verification mechanism against a live testnet. Unlike unit tests with mocks, these tests validate the actual "optimistic failure → blockchain success" path.
+
+#### Test Flow
+
+```mermaid
+sequenceDiagram
+    participant Test as Integration Test
+    participant Module as EthrDIDModule
+    participant Chain as Blockchain
+
+    Note over Test: Step 1: Setup
+    Test->>Chain: Fund account, create DID
+
+    Note over Test: Step 2: Modify on-chain state
+    Test->>Chain: setAttribute(BBS key)
+    Chain-->>Test: TX confirmed
+
+    Note over Test: Step 3: Issue credential
+    Test->>Test: Issue BBS credential
+
+    Note over Test: Step 4: Verify fallback mechanism
+    Test->>Module: verifyCredentialOptimistic()
+    Module->>Module: Try optimistic (default doc)
+    Note over Module: FAILS: BBS key not in default doc
+    Module->>Chain: Fallback to blockchain
+    Chain-->>Module: DID doc with BBS key
+    Module-->>Test: verified: true
+
+    Note over Test: ✓ Core mechanism validated
+```
+
+#### True Fallback Path (5 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Create primary DID | Create DID with Secp256k1 keypair | DID created and funded |
+| 2 | Register BBS key | setAttribute modifies on-chain state | TX confirmed, BBS key in doc |
+| 3 | Issue credential | Issue credential with registered BBS key | Signed credential with BBS proof |
+| 4 | **Fallback verification** | verifyCredentialOptimistic succeeds via fallback | verified=true, DID marked in storage |
+| 5 | Skip optimistic | Subsequent call skips optimistic (DID pre-marked) | verified=true, direct blockchain |
+
+**Test #4 is the critical test** - it validates:
+1. Pure optimistic resolution FAILS (BBS key not in default document)
+2. Blockchain resolution SUCCEEDS (finds registered BBS key)
+3. `verifyCredentialOptimistic` returns success via fallback
+4. DID is marked in storage for future calls
+
+#### Edge Cases (2 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Tampered credential | Credential modified after signing | verified=false (signature invalid) |
+| 2 | Wrong public key in proof | publicKeyBase58 replaced | verified=true (uses on-chain key by fragment ID) |
+
+**Note on Test #2**: For Approach 2 (registered BBS key), verification uses the key found in the DID document by fragment ID (`#delegate-1`), not the embedded `publicKeyBase58` in the proof. This is correct behavior - the on-chain key is authoritative.
+
+#### Run Command
+
+```bash
+ETHR_PRIVATE_KEY=0x... \
+ETHR_NETWORK=vietchain \
+ETHR_NETWORK_RPC_URL=https://rpc.vietcha.in \
+ETHR_REGISTRY_ADDRESS=0xF0889fb2473F91c068178870ae2e1A0408059A03 \
+yarn jest packages/credential-sdk/tests/ethr-did-verify-optimistic.integration.test.js
+```
+
+---
+
+### C.7 BBS Delegation Lifecycle Tests (`ethr-did-bbs-delegation.integration.test.js`)
 
 Tests the full lifecycle of BBS key delegation on ethr DIDs using `setAttribute`/`revokeAttribute`.
 

@@ -61,7 +61,7 @@ This report presents our implementation of BBS+ signature support for `did:ethr`
 
 ### Test Coverage
 
-**93 tests** covering security and functionality, all passing.
+**100 tests** covering security and functionality, all passing.
 
 ---
 
@@ -873,7 +873,8 @@ if (result.verified) {
 | ethr-did.integration.test.js | 12 | PASS |
 | ethr-did-bbs.integration.test.js | 9 | PASS |
 | ethr-did-verify-presentation-optimistic.test.js | 22 | PASS |
-| **TOTAL** | **93** | **ALL PASS** |
+| ethr-did-bbs-delegation.integration.test.js | 7 | PASS |
+| **TOTAL** | **100** | **ALL PASS** |
 
 See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenarios.
 
@@ -963,7 +964,7 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 
 | File | Status | Description |
 |------|--------|-------------|
-| `module.js` | MODIFIED | Core ethr DID module. Added: EOA-like implicit BBS key authorization in `getDocument()` - automatically adds `#keys-bbs` to `assertionMethod` unless explicit BBS key is registered on-chain. Checks for `Bls12381G2VerificationKeyDock2022`, `Bls12381BBSVerificationKeyDock2023`, `Bls12381PSVerificationKeyDock2023`, `Bls12381BBDT16VerificationKeyDock2024` types. |
+| `module.js` | MODIFIED | Core ethr DID module. Added: (1) EOA-like implicit BBS key authorization in `getDocument()` - automatically adds `#keys-bbs` to `assertionMethod` unless explicit BBS key is registered on-chain. (2) Key format normalization in `#getDocumentFromChain()` - converts `publicKeyHex` to `publicKeyBase58` for consistency with other modules. (3) `revokeAttribute()` method for revoking on-chain attributes. |
 | `utils.js` | MODIFIED | Utility functions. Added: `ETHR_BBS_KEY_ID` constant (`#keys-bbs`), `bbsPublicKeyToAddress()` function to derive Ethereum address from 96-byte BBS public key using keccak256, `detectKeypairType()` to distinguish secp256k1 from BBS keypairs, `keypairToAddress()` to extract address from either keypair type. |
 | `verify-optimistic.js` | **NEW** | Optimistic verification functions. Implements `verifyCredentialOptimistic()` and `verifyPresentationOptimistic()` for verification without blockchain RPC calls. Uses storage adapters to track DIDs that need blockchain resolution. Includes granular failure detection for presentations. |
 | `storage.js` | **NEW** | Storage adapters for optimistic resolution. Provides `createMemoryStorage()`, `createLocalStorage()`, and `createSessionStorage()` factories for tracking DIDs that have been modified on-chain. |
@@ -992,6 +993,7 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 | `ethr-vc-issuance-secp256k1.test.js` | **NEW** | Secp256k1 credential issuance tests (split from original). |
 | `ethr-did-verify-optimistic.test.js` | **NEW** | Optimistic credential verification tests. |
 | `ethr-did-verify-presentation-optimistic.test.js` | **NEW** | Optimistic presentation verification tests (22 tests). |
+| `ethr-did-bbs-delegation.integration.test.js` | **NEW** | BBS delegation lifecycle tests (7 tests). Tests setAttribute/revokeAttribute for BBS key registration and revocation. |
 
 ### File Structure Overview
 
@@ -1007,7 +1009,7 @@ packages/credential-sdk/
 │   │   └── helpers.js                              ◄── MODIFIED: Suite routing
 │   └── modules/
 │       └── ethr-did/
-│           ├── module.js                           ◄── MODIFIED: EOA-like auth
+│           ├── module.js                           ◄── MODIFIED: EOA-like auth, key format normalization
 │           ├── utils.js                            ◄── MODIFIED: Address utils
 │           ├── verify-optimistic.js                ◄── NEW: Optimistic verify
 │           ├── storage.js                          ◄── NEW: Storage adapters
@@ -1027,7 +1029,8 @@ packages/credential-sdk/
     ├── ethr-vc-issuance-bbs.test.js                ◄── NEW
     ├── ethr-vc-issuance-secp256k1.test.js          ◄── NEW
     ├── ethr-did-verify-optimistic.test.js          ◄── NEW
-    └── ethr-did-verify-presentation-optimistic.test.js ◄── NEW (22 tests)
+    ├── ethr-did-verify-presentation-optimistic.test.js ◄── NEW (22 tests)
+    └── ethr-did-bbs-delegation.integration.test.js ◄── NEW (7 tests)
 ```
 
 ---
@@ -1243,6 +1246,61 @@ These tests verify that granular detection correctly identifies DIDs that need b
 
 ---
 
+### C.6 BBS Delegation Lifecycle Tests (`ethr-did-bbs-delegation.integration.test.js`)
+
+Tests the full lifecycle of BBS key delegation on ethr DIDs using `setAttribute`/`revokeAttribute`.
+
+#### Lifecycle Steps (5 tests)
+
+| # | Test Case | Scenario |
+|---|-----------|----------|
+| 1 | Create primary DID | Create DID with Secp256k1 keypair, fund with gas |
+| 2 | Register BBS key | Use `setAttribute` with `did/pub/Bls12381G2Key2020/veriKey/base58` format |
+| 3 | Issue and verify | Issue credential with registered BBS key, verify succeeds |
+| 4 | Revoke BBS key | Use `revokeAttribute` to remove BBS key from DID |
+| 5 | Verification fails | Previously-issued credential fails verification after revocation |
+
+#### Additional Verification (2 tests)
+
+| # | Test Case | Scenario |
+|---|-----------|----------|
+| 1 | New credentials fail | New credentials from revoked BBS key fail verification |
+| 2 | Owner can still issue | Owner's secp256k1 key can still issue credentials after BBS revocation |
+
+#### Key Implementation Details
+
+**BBS Key Registration Format:**
+```javascript
+// Register BBS public key as attribute
+await module.setAttribute(
+  did,
+  'did/pub/Bls12381G2Key2020/veriKey/base58',
+  publicKeyBase58,
+  ownerKeypair
+);
+```
+
+**Key Format Normalization:**
+The ethr-did-resolver returns `publicKeyHex` for registered keys, but the SDK standardizes on `publicKeyBase58` for consistency with other modules (cheqd, dock). The `EthrDIDModule.#getDocumentFromChain()` method automatically converts:
+
+```javascript
+// In module.js - normalize verification methods
+if (document.verificationMethod) {
+  document.verificationMethod = document.verificationMethod.map((vm) => {
+    if (vm.publicKeyHex && !vm.publicKeyBase58) {
+      const { publicKeyHex, ...rest } = vm;
+      return {
+        ...rest,
+        publicKeyBase58: b58.encode(Buffer.from(publicKeyHex, 'hex')),
+      };
+    }
+    return vm;
+  });
+}
+```
+
+---
+
 ### Test Execution Commands
 
 ```bash
@@ -1257,4 +1315,11 @@ ETHR_NETWORK=vietchain \
 ETHR_NETWORK_RPC_URL=https://rpc.vietcha.in \
 ETHR_REGISTRY_ADDRESS=0xF0889fb2473F91c068178870ae2e1A0408059A03 \
 yarn jest packages/credential-sdk/tests/ethr-did-bbs.integration.test.js
+
+# Run BBS delegation lifecycle tests (requires RPC + funded account)
+ETHR_PRIVATE_KEY=0x... \
+ETHR_NETWORK=vietchain \
+ETHR_NETWORK_RPC_URL=https://rpc.vietcha.in \
+ETHR_REGISTRY_ADDRESS=0xF0889fb2473F91c068178870ae2e1A0408059A03 \
+yarn jest packages/credential-sdk/tests/ethr-did-bbs-delegation.integration.test.js
 ```

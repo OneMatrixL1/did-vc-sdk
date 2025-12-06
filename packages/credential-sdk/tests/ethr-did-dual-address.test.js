@@ -22,7 +22,6 @@ import {
   addressToDualDID,
   createDualDID,
   bbsPublicKeyToAddress,
-  keypairToAddress,
   generateDefaultDocument,
   ETHR_BBS_KEY_ID,
 } from '../src/modules/ethr-did/utils';
@@ -350,7 +349,7 @@ describe('Dual-Address ethr DIDs', () => {
       expect(result.verified).toBe(true);
     });
 
-    test('rejects credential with wrong BBS keypair for dual-address DID', async () => {
+    test('wrong BBS keypair signs but verification fails for dual-address DID', async () => {
       // Create a different BBS keypair that doesn't match the DID's BBS address
       const wrongBBSKeypair = Bls12381BBSKeyPairDock2023.generate({
         id: 'wrong-key',
@@ -375,10 +374,13 @@ describe('Dual-Address ethr DIDs', () => {
         },
       };
 
-      // Signing should throw because keypair doesn't match DID's BBS address
-      await expect(issueCredential(wrongKeyDoc, credential)).rejects.toThrow(
-        /BBS keypair does not match DID's BBS address/,
-      );
+      // Signing succeeds (no signing-time validation, like Dock module)
+      const signedCredential = await issueCredential(wrongKeyDoc, credential);
+      expect(signedCredential.proof).toBeDefined();
+
+      // But verification fails because keypair doesn't match DID's BBS address
+      const result = await verifyCredential(signedCredential);
+      expect(result.verified).toBe(false);
     });
   });
 

@@ -115,11 +115,13 @@ describe('BBS Security Tests - Bad Actor Scenarios', () => {
         },
       };
 
-      // Signing should fail because attacker's keypair derives to different address than victim's DID
-      // This is caught at signing time for better security (fail fast)
-      await expect(issueCredential(attackerKeyDoc, fakeCredential)).rejects.toThrow(
-        /BBS keypair does not match DID's BBS address/,
-      );
+      // Signing succeeds (no signing-time validation, like Dock module)
+      const signedFakeCredential = await issueCredential(attackerKeyDoc, fakeCredential);
+
+      // But verification FAILS because attacker's publicKeyBase58 derives to
+      // a different address than victim's DID
+      const result = await verifyCredential(signedFakeCredential);
+      expect(result.verified).toBe(false);
     });
 
     test('attacker cannot use victim credential with replaced public key', async () => {
@@ -610,11 +612,13 @@ describe('BBS Security Tests - Bad Actor Scenarios', () => {
         },
       };
 
-      // Signing should fail because attacker's BBS key derives to different address than victim's DID
-      // This is caught at signing time for better security (fail fast)
-      await expect(issueCredential(attackerKeyDoc, fakeCredential)).rejects.toThrow(
-        /BBS keypair does not match DID's BBS address/,
-      );
+      // Signing succeeds (no signing-time validation, like Dock module)
+      const signedFakeCredential = await issueCredential(attackerKeyDoc, fakeCredential);
+
+      // But verification FAILS because attacker's publicKeyBase58 derives to
+      // a different address than victim's secp256k1 DID
+      const result = await verifyCredential(signedFakeCredential);
+      expect(result.verified).toBe(false);
 
       // Cleanup
       delete networkCache[victimSecp256k1DID];
@@ -643,7 +647,7 @@ describe('BBS Security Tests - Bad Actor Scenarios', () => {
       };
 
       // Attacker has their own BBS keypair
-      const attackerKeypair = Bls12381BBSKeyPairDock2023.generate({
+      const attackerBBSKeypair = Bls12381BBSKeyPairDock2023.generate({
         id: 'attacker',
         controller: 'temp',
       });
@@ -653,7 +657,7 @@ describe('BBS Security Tests - Bad Actor Scenarios', () => {
         id: `${legitimateDID}#keys-bbs`,
         controller: legitimateDID,
         type: Bls12381BBS23DockVerKeyName,
-        keypair: attackerKeypair,
+        keypair: attackerBBSKeypair,
       };
 
       const credential = {
@@ -667,11 +671,13 @@ describe('BBS Security Tests - Bad Actor Scenarios', () => {
         },
       };
 
-      // Signing should fail - attacker's keypair derives to different address than the DID
-      // This is caught at signing time for better security (fail fast)
-      await expect(issueCredential(attackerKeyDoc, credential)).rejects.toThrow(
-        /BBS keypair does not match DID's BBS address/,
-      );
+      // Signing succeeds (no signing-time validation, like Dock module)
+      const signedFakeCredential = await issueCredential(attackerKeyDoc, credential);
+
+      // But verification FAILS because attacker's publicKeyBase58 derives to
+      // a different address than the legitimate DID
+      const result = await verifyCredential(signedFakeCredential);
+      expect(result.verified).toBe(false);
 
       // Cleanup
       delete networkCache[legitimateDID];

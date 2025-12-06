@@ -20,6 +20,40 @@ Optimistic DID resolution is a performance optimization that generates default D
 
 ## API Reference
 
+### verifyCredentialOptimistic()
+
+Helper function that tries optimistic resolution first, then falls back to blockchain:
+
+```javascript
+import {
+  EthrDIDModule,
+  verifyCredentialOptimistic,
+} from '@truvera/credential-sdk/modules/ethr-did';
+
+const module = new EthrDIDModule({ networks: [networkConfig] });
+
+const result = await verifyCredentialOptimistic(credential, { module });
+```
+
+### verifyPresentationOptimistic()
+
+Helper function for verifying verifiable presentations with optimistic-first resolution:
+
+```javascript
+import {
+  EthrDIDModule,
+  verifyPresentationOptimistic,
+} from '@truvera/credential-sdk/modules/ethr-did';
+
+const module = new EthrDIDModule({ networks: [networkConfig] });
+
+const result = await verifyPresentationOptimistic(presentation, {
+  module,
+  challenge: 'test-challenge',
+  domain: 'example.com', // optional
+});
+```
+
 ### EthrDIDModule Options
 
 #### Constructor Option
@@ -56,80 +90,11 @@ const doc = generateDefaultDocument('did:ethr:vietchain:0x123...', {
 });
 ```
 
-**Returns:**
-```javascript
-{
-  '@context': [
-    'https://www.w3.org/ns/did/v1',
-    'https://w3id.org/security/suites/secp256k1recovery-2020/v2',
-  ],
-  id: 'did:ethr:vietchain:0x123...',
-  verificationMethod: [{
-    id: 'did:ethr:vietchain:0x123...#controller',
-    type: 'EcdsaSecp256k1RecoveryMethod2020',
-    controller: 'did:ethr:vietchain:0x123...',
-    blockchainAccountId: 'eip155:84005:0x123...',
-  }],
-  authentication: ['did:ethr:vietchain:0x123...#controller'],
-  assertionMethod: [
-    'did:ethr:vietchain:0x123...#controller',
-    'did:ethr:vietchain:0x123...#keys-bbs'
-  ],
-}
-```
-
-### verifyCredentialOptimistic()
-
-Helper function for frontend clients that handles optimistic-first verification with automatic fallback:
-
-```javascript
-import {
-  EthrDIDModule,
-  verifyCredentialOptimistic,
-  createLocalStorageAdapter,
-} from '@truvera/credential-sdk/modules/ethr-did';
-
-const module = new EthrDIDModule({ networks: [networkConfig] });
-
-const result = await verifyCredentialOptimistic(credential, {
-  module,
-  storage: createLocalStorageAdapter(), // optional
-});
-```
-
-### verifyPresentationOptimistic()
-
-Helper function for verifying verifiable presentations with optimistic-first resolution. Handles multiple DIDs (presenter + all credential issuers) and uses granular failure detection to mark only the specific DIDs that fail:
-
-```javascript
-import {
-  EthrDIDModule,
-  verifyPresentationOptimistic,
-  createMemoryStorageAdapter,
-} from '@truvera/credential-sdk/modules/ethr-did';
-
-const module = new EthrDIDModule({ networks: [networkConfig] });
-
-const result = await verifyPresentationOptimistic(presentation, {
-  module,
-  storage: createMemoryStorageAdapter(), // optional
-  challenge: 'test-challenge',
-  domain: 'example.com', // optional
-});
-```
-
-**Key Features:**
-- Extracts all DIDs from the presentation (holder + all credential issuers)
-- Tries optimistic resolution first for all DIDs
-- On failure, identifies which specific DID(s) failed (granular detection)
-- Only marks the failed DIDs in storage
-- Falls back to blockchain resolution
-
 ---
 
 ## Usage Patterns
 
-### Frontend - Simple (No Storage)
+### Simple Usage
 
 Always tries optimistic first, falls back to blockchain on failure:
 
@@ -140,55 +105,7 @@ const module = new EthrDIDModule({ networks: [networkConfig] });
 const result = await verifyCredentialOptimistic(credential, { module });
 ```
 
-### Frontend - With localStorage
-
-Remembers which DIDs need blockchain resolution across page refreshes:
-
-```javascript
-import {
-  EthrDIDModule,
-  verifyCredentialOptimistic,
-  createLocalStorageAdapter,
-} from '@truvera/credential-sdk/modules/ethr-did';
-
-const module = new EthrDIDModule({ networks: [networkConfig] });
-const storage = createLocalStorageAdapter();
-
-const result = await verifyCredentialOptimistic(credential, { module, storage });
-```
-
-### Frontend - With sessionStorage
-
-Clears when tab/window is closed:
-
-```javascript
-import {
-  verifyCredentialOptimistic,
-  createSessionStorageAdapter,
-} from '@truvera/credential-sdk/modules/ethr-did';
-
-const storage = createSessionStorageAdapter();
-const result = await verifyCredentialOptimistic(credential, { module, storage });
-```
-
-### Frontend - With Memory Storage
-
-Clears on page refresh, good for SPAs:
-
-```javascript
-import {
-  verifyCredentialOptimistic,
-  createMemoryStorageAdapter,
-} from '@truvera/credential-sdk/modules/ethr-did';
-
-const storage = createMemoryStorageAdapter();
-const result = await verifyCredentialOptimistic(credential, { module, storage });
-
-// Clear cache when needed
-storage.clear();
-```
-
-### Frontend - Verifiable Presentations
+### Verifiable Presentations
 
 Verify presentations with multiple credentials from different issuers:
 
@@ -196,15 +113,12 @@ Verify presentations with multiple credentials from different issuers:
 import {
   EthrDIDModule,
   verifyPresentationOptimistic,
-  createMemoryStorageAdapter,
 } from '@truvera/credential-sdk/modules/ethr-did';
 
 const module = new EthrDIDModule({ networks: [networkConfig] });
-const storage = createMemoryStorageAdapter();
 
 const result = await verifyPresentationOptimistic(presentation, {
   module,
-  storage,
   challenge: 'unique-challenge-from-verifier',
   domain: 'verifier.example.com',
 });
@@ -216,7 +130,7 @@ if (result.verified) {
 }
 ```
 
-### Backend - Manual Control with Redis
+### Backend - Manual Control
 
 Backend has full control over caching strategy:
 
@@ -226,65 +140,22 @@ import { verifyCredential } from '@truvera/credential-sdk/vc';
 
 const module = new EthrDIDModule({ networks: [networkConfig] });
 
-async function verify(credential, redis) {
-  const issuerDID = credential.issuer;
-  const isModified = await redis.exists(`modified:${issuerDID}`);
-
-  // Create resolver with optimistic flag based on cache
-  const resolver = {
+async function verify(credential) {
+  // Try optimistic first
+  const optimisticResolver = {
     supports: (id) => module.supports(id),
-    resolve: (id) => module.resolve(id, { optimistic: !isModified }),
+    resolve: (id) => module.resolve(id, { optimistic: true }),
   };
 
-  let result = await verifyCredential(credential, { resolver });
+  let result = await verifyCredential(credential, { resolver: optimisticResolver });
 
-  if (!result.verified && !isModified) {
-    // Mark as modified and retry with blockchain
-    await redis.setex(`modified:${issuerDID}`, 3600, '1');
+  if (!result.verified) {
+    // Fallback to blockchain
     result = await verifyCredential(credential, { resolver: module });
   }
 
   return result;
 }
-```
-
-### Backend - Using verifyCredentialOptimistic with Redis
-
-```javascript
-const storage = {
-  has: async (did) => !!(await redis.get(`modified:${did}`)),
-  set: async (did) => redis.setex(`modified:${did}`, 3600, '1'),
-};
-
-const result = await verifyCredentialOptimistic(credential, { module, storage });
-```
-
----
-
-## Storage Adapter Interface
-
-Custom storage adapters must implement:
-
-```typescript
-interface StorageAdapter {
-  has(did: string): Promise<boolean>;  // Check if DID needs blockchain
-  set(did: string): Promise<void>;     // Mark DID as needing blockchain
-}
-```
-
-#### Example: IndexedDB Adapter
-
-```javascript
-const indexedDBStorage = {
-  has: async (did) => {
-    const db = await openDB();
-    return !!(await db.get('modifiedDIDs', did));
-  },
-  set: async (did) => {
-    const db = await openDB();
-    await db.put('modifiedDIDs', { did, timestamp: Date.now() });
-  },
-};
 ```
 
 ---
@@ -294,21 +165,8 @@ const indexedDBStorage = {
 | Test File | Tests | Description |
 |-----------|-------|-------------|
 | `ethr-did-optimistic.test.js` | 20 | EthrDIDModule optimistic option |
-| `ethr-did-verify-optimistic.test.js` | 18 | verifyCredentialOptimistic helper |
-| `ethr-did-verify-presentation-optimistic.test.js` | 16 | verifyPresentationOptimistic helper |
-
-### Key Test Cases
-
-1. `generateDefaultDocument()` returns correct structure
-2. `getDocument({ optimistic: true })` returns default document (no RPC)
-3. `getDocument({ optimistic: false })` fetches from blockchain
-4. Constructor `optimistic: true` sets default behavior
-5. Per-call option overrides constructor default
-6. BBS verification works with optimistic document
-7. Storage adapter marks DIDs on verification failure
-8. Storage adapter skips optimistic for known modified DIDs
-9. VP verification with multiple credentials from different issuers
-10. Granular failure detection marks only failed issuer DIDs
+| `ethr-did-verify-optimistic.test.js` | 5 | verifyCredentialOptimistic helper |
+| `ethr-did-verify-presentation-optimistic.test.js` | 10 | verifyPresentationOptimistic helper |
 
 ---
 
@@ -318,11 +176,8 @@ const indexedDBStorage = {
 |------|--------|
 | `src/modules/ethr-did/module.js` | Added `optimistic` option, `getDefaultDocument()`, refactored `getDocument()` |
 | `src/modules/ethr-did/utils.js` | Added `generateDefaultDocument()` |
-| `src/modules/ethr-did/verify-optimistic.js` | `verifyCredentialOptimistic()`, `verifyPresentationOptimistic()`, and storage adapters |
+| `src/modules/ethr-did/verify-optimistic.js` | `verifyCredentialOptimistic()`, `verifyPresentationOptimistic()` |
 | `src/modules/ethr-did/index.js` | Export new functions |
-| `tests/ethr-did-optimistic.test.js` | 20 tests for EthrDIDModule optimistic |
-| `tests/ethr-did-verify-optimistic.test.js` | 18 tests for verifyCredentialOptimistic |
-| `tests/ethr-did-verify-presentation-optimistic.test.js` | 16 tests for verifyPresentationOptimistic |
 
 ---
 
@@ -332,18 +187,16 @@ const indexedDBStorage = {
 
 - Default DIDs (no on-chain changes): **100% faster** (0 RPC calls)
 - First verification of modified DID: **Same** (2 verifications, but 2nd has RPC)
-- Subsequent verifications of modified DID with storage: **Same** (1 verification + 1 RPC)
 
 ### When to Avoid
 
 - All DIDs are modified on-chain
-- Storage overhead is prohibitive
 - Verification failure rate is very high
 
 ### Recommended Strategy
 
 | Scenario | Recommendation |
 |----------|----------------|
-| Frontend, most DIDs unmodified | `verifyCredentialOptimistic` with `sessionStorage` |
-| Backend, high volume | Manual control with Redis, TTL 1 hour |
-| Backend, low volume | `verifyCredentialOptimistic` with memory storage |
+| Frontend | `verifyCredentialOptimistic` |
+| Backend, high volume | Manual control with caching |
+| Backend, low volume | `verifyCredentialOptimistic` |

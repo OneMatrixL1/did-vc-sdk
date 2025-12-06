@@ -2,8 +2,7 @@
  * Unit tests for verifyPresentationOptimistic()
  *
  * Tests the optimistic verification helper for verifiable presentations that
- * tries optimistic resolution first, identifies which DIDs fail, and falls
- * back to blockchain if needed.
+ * tries optimistic resolution first, then falls back to blockchain if needed.
  */
 
 import b58 from 'bs58';
@@ -15,7 +14,6 @@ import {
   addressToDID,
   keypairToAddress,
   verifyPresentationOptimistic,
-  createMemoryStorageAdapter,
 } from '../src/modules/ethr-did';
 import mockFetch from './mocks/fetch';
 import networkCache from './utils/network-cache';
@@ -239,7 +237,7 @@ describe('verifyPresentationOptimistic()', () => {
       ).rejects.toThrow('"presentation" property is required');
     });
 
-    test('verifies valid presentation without storage', async () => {
+    test('verifies valid presentation', async () => {
       const result = await verifyPresentationOptimistic(signedPresentation, {
         module: mockModule,
         challenge: testChallenge,
@@ -280,101 +278,6 @@ describe('verifyPresentationOptimistic()', () => {
       });
 
       expect(result.verified).toBe(false);
-    });
-  });
-
-  describe('With memory storage', () => {
-    test('verifies presentation and does not mark DIDs on success', async () => {
-      const storage = createMemoryStorageAdapter();
-
-      const result = await verifyPresentationOptimistic(signedPresentation, {
-        module: mockModule,
-        storage,
-        challenge: testChallenge,
-        domain: testDomain,
-      });
-
-      expect(result.verified).toBe(true);
-      // Neither issuer nor holder should be marked on success
-      expect(await storage.has(issuerDID)).toBe(false);
-      expect(await storage.has(holderDID)).toBe(false);
-    });
-
-    test('skips optimistic when any DID is in storage', async () => {
-      const storage = createMemoryStorageAdapter();
-
-      // Pre-mark issuer DID
-      await storage.set(issuerDID);
-
-      const result = await verifyPresentationOptimistic(signedPresentation, {
-        module: mockModule,
-        storage,
-        challenge: testChallenge,
-        domain: testDomain,
-      });
-
-      // Should still verify (goes directly to blockchain fallback)
-      expect(result.verified).toBe(true);
-    });
-
-    test('skips optimistic when holder DID is in storage', async () => {
-      const storage = createMemoryStorageAdapter();
-
-      // Pre-mark holder DID
-      await storage.set(holderDID);
-
-      const result = await verifyPresentationOptimistic(signedPresentation, {
-        module: mockModule,
-        storage,
-        challenge: testChallenge,
-        domain: testDomain,
-      });
-
-      // Should still verify (goes directly to blockchain fallback)
-      expect(result.verified).toBe(true);
-    });
-  });
-
-  describe('DID extraction', () => {
-    test('extracts holder DID from string holder field', async () => {
-      const storage = createMemoryStorageAdapter();
-
-      const result = await verifyPresentationOptimistic(signedPresentation, {
-        module: mockModule,
-        storage,
-        challenge: testChallenge,
-        domain: testDomain,
-      });
-
-      expect(result.verified).toBe(true);
-      // Holder should not be marked on success
-      expect(await storage.has(holderDID)).toBe(false);
-    });
-
-    test('extracts issuer DID from credentials and marks on failure', async () => {
-      const storage = createMemoryStorageAdapter();
-
-      // Tamper credential to trigger failure detection
-      const tamperedPresentation = {
-        ...signedPresentation,
-        verifiableCredential: [{
-          ...signedPresentation.verifiableCredential[0],
-          credentialSubject: {
-            ...signedPresentation.verifiableCredential[0].credentialSubject,
-            alumniOf: 'Tampered Value',
-          },
-        }],
-      };
-
-      await verifyPresentationOptimistic(tamperedPresentation, {
-        module: mockModule,
-        storage,
-        challenge: testChallenge,
-        domain: testDomain,
-      });
-
-      // Issuer DID should be marked because the credential failed
-      expect(await storage.has(issuerDID)).toBe(true);
     });
   });
 
@@ -430,23 +333,16 @@ describe('verifyPresentationOptimistic()', () => {
     });
 
     test('verifies VP with multiple credentials from different issuers', async () => {
-      const storage = createMemoryStorageAdapter();
-
       const result = await verifyPresentationOptimistic(multiCredPresentation, {
         module: mockModule,
-        storage,
         challenge: testChallenge,
         domain: testDomain,
       });
 
       expect(result.verified).toBe(true);
-      // No DIDs should be marked on success
-      expect(await storage.has(issuerDID)).toBe(false);
-      expect(await storage.has(secondIssuerDID)).toBe(false);
-      expect(await storage.has(holderDID)).toBe(false);
     });
 
-    test('deduplicates DIDs when presenter is also an issuer', async () => {
+    test('handles self-issued credential', async () => {
       // Create self-issued credential
       const selfIssuedCred = await issueCredential(holderKeyDoc, {
         '@context': [
@@ -474,11 +370,8 @@ describe('verifyPresentationOptimistic()', () => {
         testDomain,
       );
 
-      const storage = createMemoryStorageAdapter();
-
       const result = await verifyPresentationOptimistic(selfIssuedPresentation, {
         module: mockModule,
-        storage,
         challenge: testChallenge,
         domain: testDomain,
       });
@@ -532,34 +425,6 @@ describe('verifyPresentationOptimistic()', () => {
 
       // Empty presentation should still verify (just the proof)
       expect(result.verified).toBe(true);
-    });
-
-    test('handles credentials with object issuer format', async () => {
-      // Note: This tests the DID extraction logic, not full verification
-      const storage = createMemoryStorageAdapter();
-
-      // Create credential with object issuer format
-      const credWithObjectIssuer = {
-        ...signedCredential,
-        issuer: { id: issuerDID, name: 'Test Issuer Org' },
-      };
-
-      const presentationWithObjectIssuer = {
-        ...signedPresentation,
-        verifiableCredential: [credWithObjectIssuer],
-      };
-
-      // Will fail verification (signature invalid due to modification)
-      // but should correctly extract and mark the issuer DID
-      await verifyPresentationOptimistic(presentationWithObjectIssuer, {
-        module: mockModule,
-        storage,
-        challenge: testChallenge,
-        domain: testDomain,
-      });
-
-      // The issuer DID should have been correctly extracted
-      expect(await storage.has(issuerDID)).toBe(true);
     });
   });
 });

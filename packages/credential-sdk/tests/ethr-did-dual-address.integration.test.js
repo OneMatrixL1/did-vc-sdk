@@ -280,10 +280,32 @@ describe('Dual-Address ethr DIDs Integration', () => {
         },
       };
 
-      // Signing should fail because keypair doesn't match DID's BBS address
-      await expect(issueCredential(wrongKeyDoc, credential)).rejects.toThrow(
-        /BBS keypair does not match DID's BBS address/,
-      );
+      // Signing succeeds (no signing-time validation, like Dock module)
+      const signedCredential = await issueCredential(wrongKeyDoc, credential);
+      expect(signedCredential.proof).toBeDefined();
+
+      // But verification should fail because keypair doesn't match DID's BBS address
+      const resolver = {
+        supports: (id) => isEthrDID(id.split('#')[0]),
+        resolve: (id) => {
+          const didPart = id.split('#')[0];
+          const doc = generateDefaultDocument(didPart, { chainId: 84005 });
+
+          if (id.includes('#')) {
+            const fragment = id.split('#')[1];
+            const vm = doc.verificationMethod.find(
+              (v) => v.id === id || v.id.endsWith(`#${fragment}`),
+            );
+            if (vm) {
+              return { '@context': doc['@context'], ...vm };
+            }
+          }
+          return doc;
+        },
+      };
+
+      const result = await verifyCredential(signedCredential, { resolver });
+      expect(result.verified).toBe(false);
     });
   });
 

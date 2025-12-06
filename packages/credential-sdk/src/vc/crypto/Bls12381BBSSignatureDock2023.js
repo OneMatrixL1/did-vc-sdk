@@ -49,30 +49,6 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
     const { KeyPair } = this;
     const paramGetter = this.paramGenerator;
 
-    // Extract DID from verification method if available
-    const verificationMethodId = typeof verificationMethod === 'object'
-      ? verificationMethod.id || verificationMethod
-      : verificationMethod;
-    const didPart = verificationMethodId?.split('#')[0];
-
-    // Validate BBS keypair matches DID's BBS address (for ethr DIDs)
-    if (didPart && isEthrDID(didPart) && keypair?.publicKeyBuffer) {
-      const parsed = parseDID(didPart);
-      const derivedBBSAddress = bbsPublicKeyToAddress(keypair.publicKeyBuffer);
-
-      // Determine expected BBS address based on DID type
-      const expectedBBSAddress = parsed.isDualAddress
-        ? parsed.bbsAddress
-        : parsed.address;
-
-      if (derivedBBSAddress.toLowerCase() !== expectedBBSAddress.toLowerCase()) {
-        throw new Error(
-          `BBS keypair does not match DID's BBS address. `
-          + `Derived: ${derivedBBSAddress}, Expected: ${expectedBBSAddress}`,
-        );
-      }
-    }
-
     // Get base signer from parent
     const baseSigner = {
       id: verificationMethod,
@@ -140,7 +116,12 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
         const derivedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
         const didParts = parseDID(didPart);
 
-        if (derivedAddress.toLowerCase() === didParts.address.toLowerCase()) {
+        // For dual-address DIDs, check against bbsAddress; for single-address, use address
+        const expectedAddress = didParts.isDualAddress
+          ? didParts.bbsAddress
+          : didParts.address;
+
+        if (derivedAddress.toLowerCase() === expectedAddress.toLowerCase()) {
           // Address-based: BBS key derives to DID's address - use recovery method
           return Bls12381BBSRecoveryMethod2023.fromProof(proof, didPart);
         }

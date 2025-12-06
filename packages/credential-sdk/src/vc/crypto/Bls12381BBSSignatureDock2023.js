@@ -39,7 +39,8 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
   }
 
   /**
-   * Override signerFactory to include publicKeyBase58 for ethr DID address verification
+   * Override signerFactory to include publicKeyBase58 for ethr DID address verification.
+   * Also validates that BBS keypair matches the DID's BBS address for ethr DIDs.
    * @param keypair - BBS keypair
    * @param verificationMethod - Verification method ID
    * @returns {object} Signer object with id, publicKeyBase58, and sign method
@@ -115,7 +116,12 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
         const derivedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
         const didParts = parseDID(didPart);
 
-        if (derivedAddress.toLowerCase() === didParts.address.toLowerCase()) {
+        // For dual-address DIDs, check against bbsAddress; for single-address, use address
+        const expectedAddress = didParts.isDualAddress
+          ? didParts.bbsAddress
+          : didParts.address;
+
+        if (derivedAddress.toLowerCase() === expectedAddress.toLowerCase()) {
           // Address-based: BBS key derives to DID's address - use recovery method
           return Bls12381BBSRecoveryMethod2023.fromProof(proof, didPart);
         }

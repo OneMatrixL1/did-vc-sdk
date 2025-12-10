@@ -1,14 +1,15 @@
 /**
- * TESTCASE 3: Cross-System Customer Tier Verification
+ * TESTCASE 3: Cross-System Customer Tier Verification with BBS Signatures
  *
  * Real-world Flow:
- * 1. System A (e-commerce) issues VIP tier credential to user
+ * 1. System A (e-commerce) issues VIP tier credential to user with BBS signature
  * 2. User creates Verifiable Presentation containing the VC
  * 3. User signs VP with their own key (proves ownership)
  * 4. System B (partner service) verifies VP (includes VC verification)
  * 5. System B grants access based on tier
  *
  * Security Features:
+ * - BBS signatures for privacy-preserving credentials
  * - VP proves user owns the credential
  * - Challenge-response prevents replay attacks
  * - Tamper detection on both VP and VC
@@ -17,75 +18,76 @@
  * Run: npm test -- testcase3
  */
 
+import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import mockFetch from './mocks/fetch';
 import networkCache from './utils/network-cache';
-import b58 from 'bs58';
 import {
     issueCredential,
 } from '../src/vc';
 import { signPresentation, verifyPresentation } from '../src/vc/presentations';
-import { Secp256k1Keypair } from '../src/keypairs';
+import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
+import { Bls12381BBS23DockVerKeyName } from '../src/vc/crypto/constants';
 import { addressToDID, keypairToAddress } from '../src/modules/ethr-did/utils';
-import { EcdsaSecp256k1VerKeyName } from '../src/vc/crypto/constants';
+import customerTierContext from './testcase3/customer-tier-context.json';
 
 // Setup mock to avoid network calls
 mockFetch();
 
 // Constants
 const CREDENTIALS_V1 = 'https://www.w3.org/2018/credentials/v1';
-const CREDENTIALS_EXAMPLES = 'https://www.w3.org/2018/credentials/examples/v1';
+const BBS_V1 = 'https://ld.truvera.io/security/bbs/v1';
 const DID_V1 = 'https://www.w3.org/ns/did/v1';
 const SECURITY_V2 = 'https://w3id.org/security/v2';
 const VIETCHAIN_NETWORK = 'vietchain';
 
-/**
- * Get raw public key bytes from Secp256k1Keypair
- */
-function getRawPublicKeyBytes(keypair) {
-    const pk = keypair.publicKey();
-    return pk.value;
-}
+// Custom context - will be hosted on GitHub after push
+const CUSTOMER_TIER_CONTEXT = 'https://raw.githubusercontent.com/OneMatrixL1/did-vc-sdk/testcase3/packages/credential-sdk/tests/testcase3/customer-tier-context.json';
+
+// Cache the context locally for testing (before pushing to GitHub)
+networkCache[CUSTOMER_TIER_CONTEXT] = customerTierContext;
 
 /**
- * Create key document and register DID document in networkCache
- * Following SDK pattern from ethr-vc-issuance-secp256k1.test.js
+ * Helper to create key document and register minimal DID document for BBS keypair.
+ *
+ * IMPORTANT: This creates a minimal DID document that does NOT contain the BBS public key.
+ * Verification relies on the BBS address-based recovery mechanism:
+ * 1. The proof contains publicKeyBase58 (embedded during signing)
+ * 2. Verifier derives address from the embedded public key
+ * 3. Verifier compares derived address with DID's address
+ * 4. If match, verifies BBS signature using the embedded public key
+ *
+ * @param {Bls12381BBSKeyPairDock2023} keypair - BBS keypair
+ * @param {string} did - DID string
+ * @returns {object} keyDoc for signing
  */
-function createKeyDocAndRegisterDID(keypair, did) {
-    const publicKeyBytes = getRawPublicKeyBytes(keypair);
-    const publicKeyBase58 = b58.encode(publicKeyBytes);
-    const keyId = `${did}#keys-1`;
+function createBBSKeyDocWithMinimalDIDDocument(keypair, did) {
+    const keyId = `${did}#keys-bbs`;
+    const address = did.split(':').pop();
 
     const keyDoc = {
         id: keyId,
         controller: did,
-        type: EcdsaSecp256k1VerKeyName,
-        publicKey: keypair.publicKey(),
+        type: Bls12381BBS23DockVerKeyName,
         keypair,
     };
 
-    // Register key
-    networkCache[keyId] = {
-        '@context': SECURITY_V2,
-        id: keyId,
-        type: EcdsaSecp256k1VerKeyName,
-        controller: did,
-        publicKeyBase58,
-    };
-
-    // Register DID document
+    // Register minimal DID document - NO BBS public key here!
+    // The BBS public key comes from the proof's publicKeyBase58 field
     networkCache[did] = {
         '@context': [DID_V1, SECURITY_V2],
         id: did,
         verificationMethod: [
             {
-                id: keyId,
-                type: EcdsaSecp256k1VerKeyName,
+                // Default controller key (secp256k1 recovery method)
+                id: `${did}#controller`,
+                type: 'EcdsaSecp256k1RecoveryMethod2020',
                 controller: did,
-                publicKeyBase58,
+                blockchainAccountId: `eip155:1:${address}`,
             },
         ],
-        assertionMethod: [keyId],
-        authentication: [keyId],
+        // Authorize both controller and BBS key ID for assertions
+        assertionMethod: [`${did}#controller`, keyId],
+        authentication: [`${did}#controller`],
     };
 
     return keyDoc;
@@ -99,109 +101,85 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
     // Credentials
     let vip1Credential;
 
-    beforeAll(() => {
-        console.log('\n' + '='.repeat(70));
-        console.log('🚀 TESTCASE 3: Cross-System Customer Tier Verification');
-        console.log('='.repeat(70) + '\n');
+    beforeAll(async () => {
+        // Initialize WASM for BBS operations
+        await initializeWasm();
 
-        // ========== Setup System A (Issuer) ==========
-        const systemAKeypair = Secp256k1Keypair.random();
+        // ========== Setup System A (Issuer) with BBS ==========
+        const systemAKeypair = Bls12381BBSKeyPairDock2023.generate({
+            id: 'system-a-key',
+            controller: 'temp',
+        });
         systemADID = addressToDID(keypairToAddress(systemAKeypair), VIETCHAIN_NETWORK);
-        systemAKeyDoc = createKeyDocAndRegisterDID(systemAKeypair, systemADID);
+        systemAKeyDoc = createBBSKeyDocWithMinimalDIDDocument(systemAKeypair, systemADID);
 
         expect(systemADID).toMatch(/^did:ethr:vietchain:0x[0-9a-fA-F]{40}$/);
 
-        // ========== Setup User (Holder) ==========
-        const userKeypair = Secp256k1Keypair.random();
+        // ========== Setup User (Holder) with BBS ==========
+        const userKeypair = Bls12381BBSKeyPairDock2023.generate({
+            id: 'user-key',
+            controller: 'temp',
+        });
         userDID = addressToDID(keypairToAddress(userKeypair), VIETCHAIN_NETWORK);
-        userKeyDoc = createKeyDocAndRegisterDID(userKeypair, userDID);
+        userKeyDoc = createBBSKeyDocWithMinimalDIDDocument(userKeypair, userDID);
 
         expect(userDID).toMatch(/^did:ethr:vietchain:0x[0-9a-fA-F]{40}$/);
         expect(userDID).not.toBe(systemADID);
-
-        console.log('✅ Setup complete:');
-        console.log(`   System A DID: ${systemADID}`);
-        console.log(`   User DID: ${userDID}\n`);
     });
 
     describe('Scenario 1: System A issues customer tier credential', () => {
-        test('System A issues VIP1 credential to user', async () => {
-            console.log('='.repeat(70));
-            console.log('🏪 SCENARIO 1: System A - E-commerce Platform');
-            console.log('='.repeat(70) + '\n');
-
-            console.log('📝 User logs into System A');
-            console.log('🔍 Checking purchase history:');
-            console.log('   - Total spent: $250,000');
-            console.log('   - Member since: 2020-03-15');
-            console.log('💎 → Qualifies for VIP1 tier!\n');
-
-            // Build unsigned credential
+        test('System A issues VIP1 credential to user with BBS signature', async () => {
+            // Build unsigned credential using custom context
             const unsignedCredential = {
                 '@context': [
                     CREDENTIALS_V1,
-                    CREDENTIALS_EXAMPLES,
+                    BBS_V1,
+                    CUSTOMER_TIER_CONTEXT,
                 ],
                 type: ['VerifiableCredential', 'CustomerTierCredential'],
                 issuer: systemADID,
                 issuanceDate: '2024-01-01T00:00:00Z',
                 credentialSubject: {
                     id: userDID,
-                    alumniOf: 'VIP1 Tier - System A E-commerce',
+                    customerTier: {
+                        tier: 'VIP1',
+                        tierName: 'VIP1 - Premium Customer',
+                        tierDescription: 'Top tier customer from System A E-commerce',
+                        totalSpent: '$250,000',
+                        memberSince: '2020-03-15',
+                        accountId: 'SYSCUST-12345',
+                    },
                 },
             };
 
-            console.log('🔐 System A issuing credential...');
-
-            // Issue credential using SDK
+            // Issue credential using SDK with BBS
             vip1Credential = await issueCredential(systemAKeyDoc, unsignedCredential);
 
             // Validate
             expect(vip1Credential).toBeDefined();
             expect(vip1Credential.issuer).toBe(systemADID);
             expect(vip1Credential.credentialSubject.id).toBe(userDID);
+            expect(vip1Credential.credentialSubject.customerTier.tier).toBe('VIP1');
             expect(vip1Credential.proof).toBeDefined();
-            expect(vip1Credential.proof.type).toBe('EcdsaSecp256k1Signature2019');
-
-            console.log('✅ Credential issued successfully!\n');
-            console.log('📄 Credential details:');
-            console.log(`   Issuer: ${vip1Credential.issuer}`);
-            console.log(`   Subject: ${vip1Credential.credentialSubject.id}`);
-            console.log(`   Tier: ${vip1Credential.credentialSubject.alumniOf}`);
-            console.log(`   Signature: ${vip1Credential.proof.type}\n`);
-
-            console.log('💾 User saved credential to digital wallet\n');
+            expect(vip1Credential.proof.type).toBe('Bls12381BBSSignatureDock2023');
         }, 30000);
     });
 
     describe('Scenario 2: User presents credential to System B via VP', () => {
-        test('User creates and signs Verifiable Presentation', async () => {
-            console.log('='.repeat(70));
-            console.log('🏢 SCENARIO 2: User presents to System B');
-            console.log('='.repeat(70) + '\n');
-
-            console.log('👤 User accessing System B...');
-            console.log('🎫 System B requests proof of VIP tier\n');
-
+        test('User creates and signs Verifiable Presentation with BBS', async () => {
             // System B generates challenge (prevents replay attack)
             const challenge = `system-b-challenge-${Date.now()}`;
             const domain = 'systemb.example.com';
 
-            console.log('🔐 System B sends challenge:');
-            console.log(`   Challenge: ${challenge.substring(0, 40)}...`);
-            console.log(`   Domain: ${domain}\n`);
-
             // User creates VP containing the VC
             const unsignedPresentation = {
-                '@context': [CREDENTIALS_V1],
+                '@context': [CREDENTIALS_V1, BBS_V1],
                 type: ['VerifiablePresentation'],
                 verifiableCredential: [vip1Credential],
                 holder: userDID,
             };
 
-            console.log('📝 User creating Verifiable Presentation...');
-
-            // User signs VP with their key (proves ownership)
+            // User signs VP with their BBS key (proves ownership)
             const signedVP = await signPresentation(
                 unsignedPresentation,
                 userKeyDoc,
@@ -214,26 +192,10 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
             expect(signedVP.holder).toBe(userDID);
             expect(signedVP.verifiableCredential).toHaveLength(1);
             expect(signedVP.proof).toBeDefined();
-            expect(signedVP.proof.type).toBe('EcdsaSecp256k1Signature2019');
+            expect(signedVP.proof.type).toBe('Bls12381BBSSignatureDock2023');
             expect(signedVP.proof.challenge).toBe(challenge);
             expect(signedVP.proof.domain).toBe(domain);
             expect(signedVP.proof.proofPurpose).toBe('authentication');
-
-            console.log('✅ VP created and signed!\n');
-            console.log('📄 Presentation details:');
-            console.log(`   Holder: ${signedVP.holder}`);
-            console.log(`   VCs included: ${signedVP.verifiableCredential.length}`);
-            console.log(`   Signature: ${signedVP.proof.type}`);
-            console.log(`   Purpose: ${signedVP.proof.proofPurpose}\n`);
-
-            console.log('📤 User sending VP to System B...\n');
-
-            // System B verifies VP (including VC inside)
-            console.log('🔍 System B verifying presentation...');
-            console.log('   ⏳ Checking VP signature (proof of ownership)');
-            console.log('   ⏳ Verifying challenge matches');
-            console.log('   ⏳ Verifying VC inside (issuer, signature)');
-            console.log('   ⏳ Checking expiration\n');
 
             const result = await verifyPresentation(signedVP, {
                 challenge,
@@ -245,27 +207,9 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
             expect(result.presentationResult.verified).toBe(true);
             expect(result.credentialResults).toBeDefined();
             expect(result.credentialResults[0].verified).toBe(true);
-
-            console.log('✅ VERIFICATION SUCCESSFUL!\n');
-            console.log('📊 Verified information:');
-            console.log(`   VP Holder: ${signedVP.holder}`);
-            console.log(`   VC Issuer: ${vip1Credential.issuer} (System A)`);
-            console.log(`   Tier: ${vip1Credential.credentialSubject.alumniOf}\n`);
-
-            console.log('🎉 ACCESS GRANTED!');
-            console.log('   ✓ User proves ownership via VP signature');
-            console.log('   ✓ VC verified from System A');
-            console.log('   ✓ VIP1 tier confirmed');
-            console.log('   ✓ Unlocking premium features\n');
         }, 30000);
 
         test('SECURITY: System B rejects tampered credential in VP', async () => {
-            console.log('='.repeat(70));
-            console.log('🔒 SECURITY TEST: Tamper Detection');
-            console.log('='.repeat(70) + '\n');
-
-            console.log('⚠️  Simulating attack: Modifying VC tier inside VP\n');
-
             const challenge = `security-test-${Date.now()}`;
             const domain = 'systemb.example.com';
 
@@ -274,13 +218,17 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
                 ...vip1Credential,
                 credentialSubject: {
                     ...vip1Credential.credentialSubject,
-                    alumniOf: 'VIP3 Tier - TAMPERED!', // MODIFIED!
+                    customerTier: {
+                        ...vip1Credential.credentialSubject.customerTier,
+                        tier: 'VIP3', // TAMPERED!
+                        tierName: 'VIP3 - TAMPERED!',
+                    },
                 },
             };
 
             // Create VP with tampered VC
             const tamperedPresentation = {
-                '@context': [CREDENTIALS_V1],
+                '@context': [CREDENTIALS_V1, BBS_V1],
                 type: ['VerifiablePresentation'],
                 verifiableCredential: [tamperedVC],
                 holder: userDID,
@@ -293,8 +241,6 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
                 domain,
             );
 
-            console.log('🔍 System B verifying...\n');
-
             const result = await verifyPresentation(signedVP, {
                 challenge,
                 domain,
@@ -303,26 +249,16 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
             // Must fail because VC signature is invalid
             expect(result.verified).toBe(false);
             expect(result.credentialResults[0].verified).toBe(false);
-
-            console.log('✅ ATTACK BLOCKED!');
-            console.log('   VC signature verification failed');
-            console.log('   → Access denied\n');
         }, 30000);
 
         test('SECURITY: System B rejects wrong challenge', async () => {
-            console.log('='.repeat(70));
-            console.log('🔒 SECURITY TEST: Challenge Mismatch');
-            console.log('='.repeat(70) + '\n');
-
-            console.log('⚠️  Simulating replay attack: Wrong challenge\n');
-
             const correctChallenge = `correct-${Date.now()}`;
             const wrongChallenge = `wrong-${Date.now()}`;
             const domain = 'systemb.example.com';
 
             // Create VP with correct challenge
             const presentation = {
-                '@context': [CREDENTIALS_V1],
+                '@context': [CREDENTIALS_V1, BBS_V1],
                 type: ['VerifiablePresentation'],
                 verifiableCredential: [vip1Credential],
                 holder: userDID,
@@ -335,8 +271,6 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
                 domain,
             );
 
-            console.log('🔍 Attacker tries to verify with wrong challenge...\n');
-
             // Try to verify with wrong challenge
             const result = await verifyPresentation(signedVP, {
                 challenge: wrongChallenge,
@@ -345,24 +279,15 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
 
             // Must fail
             expect(result.verified).toBe(false);
-
-            console.log('✅ REPLAY ATTACK BLOCKED!');
-            console.log('   Challenge mismatch detected');
-            console.log('   → Access denied\n');
         }, 30000);
 
         test('SECURITY: System B rejects expired credential', async () => {
-            console.log('='.repeat(70));
-            console.log('🔒 SECURITY TEST: Expiration Validation');
-            console.log('='.repeat(70) + '\n');
-
-            console.log('⏰ Creating credential with past expiration\n');
-
             // Issue expired credential
             const expiredCredential = await issueCredential(systemAKeyDoc, {
                 '@context': [
                     CREDENTIALS_V1,
-                    CREDENTIALS_EXAMPLES,
+                    BBS_V1,
+                    CUSTOMER_TIER_CONTEXT,
                 ],
                 type: ['VerifiableCredential', 'CustomerTierCredential'],
                 issuer: systemADID,
@@ -370,7 +295,11 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
                 expirationDate: '2023-12-31T23:59:59Z', // Expired
                 credentialSubject: {
                     id: userDID,
-                    alumniOf: 'VIP1 Tier - Expired',
+                    customerTier: {
+                        tier: 'VIP1',
+                        tierName: 'VIP1 - Expired',
+                        tierDescription: 'Expired customer tier',
+                    },
                 },
             });
 
@@ -379,7 +308,7 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
 
             // Create VP with expired VC
             const presentation = {
-                '@context': [CREDENTIALS_V1],
+                '@context': [CREDENTIALS_V1, BBS_V1],
                 type: ['VerifiablePresentation'],
                 verifiableCredential: [expiredCredential],
                 holder: userDID,
@@ -392,8 +321,6 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
                 domain,
             );
 
-            console.log('🔍 System B verifying expired credential...\n');
-
             const result = await verifyPresentation(signedVP, {
                 challenge,
                 domain,
@@ -404,10 +331,6 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
             expect(result.credentialResults[0].verified).toBe(false);
             expect(result.credentialResults[0].error).toBeDefined();
             expect(result.credentialResults[0].error.message).toMatch(/expired/i);
-
-            console.log('✅ EXPIRED CREDENTIAL REJECTED!');
-            console.log(`   Error: ${result.credentialResults[0].error.message}`);
-            console.log('   → Access denied\n');
         }, 30000);
     });
 });

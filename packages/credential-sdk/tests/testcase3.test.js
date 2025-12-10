@@ -47,11 +47,9 @@ const networkConfig = {
     chainId: VIETCHAIN_CHAIN_ID,
 };
 
-// Custom context URL
+// Custom context URL (live on GitHub)
 const CUSTOMER_TIER_CONTEXT = 'https://raw.githubusercontent.com/OneMatrixL1/did-vc-sdk/testcase3/packages/credential-sdk/tests/testcase3/customer-tier-context.json';
 
-// Cache the context locally for testing
-networkCache[CUSTOMER_TIER_CONTEXT] = customerTierContext;
 
 describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
     // System A (Issuer)
@@ -69,6 +67,18 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
     let vip1Credential;
 
     beforeAll(async () => {
+        // Fetch custom context from GitHub and cache for jsonld
+        const realFetch = require('node-fetch');
+        try {
+            const response = await realFetch(CUSTOMER_TIER_CONTEXT);
+            const contextData = await response.json();
+            networkCache[CUSTOMER_TIER_CONTEXT] = contextData;
+        } catch (error) {
+            // Fallback to local if GitHub is unavailable
+            console.error('Failed to fetch custom context from GitHub:', error);
+            networkCache[CUSTOMER_TIER_CONTEXT] = customerTierContext;
+        }
+
         // Initialize WASM for BBS operations
         await initializeWasm();
 

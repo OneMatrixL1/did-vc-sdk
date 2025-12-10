@@ -12,6 +12,7 @@
         "tierDescription": "https://schema.org/description",
         "totalSpent": "https://schema.org/totalPrice",
         "memberSince": "https://schema.org/dateCreated",
-        "accountId": "https://schema.org/identifier"
+        "accountId": "https://schema.org/identifier",
+        "publicKeyBase58": "https://ld.truvera.io/security#publicKeyBase58"
     }
 }

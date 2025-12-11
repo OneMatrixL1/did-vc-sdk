@@ -45,6 +45,7 @@ function documentLoader(resolver = null) {
    */
   async function loadDocument(uri) {
     let document;
+
     const uriString = uri.toString();
 
     if (uriString.startsWith('data:')) {
@@ -60,14 +61,14 @@ function documentLoader(resolver = null) {
 
       // Check its not in data cache
       const cachedData = cachedUris.get(cacheKey);
-      console.log('cachedData', cachedData);
+
       if (cachedData) {
         document = cachedData;
       } else {
         const doc = await jsonFetch(uriString);
 
-        console.log('document fetch', doc);
         cachedUris.set(cacheKey, doc);
+
         document = doc;
       }
     }

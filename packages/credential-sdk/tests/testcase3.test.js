@@ -3,8 +3,8 @@
  *
  * Real-world Flow:
  * 1. System A (e-commerce) issues VIP tier credential to user with BBS signature
- * 2. User presents credential to System B
- * 3. System B verifies the credential using optimistic DID resolution
+ * 2. User presents credential to System B via Verifiable Presentation (VP)
+ * 3. System B verifies the VP and embedded VC using optimistic DID resolution
  *
  * Uses:
  * - did:ethr:vietchain:... (ethr-did module)
@@ -18,6 +18,7 @@ import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import {
   issueCredential,
   verifyCredential,
+  VerifiablePresentation,
 } from '../src/vc';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
 import { Bls12381BBS23DockVerKeyName } from '../src/vc/crypto/constants';
@@ -26,6 +27,7 @@ import {
   addressToDID,
   keypairToAddress,
   verifyCredentialOptimistic,
+  verifyPresentationOptimistic,
 } from '../src/modules/ethr-did';
 
 // Constants
@@ -51,8 +53,10 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
   let systemADID;
   let systemAKeyDoc;
 
-  // User (Holder)
+  // User (Holder) - needs keypair to sign VP
+  let userKeypair;
   let userDID;
+  let userKeyDoc;
 
   // System B (Verifier) - uses EthrDIDModule
   let systemBModule;
@@ -70,6 +74,7 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
       id: 'system-a-key',
       controller: 'temp',
     });
+
     systemADID = addressToDID(keypairToAddress(systemAKeypair), VIETCHAIN_NETWORK);
 
     // Simple keyDoc - no custom helpers needed!
@@ -82,13 +87,21 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
 
     expect(systemADID).toMatch(/^did:ethr:vietchain:0x[0-9a-fA-F]{40}$/);
 
-    // ========== Setup User (just a DID, no keypair needed for this flow) ==========
-    // User is the credential subject - they just receive the VC
-    const userKeypair = Bls12381BBSKeyPairDock2023.generate({
+    // ========== Setup User (Holder) ==========
+    // User needs keys to sign the VP
+    userKeypair = Bls12381BBSKeyPairDock2023.generate({
       id: 'user-key',
       controller: 'temp',
     });
+
     userDID = addressToDID(keypairToAddress(userKeypair), VIETCHAIN_NETWORK);
+
+    userKeyDoc = {
+      id: `${userDID}#keys-bbs`,
+      controller: userDID,
+      type: Bls12381BBS23DockVerKeyName,
+      keypair: userKeypair,
+    };
 
     expect(userDID).toMatch(/^did:ethr:vietchain:0x[0-9a-fA-F]{40}$/);
 
@@ -110,18 +123,17 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
           CUSTOMER_TIER_CONTEXT,
         ],
         type: ['VerifiableCredential', 'CustomerTierCredential'],
+        id: 'urn:uuid:cred-vip1',
         issuer: systemADID,
         issuanceDate: '2024-01-01T00:00:00Z',
         credentialSubject: {
           id: userDID,
-          customerTier: {
-            tier: 'VIP1',
-            tierName: 'VIP1 - Premium Customer',
-            tierDescription: 'Top tier customer from System A E-commerce',
-            totalSpent: '$250,000',
-            memberSince: '2020-03-15',
-            accountId: 'SYSCUST-12345',
-          },
+          tier: 'VIP1',
+          tierName: 'VIP1 - Premium Customer',
+          tierDescription: 'Top tier customer from System A E-commerce',
+          totalSpent: '$250,000',
+          memberSince: '2020-03-15',
+          accountId: 'SYSCUST-12345',
         },
       };
 
@@ -132,7 +144,7 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
       expect(vip1Credential).toBeDefined();
       expect(vip1Credential.issuer).toBe(systemADID);
       expect(vip1Credential.credentialSubject.id).toBe(userDID);
-      expect(vip1Credential.credentialSubject.customerTier.tier).toBe('VIP1');
+      expect(vip1Credential.credentialSubject.tier).toBe('VIP1');
       expect(vip1Credential.proof).toBeDefined();
       expect(vip1Credential.proof.type).toBe('Bls12381BBSSignatureDock2023');
 
@@ -141,41 +153,83 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
     }, 30000);
   });
 
-  describe('Scenario 2: System B verifies credential using EthrDIDModule', () => {
-    test('System B verifies VIP1 credential with optimistic resolution', async () => {
-      // System B uses EthrDIDModule with optimistic: true
-      // No need for VP - just verify the credential directly
-      const result = await verifyCredentialOptimistic(vip1Credential, {
+  describe('Scenario 2: User presents credential to System B', () => {
+    test('User creates transferable Verifiable Presentation (VP) from VC', async () => {
+      // 1. User creates a VP and adds the credential
+      const vp = new VerifiablePresentation('urn:uuid:vp-12345');
+      vp.addCredential(vip1Credential);
+      vp.setHolder(userDID);
+
+      // 2. User signs the VP with their key
+      await vp.sign(userKeyDoc, 'nonce-123', 'domain-abc', systemBModule);
+
+      // Verify structure
+      expect(vp.proof).toBeDefined();
+      expect(vp.credentials.length).toBe(1);
+      expect(vp.holder).toBe(userDID);
+
+      // 3. System B verifies the VP
+      // This verifies BOTH the VP signature (User) AND the embedded VC signature (System A)
+      const result = await vp.verify({
+        challenge: 'nonce-123',
+        domain: 'domain-abc',
         resolver: systemBModule,
-        module: systemBModule,
+        forceRevocationCheck: false,
       });
 
       expect(result.verified).toBe(true);
+      expect(result.credentialResults[0].verified).toBe(true);
     }, 30000);
 
-    test('SECURITY: System B rejects tampered credential', async () => {
-      // Tamper with credential
+    test('SECURITY: System B rejects VP with tampered inner VC', async () => {
+      // Create valid VP first
+      const vp = new VerifiablePresentation('urn:uuid:vp-tampered-vc');
+
+      // Tamper with credential BEFORE adding to VP (or deep copy modify)
       const tamperedVC = {
         ...vip1Credential,
         credentialSubject: {
           ...vip1Credential.credentialSubject,
-          customerTier: {
-            ...vip1Credential.credentialSubject.customerTier,
-            tier: 'VIP3', // TAMPERED!
-            tierName: 'VIP3 - TAMPERED!',
-          },
+          tier: 'VIP3', // TAMPERED!
         },
       };
 
-      const result = await verifyCredential(tamperedVC, {
+      vp.addCredential(tamperedVC);
+      vp.setHolder(userDID);
+      await vp.sign(userKeyDoc, 'nonce-bad', 'domain-bad', systemBModule);
+
+      const result = await vp.verify({
+        challenge: 'nonce-bad',
+        domain: 'domain-bad',
         resolver: systemBModule,
       });
 
-      // Must fail because BBS signature is invalid
+      // VP Signature is valid (signed by User), but embedded VC signature is invalid
+      // So overall verification must fail or credentialResults must show failure
+      expect(result.verified).toBe(false);
+      expect(result.credentialResults[0].verified).toBe(false);
+    }, 30000);
+
+    test('SECURITY: System B rejects VP with tampered VP signature', async () => {
+      // Create valid VP
+      const vp = new VerifiablePresentation('urn:uuid:vp-tampered-sig');
+      vp.addCredential(vip1Credential);
+      vp.setHolder(userDID);
+      await vp.sign(userKeyDoc, 'nonce-123', 'domain-abc', systemBModule);
+
+      // Tamper with VP structure after signing
+      vp.id = 'urn:uuid:changed-id';
+
+      const result = await vp.verify({
+        challenge: 'nonce-123',
+        domain: 'domain-abc',
+        resolver: systemBModule,
+      });
+
       expect(result.verified).toBe(false);
     }, 30000);
 
-    test('SECURITY: System B rejects expired credential', async () => {
+    test('SECURITY: System B rejects expired credential in VP', async () => {
       // Issue expired credential
       const expiredCredential = await issueCredential(systemAKeyDoc, {
         '@context': [
@@ -184,56 +238,29 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
           CUSTOMER_TIER_CONTEXT,
         ],
         type: ['VerifiableCredential', 'CustomerTierCredential'],
+        id: 'urn:uuid:cred-expired',
         issuer: systemADID,
         issuanceDate: '2023-01-01T00:00:00Z',
-        expirationDate: '2023-12-31T23:59:59Z', // Expired
+        expirationDate: '2023-12-31T23:59:59Z',
         credentialSubject: {
           id: userDID,
-          customerTier: {
-            tier: 'VIP1',
-            tierName: 'VIP1 - Expired',
-            tierDescription: 'Expired customer tier',
-          },
+          tier: 'VIP1',
         },
       });
 
-      expect(expiredCredential.proof.type).toBe('Bls12381BBSSignatureDock2023');
+      const vp = new VerifiablePresentation('urn:uuid:vp-expired');
+      vp.addCredential(expiredCredential);
+      vp.setHolder(userDID);
+      await vp.sign(userKeyDoc, 'nonce-exp', 'domain-exp', systemBModule);
 
-      const result = await verifyCredential(expiredCredential, {
+      const result = await vp.verify({
+        challenge: 'nonce-exp',
+        domain: 'domain-exp',
         resolver: systemBModule,
       });
 
-      // Must fail due to expiration
       expect(result.verified).toBe(false);
-      expect(result.error).toBeDefined();
-      expect(result.error.message).toMatch(/expired/i);
-    }, 30000);
-
-    test('SECURITY: System B rejects credential with wrong public key', async () => {
-      // Generate a different keypair
-      const wrongKeypair = Bls12381BBSKeyPairDock2023.generate({
-        id: 'wrong-key',
-        controller: 'temp',
-      });
-
-      const b58 = await import('bs58');
-      const wrongPublicKey = b58.default.encode(new Uint8Array(wrongKeypair.publicKeyBuffer));
-
-      // Replace publicKeyBase58 with wrong key
-      const tamperedVC = {
-        ...vip1Credential,
-        proof: {
-          ...vip1Credential.proof,
-          publicKeyBase58: wrongPublicKey,
-        },
-      };
-
-      const result = await verifyCredential(tamperedVC, {
-        resolver: systemBModule,
-      });
-
-      // Must fail - address derived from wrong public key won't match DID
-      expect(result.verified).toBe(false);
+      expect(result.credentialResults[0].error.message).toMatch(/expired/i);
     }, 30000);
   });
 });

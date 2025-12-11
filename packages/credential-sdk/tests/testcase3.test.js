@@ -17,16 +17,16 @@
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import {
   issueCredential,
-  verifyCredential,
   VerifiablePresentation,
+  EcdsaSecp256k1Signature2020,
 } from '../src/vc';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
-import { Bls12381BBS23DockVerKeyName } from '../src/vc/crypto/constants';
+import { Bls12381BBS23DockVerKeyName, EcdsaSecp256k1RecoveryMethod2020Name } from '../src/vc/crypto/constants';
+import { Secp256k1Keypair } from '../src/keypairs';
 import {
   EthrDIDModule,
   addressToDID,
   keypairToAddress,
-  verifyCredentialOptimistic,
   verifyPresentationOptimistic,
 } from '../src/modules/ethr-did';
 
@@ -88,18 +88,16 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
     expect(systemADID).toMatch(/^did:ethr:vietchain:0x[0-9a-fA-F]{40}$/);
 
     // ========== Setup User (Holder) ==========
-    // User needs keys to sign the VP
-    userKeypair = Bls12381BBSKeyPairDock2023.generate({
-      id: 'user-key',
-      controller: 'temp',
-    });
+    // User needs Secp256k1 keys to sign the VP (BBS cannot sign VP due to schema issues)
+    userKeypair = Secp256k1Keypair.random();
 
     userDID = addressToDID(keypairToAddress(userKeypair), VIETCHAIN_NETWORK);
 
     userKeyDoc = {
-      id: `${userDID}#keys-bbs`,
+      id: `${userDID}#controller`,
       controller: userDID,
-      type: Bls12381BBS23DockVerKeyName,
+      type: EcdsaSecp256k1RecoveryMethod2020Name,
+      publicKey: userKeypair.publicKey(),
       keypair: userKeypair,
     };
 
@@ -168,13 +166,14 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
       expect(vp.credentials.length).toBe(1);
       expect(vp.holder).toBe(userDID);
 
-      // 3. System B verifies the VP
+      // 3. System B verifies the VP using verifyPresentationOptimistic
       // This verifies BOTH the VP signature (User) AND the embedded VC signature (System A)
-      const result = await vp.verify({
+      const result = await verifyPresentationOptimistic(vp.toJSON(), {
+        module: systemBModule,
         challenge: 'nonce-123',
         domain: 'domain-abc',
-        resolver: systemBModule,
         forceRevocationCheck: false,
+        suite: [new EcdsaSecp256k1Signature2020()],
       });
 
       expect(result.verified).toBe(true);
@@ -198,10 +197,12 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
       vp.setHolder(userDID);
       await vp.sign(userKeyDoc, 'nonce-bad', 'domain-bad', systemBModule);
 
-      const result = await vp.verify({
+      const result = await verifyPresentationOptimistic(vp.toJSON(), {
+        module: systemBModule,
         challenge: 'nonce-bad',
         domain: 'domain-bad',
-        resolver: systemBModule,
+        forceRevocationCheck: false,
+        suite: [new EcdsaSecp256k1Signature2020()],
       });
 
       // VP Signature is valid (signed by User), but embedded VC signature is invalid
@@ -220,10 +221,12 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
       // Tamper with VP structure after signing
       vp.id = 'urn:uuid:changed-id';
 
-      const result = await vp.verify({
+      const result = await verifyPresentationOptimistic(vp.toJSON(), {
+        module: systemBModule,
         challenge: 'nonce-123',
         domain: 'domain-abc',
-        resolver: systemBModule,
+        forceRevocationCheck: false,
+        suite: [new EcdsaSecp256k1Signature2020()],
       });
 
       expect(result.verified).toBe(false);
@@ -253,10 +256,12 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
       vp.setHolder(userDID);
       await vp.sign(userKeyDoc, 'nonce-exp', 'domain-exp', systemBModule);
 
-      const result = await vp.verify({
+      const result = await verifyPresentationOptimistic(vp.toJSON(), {
+        module: systemBModule,
         challenge: 'nonce-exp',
         domain: 'domain-exp',
-        resolver: systemBModule,
+        forceRevocationCheck: false,
+        suite: [new EcdsaSecp256k1Signature2020()],
       });
 
       expect(result.verified).toBe(false);

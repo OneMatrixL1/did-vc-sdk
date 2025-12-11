@@ -1,18 +1,14 @@
 {
     "@context": {
         "@version": 1.1,
-        "@protected": true,
-        "CustomerTierCredential": "https://example.com/CustomerTierCredential",
-        "customerTier": {
-            "@id": "https://schema.org/customer",
-            "@type": "@id"
-        },
-        "tier": "https://schema.org/value",
-        "tierName": "https://schema.org/name",
-        "tierDescription": "https://schema.org/description",
-        "totalSpent": "https://schema.org/totalPrice",
-        "memberSince": "https://schema.org/dateCreated",
-        "accountId": "https://schema.org/identifier",
+        "ct": "https://example.com/customer-tier#",
+        "CustomerTierCredential": "ct:CustomerTierCredential",
+        "tier": "ct:tier",
+        "tierName": "ct:tierName",
+        "tierDescription": "ct:tierDescription",
+        "totalSpent": "ct:totalSpent",
+        "memberSince": "ct:memberSince",
+        "accountId": "ct:accountId",
         "publicKeyBase58": "https://ld.truvera.io/security#publicKeyBase58"
     }
 }

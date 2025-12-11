@@ -15,8 +15,6 @@
  */
 
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import mockFetch from './mocks/fetch';
-import networkCache from './utils/network-cache';
 import {
   issueCredential,
   verifyCredential,
@@ -27,11 +25,8 @@ import {
   EthrDIDModule,
   addressToDID,
   keypairToAddress,
+  verifyCredentialOptimistic,
 } from '../src/modules/ethr-did';
-import customerTierContext from './testcase3/customer-tier-context.json';
-
-// Setup mock to avoid network calls
-mockFetch();
 
 // Constants
 const CREDENTIALS_V1 = 'https://www.w3.org/2018/credentials/v1';
@@ -66,18 +61,6 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
   let vip1Credential;
 
   beforeAll(async () => {
-    // Fetch custom context from GitHub and cache for jsonld
-    const realFetch = require('node-fetch');
-    try {
-      const response = await realFetch(CUSTOMER_TIER_CONTEXT);
-      const contextData = await response.json();
-      networkCache[CUSTOMER_TIER_CONTEXT] = contextData;
-    } catch (error) {
-      // Fallback to local if GitHub is unavailable
-      console.error('Failed to fetch custom context from GitHub:', error);
-      networkCache[CUSTOMER_TIER_CONTEXT] = customerTierContext;
-    }
-
     // Initialize WASM for BBS operations
     await initializeWasm();
 
@@ -162,8 +145,9 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
     test('System B verifies VIP1 credential with optimistic resolution', async () => {
       // System B uses EthrDIDModule with optimistic: true
       // No need for VP - just verify the credential directly
-      const result = await verifyCredential(vip1Credential, {
+      const result = await verifyCredentialOptimistic(vip1Credential, {
         resolver: systemBModule,
+        module: systemBModule,
       });
 
       expect(result.verified).toBe(true);

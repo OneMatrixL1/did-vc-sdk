@@ -289,10 +289,429 @@ describe('Ethr DID VC Issuance with BBS', () => {
     }, 30000);
   });
 
-  // NOTE: BBS presentations require special handling with derived proofs
-  // for selective disclosure. Standard presentation signing with BBS
-  // has schema compatibility issues. See BBS+ selective disclosure
-  // documentation for proper presentation creation.
+  describe('BBS Selective Disclosure Presentations', () => {
+    /**
+     * BBS presentations use a different mechanism than standard VPs.
+     * Instead of signPresentation(), we use the Presentation class to create
+     * derived credentials that reveal only selected attributes.
+     */
+    let fullCredential;
+
+    /**
+     * Helper to cache verification method for Presentation.addCredentialToPresent()
+     * BBS recovery embeds publicKeyBase58 in the proof, but the Presentation class
+     * still needs to resolve the verification method ID from the network cache.
+     */
+    function cacheVerificationMethodForPresentation(credential) {
+      const verificationMethod = credential.proof.verificationMethod;
+      networkCache[verificationMethod] = {
+        '@context': BBS_V1_CONTEXT,
+        id: verificationMethod,
+        type: 'Bls12381BBSVerificationKeyDock2023',
+        controller: credential.issuer,
+        publicKeyBase58: credential.proof.publicKeyBase58,
+      };
+    }
+
+    beforeAll(async () => {
+      // Issue a credential with multiple attributes
+      const unsignedCredential = {
+        '@context': [
+          CREDENTIALS_V1_CONTEXT,
+          CREDENTIALS_EXAMPLES_CONTEXT,
+          BBS_V1_CONTEXT,
+        ],
+        type: ['VerifiableCredential', 'UniversityDegreeCredential'],
+        issuer: issuerDID,
+        issuanceDate: TEST_ISSUANCE_DATE,
+        credentialSubject: {
+          id: holderDID,
+          givenName: 'Alice',
+          familyName: 'Smith',
+          degree: {
+            type: 'BachelorDegree',
+            name: 'Bachelor of Science and Arts',
+            university: 'Example University',
+          },
+          alumniOf: 'Example University',
+          graduationYear: 2020,
+        },
+      };
+
+      fullCredential = await issueCredential(issuerKeyDoc, unsignedCredential);
+    });
+
+    test('should derive credential revealing only selected attributes', async () => {
+      const { default: Presentation } = await import('../src/vc/presentation');
+      const presentation = new Presentation();
+
+      // Cache verification method for Presentation class
+      cacheVerificationMethodForPresentation(fullCredential);
+
+      // Add the full credential to the presentation
+      const credIdx = await presentation.addCredentialToPresent(fullCredential);
+      expect(credIdx).toBe(0);
+
+      // Reveal only specific attributes (hiding givenName, familyName, graduationYear)
+      presentation.addAttributeToReveal(credIdx, [
+        'credentialSubject.degree.type',
+        'credentialSubject.degree.name',
+        'credentialSubject.alumniOf',
+      ]);
+
+      // Derive the credential with only revealed attributes
+      const derivedCredentials = presentation.deriveCredentials({
+        nonce: 'test-nonce-123',
+      });
+
+      expect(derivedCredentials).toHaveLength(1);
+      const derivedCred = derivedCredentials[0];
+
+      // Verify the derived credential has revealed attributes
+      expect(derivedCred.credentialSubject.degree.type).toBe('BachelorDegree');
+      expect(derivedCred.credentialSubject.degree.name).toBe('Bachelor of Science and Arts');
+      expect(derivedCred.credentialSubject.alumniOf).toBe('Example University');
+
+      // Verify hidden attributes are NOT present
+      expect(derivedCred.credentialSubject.givenName).toBeUndefined();
+      expect(derivedCred.credentialSubject.familyName).toBeUndefined();
+      expect(derivedCred.credentialSubject.graduationYear).toBeUndefined();
+
+      // Verify the derived credential has a proof
+      expect(derivedCred.proof).toBeDefined();
+      expect(derivedCred.proof.type).toBe('Bls12381BBSSignatureProofDock2023');
+      // Nonce is base64url encoded in the proof
+      expect(derivedCred.proof.nonce).toBeDefined();
+    }, 30000);
+
+    test('should verify derived credential with selective disclosure', async () => {
+      const { default: Presentation } = await import('../src/vc/presentation');
+      const presentation = new Presentation();
+
+      cacheVerificationMethodForPresentation(fullCredential);
+      await presentation.addCredentialToPresent(fullCredential);
+      presentation.addAttributeToReveal(0, [
+        'credentialSubject.alumniOf',
+        'credentialSubject.degree.type',
+      ]);
+
+      const derivedCredentials = presentation.deriveCredentials({
+        nonce: 'verifier-challenge-456',
+      });
+
+      // Verify the derived credential
+      const result = await verifyCredential(derivedCredentials[0]);
+
+      expect(result.verified).toBe(true);
+      expect(result.results[0].verified).toBe(true);
+    }, 30000);
+
+    test('should reveal different attributes for different verifiers', async () => {
+      const { default: Presentation } = await import('../src/vc/presentation');
+
+      // Scenario 1: Verifier only needs to know alumniOf
+      const presentation1 = new Presentation();
+      cacheVerificationMethodForPresentation(fullCredential);
+      await presentation1.addCredentialToPresent(fullCredential);
+      presentation1.addAttributeToReveal(0, ['credentialSubject.alumniOf']);
+
+      const derivedCred1 = presentation1.deriveCredentials({ nonce: 'v1' })[0];
+      expect(derivedCred1.credentialSubject.alumniOf).toBe('Example University');
+      expect(derivedCred1.credentialSubject.degree).toBeUndefined();
+
+      // Scenario 2: Verifier needs degree info
+      const presentation2 = new Presentation();
+      cacheVerificationMethodForPresentation(fullCredential);
+      await presentation2.addCredentialToPresent(fullCredential);
+      presentation2.addAttributeToReveal(0, [
+        'credentialSubject.degree.type',
+        'credentialSubject.degree.name',
+        'credentialSubject.degree.university',
+      ]);
+
+      const derivedCred2 = presentation2.deriveCredentials({ nonce: 'v2' })[0];
+      expect(derivedCred2.credentialSubject.degree.type).toBe('BachelorDegree');
+      expect(derivedCred2.credentialSubject.degree.name).toBe('Bachelor of Science and Arts');
+      expect(derivedCred2.credentialSubject.graduationYear).toBeUndefined();
+
+      // Both derived credentials should verify
+      const result1 = await verifyCredential(derivedCred1);
+      const result2 = await verifyCredential(derivedCred2);
+
+      expect(result1.verified).toBe(true);
+      expect(result2.verified).toBe(true);
+    }, 30000);
+
+    test('should fail verification if derived credential is tampered', async () => {
+      const { default: Presentation } = await import('../src/vc/presentation');
+      const presentation = new Presentation();
+
+      cacheVerificationMethodForPresentation(fullCredential);
+      await presentation.addCredentialToPresent(fullCredential);
+      presentation.addAttributeToReveal(0, ['credentialSubject.alumniOf']);
+
+      const derivedCredentials = presentation.deriveCredentials({
+        nonce: 'challenge-789',
+      });
+
+      // Tamper with revealed attribute
+      const tamperedCred = {
+        ...derivedCredentials[0],
+        credentialSubject: {
+          ...derivedCredentials[0].credentialSubject,
+          alumniOf: 'Fake University',
+        },
+      };
+
+      const result = await verifyCredential(tamperedCred);
+      expect(result.verified).toBe(false);
+    }, 30000);
+
+    test('should preserve issuer and essential metadata in derived credential', async () => {
+      const { default: Presentation } = await import('../src/vc/presentation');
+      const presentation = new Presentation();
+
+      cacheVerificationMethodForPresentation(fullCredential);
+      await presentation.addCredentialToPresent(fullCredential);
+      presentation.addAttributeToReveal(0, ['credentialSubject.alumniOf']);
+
+      const derivedCred = presentation.deriveCredentials({ nonce: 'n1' })[0];
+
+      // Essential metadata should be preserved
+      expect(derivedCred.issuer).toBe(issuerDID);
+      expect(derivedCred.type).toContain('VerifiableCredential');
+      expect(derivedCred.type).toContain('UniversityDegreeCredential');
+      expect(derivedCred['@context']).toContainEqual(CREDENTIALS_V1_CONTEXT);
+      // Note: issuanceDate is set to current date by deriveCredentials if not revealed
+      expect(derivedCred.issuanceDate).toBeDefined();
+
+      // Proof should reference the issuer's verification method
+      expect(derivedCred.proof.verificationMethod).toContain(issuerDID);
+    }, 30000);
+
+    test('should handle nested attribute revelation', async () => {
+      const { default: Presentation } = await import('../src/vc/presentation');
+      const presentation = new Presentation();
+
+      cacheVerificationMethodForPresentation(fullCredential);
+      await presentation.addCredentialToPresent(fullCredential);
+
+      // Reveal only the degree.type, not the full degree object
+      presentation.addAttributeToReveal(0, ['credentialSubject.degree.type']);
+
+      const derivedCred = presentation.deriveCredentials({ nonce: 'n2' })[0];
+
+      // Should have degree.type but not other degree fields
+      expect(derivedCred.credentialSubject.degree.type).toBe('BachelorDegree');
+      expect(derivedCred.credentialSubject.degree.name).toBeUndefined();
+      expect(derivedCred.credentialSubject.degree.university).toBeUndefined();
+
+      const result = await verifyCredential(derivedCred);
+      expect(result.verified).toBe(true);
+    }, 30000);
+
+    test('should show proof differences between VC and derived credential', async () => {
+      const { default: Presentation } = await import('../src/vc/presentation');
+
+      // VC proof contains publicKeyBase58 (for BBS recovery)
+      console.log('\n=== ORIGINAL VC PROOF ===');
+      console.log('Type:', fullCredential.proof.type);
+      console.log('Has publicKeyBase58:', 'publicKeyBase58' in fullCredential.proof);
+      console.log('VC proof keys:', Object.keys(fullCredential.proof).sort());
+
+      // Create derived credential
+      const presentation = new Presentation();
+      cacheVerificationMethodForPresentation(fullCredential);
+      await presentation.addCredentialToPresent(fullCredential);
+      presentation.addAttributeToReveal(0, ['credentialSubject.alumniOf']);
+
+      const derivedCred = presentation.deriveCredentials({ nonce: 'compare-123' })[0];
+
+      // Derived credential (VP) proof does NOT contain publicKeyBase58
+      console.log('\n=== DERIVED CREDENTIAL (VP) PROOF ===');
+      console.log('Type:', derivedCred.proof.type);
+      console.log('Has publicKeyBase58:', 'publicKeyBase58' in derivedCred.proof);
+      console.log('VP proof keys:', Object.keys(derivedCred.proof).sort());
+      console.log('');
+
+      // Verify the differences
+      expect(fullCredential.proof.type).toBe('Bls12381BBSSignatureDock2023');
+      expect(derivedCred.proof.type).toBe('Bls12381BBSSignatureProofDock2023');
+
+      // BOTH now have publicKeyBase58 for optimistic verification!
+      expect('publicKeyBase58' in fullCredential.proof).toBe(true);
+      expect('publicKeyBase58' in derivedCred.proof).toBe(true);
+
+      // Verify they have the same public key (from the same issuer)
+      expect(derivedCred.proof.publicKeyBase58).toBe(fullCredential.proof.publicKeyBase58);
+
+      expect('proofValue' in fullCredential.proof).toBe(true);
+      expect('proofValue' in derivedCred.proof).toBe(true);
+
+      // Derived proof has nonce, original doesn't
+      expect('nonce' in fullCredential.proof).toBe(false);
+      expect('nonce' in derivedCred.proof).toBe(true);
+    }, 30000);
+
+    test('should enable optimistic off-chain verification with publicKeyBase58', async () => {
+      const { default: Presentation } = await import('../src/vc/presentation');
+      const presentation = new Presentation();
+
+      cacheVerificationMethodForPresentation(fullCredential);
+      await presentation.addCredentialToPresent(fullCredential);
+      presentation.addAttributeToReveal(0, ['credentialSubject.alumniOf']);
+
+      const derivedCred = presentation.deriveCredentials({ nonce: 'optimistic-123' })[0];
+
+      // Verify the derived credential has publicKeyBase58 for optimistic verification
+      expect(derivedCred.proof.publicKeyBase58).toBeDefined();
+      expect(typeof derivedCred.proof.publicKeyBase58).toBe('string');
+
+      // Verify we can derive address from publicKeyBase58 (same as VC)
+      const publicKeyFromProof = derivedCred.proof.publicKeyBase58;
+      const expectedAddress = issuerDID.split(':').pop();
+
+      // The publicKeyBase58 should be the same as the original credential
+      expect(publicKeyFromProof).toBe(fullCredential.proof.publicKeyBase58);
+
+      // This enables optimistic verification:
+      // 1. Extract publicKeyBase58 from proof
+      // 2. Derive address: keccak256(publicKey).slice(-20)
+      // 3. Compare with DID address
+      // 4. If match, verify without blockchain lookup
+      const derivedAddress = keypairToAddress({
+        publicKeyBuffer: Buffer.from(
+          require('bs58').decode(publicKeyFromProof),
+        ),
+      });
+
+      expect(derivedAddress.toLowerCase()).toBe(expectedAddress.toLowerCase());
+
+      // Full verification should still work
+      const result = await verifyCredential(derivedCred);
+      expect(result.verified).toBe(true);
+    }, 30000);
+
+    test('should work with mainnet ethr DIDs', async () => {
+      const mainnetKeypair = Bls12381BBSKeyPairDock2023.generate({
+        id: 'mainnet-sd',
+        controller: 'temp',
+      });
+      const mainnetAddress = keypairToAddress(mainnetKeypair);
+      const mainnetDID = addressToDID(mainnetAddress); // No network = mainnet
+
+      const keyDoc = createBBSKeyDocWithMinimalDIDDocument(mainnetKeypair, mainnetDID);
+
+      const credential = await issueCredential(keyDoc, {
+        '@context': [CREDENTIALS_V1_CONTEXT, CREDENTIALS_EXAMPLES_CONTEXT, BBS_V1_CONTEXT],
+        type: ['VerifiableCredential'],
+        issuer: mainnetDID,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: holderDID,
+          field1: 'value1',
+          field2: 'value2',
+        },
+      });
+
+      const { default: Presentation } = await import('../src/vc/presentation');
+      const presentation = new Presentation();
+      cacheVerificationMethodForPresentation(credential);
+      await presentation.addCredentialToPresent(credential);
+      presentation.addAttributeToReveal(0, ['credentialSubject.field1']);
+
+      const derivedCred = presentation.deriveCredentials({ nonce: 'mn1' })[0];
+
+      expect(derivedCred.credentialSubject.field1).toBe('value1');
+      expect(derivedCred.credentialSubject.field2).toBeUndefined();
+
+      const result = await verifyCredential(derivedCred);
+      expect(result.verified).toBe(true);
+
+      cleanupDIDFromCache(mainnetDID);
+    }, 30000);
+
+    describe('Two-Tier Verification - Legacy Path Coverage', () => {
+      /**
+       * These tests cover legacy scenarios where publicKeyBase58 is NOT present
+       * in the VP proof. This tests backward compatibility with old credentials
+       * issued before the publicKeyBase58 feature.
+       */
+
+      test('Path 4: VP without publicKeyBase58 → Tier 2 → Found in DID doc → Verify succeeds', async () => {
+        const { default: Presentation } = await import('../src/vc/presentation');
+        const presentation = new Presentation();
+
+        // Create a derived credential normally
+        cacheVerificationMethodForPresentation(fullCredential);
+        await presentation.addCredentialToPresent(fullCredential);
+        presentation.addAttributeToReveal(0, ['credentialSubject.alumniOf']);
+
+        const derivedCred = presentation.deriveCredentials({ nonce: 'legacy-path4' })[0];
+
+        // Verify it has publicKeyBase58 (current implementation)
+        expect(derivedCred.proof.publicKeyBase58).toBeDefined();
+
+        // LEGACY SCENARIO: Manually remove publicKeyBase58 to simulate old VP
+        const legacyVP = {
+          ...derivedCred,
+          proof: {
+            ...derivedCred.proof,
+          },
+        };
+        delete legacyVP.proof.publicKeyBase58;
+
+        // Verify the VP doesn't have publicKeyBase58
+        expect(legacyVP.proof.publicKeyBase58).toBeUndefined();
+
+        // Verification should SKIP Tier 1 (no publicKeyBase58)
+        // Falls directly to Tier 2: fetch DID document
+        // Should find verification method in DID document (it's in networkCache)
+        const result = await verifyCredential(legacyVP);
+
+        // Should succeed via Tier 2 (DID document lookup)
+        expect(result.verified).toBe(true);
+        expect(result.results[0].verified).toBe(true);
+
+        console.log('\n✓ Path 4: VP without publicKeyBase58 verified via Tier 2 (DID doc lookup)');
+      }, 30000);
+
+      test('Path 5: VP without publicKeyBase58 → Tier 2 → NOT found in DID doc → Verify fails', async () => {
+        const { default: Presentation } = await import('../src/vc/presentation');
+        const presentation = new Presentation();
+
+        // Create a derived credential normally
+        cacheVerificationMethodForPresentation(fullCredential);
+        await presentation.addCredentialToPresent(fullCredential);
+        presentation.addAttributeToReveal(0, ['credentialSubject.alumniOf']);
+
+        const derivedCred = presentation.deriveCredentials({ nonce: 'legacy-path5' })[0];
+
+        // LEGACY SCENARIO: Remove publicKeyBase58 AND point to non-existent key
+        const legacyVP = {
+          ...derivedCred,
+          proof: {
+            ...derivedCred.proof,
+            verificationMethod: `${issuerDID}#non-existent-key`,
+          },
+        };
+        delete legacyVP.proof.publicKeyBase58;
+
+        // Verify the VP doesn't have publicKeyBase58
+        expect(legacyVP.proof.publicKeyBase58).toBeUndefined();
+
+        // Verification should SKIP Tier 1 (no publicKeyBase58)
+        // Falls directly to Tier 2: fetch DID document
+        // Should NOT find verification method (non-existent-key)
+        const result = await verifyCredential(legacyVP);
+
+        // Should fail - verification method not found in DID document
+        expect(result.verified).toBe(false);
+
+        console.log('\n✓ Path 5: VP without publicKeyBase58 failed (key not in DID doc)');
+      }, 30000);
+    });
+  });
 
   describe('Ethr DID Format Validation with BBS', () => {
     test('should work with checksummed addresses in DIDs', async () => {

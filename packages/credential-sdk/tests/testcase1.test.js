@@ -42,7 +42,6 @@ const networkConfig = {
 };
 
 // Custom context URL
-// NOTE: Update this URL when you upload example-context.json to GitHub
 const CUSTOM_CONTEXT = 'https://raw.githubusercontent.com/OneMatrixL1/did-vc-sdk/testcase1/packages/credential-sdk/tests/testcase1/example-context.json';
 
 describe('TESTCASE 1: Basic Verifiable Credential', () => {

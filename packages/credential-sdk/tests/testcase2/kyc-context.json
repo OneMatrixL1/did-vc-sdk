@@ -1,0 +1,19 @@
+{
+    "@context": {
+        "@version": 1.1,
+        "@protected": true,
+        "id": "@id",
+        "type": "@type",
+        "kyc": "https://example.com/kyc#",
+        "KYCCredential": "kyc:KYCCredential",
+        "fullName": "kyc:fullName",
+        "birthDate": {
+            "@id": "kyc:birthDate",
+            "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+        },
+        "birthPlace": "kyc:birthPlace",
+        "nationality": "kyc:nationality",
+        "idNumber": "kyc:idNumber",
+        "publicKeyBase58": "https://ld.truvera.io/security#publicKeyBase58"
+    }
+}

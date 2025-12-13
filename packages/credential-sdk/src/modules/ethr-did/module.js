@@ -180,6 +180,32 @@ class EthrDIDModule extends AbstractDIDModule {
         };
       }
 
+      // Special case: implicit BBS key (#keys-bbs) for single-address ethr DIDs
+      // The BBS key is authorized in assertionMethod but not explicitly in verificationMethod
+      // For BBS recovery, the public key will be provided in the proof's publicKeyBase58 field
+      // Here we return a placeholder that indicates BBS recovery should be used
+      if (fragment === ETHR_BBS_KEY_ID) {
+        const assertionMethodIncludesBBS = didDocument.assertionMethod?.some(
+          (am) => am === id || am === `${did}${ETHR_BBS_KEY_ID}` || (typeof am === 'object' && am.id === id),
+        );
+
+        if (assertionMethodIncludesBBS) {
+          // Return a synthetic BBS verification method
+          // This enables the BBS signature suite to use address-based recovery
+          // The actual publicKeyBase58 will come from the proof during verification
+          return {
+            '@context': [
+              'https://www.w3.org/ns/did/v1',
+              'https://w3id.org/security/v2',
+            ],
+            id,
+            type: 'Bls12381BBSRecoveryMethod2023',
+            controller: did,
+            // Note: publicKeyBase58 will be injected from proof by signature suite
+          };
+        }
+      }
+
       throw new Error(`Verification method not found: ${id}`);
     }
 

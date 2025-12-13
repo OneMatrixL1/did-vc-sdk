@@ -199,10 +199,23 @@ export default withExtendedStaticProperties(
      * @param expansionMap {function}
      */
     async getVerificationMethod({ proof, documentLoader }) {
-      return this.constructor.Signature.getVerificationMethod({
+      const vm = await this.constructor.Signature.getVerificationMethod({
         proof,
         documentLoader,
       });
+
+      // For BBS recovery method without publicKeyBase58, inject from proof
+      // This enables optimistic verification for ethr DIDs with implicit BBS keys
+      const isBBSRecovery = vm?.type === 'Bls12381BBSRecoveryMethod2023'
+        || vm?.type === 'did:Bls12381BBSRecoveryMethod2023';
+      if (vm && !vm.publicKeyBase58 && proof.publicKeyBase58 && isBBSRecovery) {
+        return {
+          ...vm,
+          publicKeyBase58: proof.publicKeyBase58,
+        };
+      }
+
+      return vm;
     }
   },
 );

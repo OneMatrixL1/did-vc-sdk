@@ -1,0 +1,23 @@
+{
+    "@context": {
+        "@version": 1.1,
+        "@protected": true,
+        "id": "@id",
+        "type": "@type",
+        "ex": "https://example.com/credentials#",
+        "ExampleCredential": "ex:ExampleCredential",
+        "firstName": "ex:firstName",
+        "lastName": "ex:lastName",
+        "birthDate": "ex:birthDate",
+        "birthPlace": "ex:birthPlace",
+        "sex": "ex:sex",
+        "nationality": "ex:nationality",
+        "citizenship": "ex:citizenship",
+        "passportNumber": "ex:passportNumber",
+        "passportIssueDate": "ex:passportIssueDate",
+        "passportExpiryDate": "ex:passportExpiryDate",
+        "passportIssuingCountry": "ex:passportIssuingCountry",
+        "permanentAddress": "ex:permanentAddress",
+        "publicKeyBase58": "https://ld.truvera.io/security#publicKeyBase58"
+    }
+}

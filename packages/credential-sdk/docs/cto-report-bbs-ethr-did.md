@@ -17,13 +17,14 @@
 | [4. Security Model](#4-security-model) | Attack vectors and mitigations |
 | [5. EOA-like Authorization](#5-eoa-like-implicit-key-authorization) | Implicit BBS key behavior |
 | [6. Optimistic Resolution](#6-optimistic-did-resolution) | Performance optimization |
-| [7. Dual-Address DIDs](#7-dual-address-dids) | Combined secp256k1 + BBS DIDs |
-| [8. Code Examples](#8-code-examples) | Three implementation approaches |
-| [9. Test Coverage](#9-test-coverage-summary) | Summary (119 tests passing) |
-| [10. Comparison](#10-comparison-secp256k1-vs-bbs) | Secp256k1 vs BBS |
-| [11. Limitations](#11-limitations-and-trade-offs) | Trade-offs accepted |
-| [12. Future](#12-future-considerations) | Potential enhancements |
-| [13. References](#13-references) | Standards and specs |
+| [7. Two-Tier VP Verification](#7-two-tier-vp-verification-system) | Optimistic VP verification with fallback |
+| [8. Dual-Address DIDs](#8-dual-address-dids) | Combined secp256k1 + BBS DIDs |
+| [9. Code Examples](#9-code-examples) | Three implementation approaches |
+| [10. Test Coverage](#10-test-coverage-summary) | Summary (136 tests passing) |
+| [11. Comparison](#11-comparison-secp256k1-vs-bbs) | Secp256k1 vs BBS |
+| [12. Limitations](#12-limitations-and-trade-offs) | Trade-offs accepted |
+| [13. Future](#13-future-considerations) | Potential enhancements |
+| [14. References](#14-references) | Standards and specs |
 
 **Appendices:**
 - [A. Data Sizes](#appendix-a-data-sizes) - Key and signature sizes
@@ -44,6 +45,7 @@ This report presents our implementation of BBS+ signature support for `did:ethr`
 | Address-based recovery verification | Self-contained credentials |
 | EOA-like implicit key authorization | Safe DID modifications |
 | Optimistic DID resolution | 10-100x faster verification |
+| **Two-tier VP verification** | **Verifiable Presentations support optimistic off-chain verification** |
 | **Dual-address DIDs** | **Single DID supports both secp256k1 and BBS signatures** |
 
 ### Cost Impact
@@ -55,7 +57,7 @@ This report presents our implementation of BBS+ signature support for `did:ethr`
 
 ### Test Coverage
 
-**119 tests** covering security and functionality, all passing.
+**136 tests** covering security, functionality, and BBS selective disclosure (including VPs), all passing.
 
 ---
 
@@ -344,7 +346,259 @@ sequenceDiagram
 
 ---
 
-## 7. Dual-Address DIDs
+## 7. Two-Tier VP Verification System
+
+### Overview
+
+Verifiable Presentations (VPs) with BBS selective disclosure now support the same optimistic verification as Verifiable Credentials. When creating derived credentials, the `publicKeyBase58` is embedded in the VP proof, enabling two-tier verification.
+
+### VP Proof Structure
+
+Derived credentials (VPs) now include `publicKeyBase58` in their proof:
+
+```json
+{
+  "proof": {
+    "type": "Bls12381BBSSignatureProofDock2023",
+    "verificationMethod": "did:ethr:0x...#keys-bbs",
+    "proofPurpose": "assertionMethod",
+    "proofValue": "z...",
+    "publicKeyBase58": "rRG1eV...",
+    "nonce": "test-nonce-123"
+  }
+}
+```
+
+| Field | Source | Purpose |
+|-------|--------|---------|
+| `publicKeyBase58` | Copied from original VC proof | Enables optimistic verification |
+| `proofValue` | Derived proof of selective disclosure | Zero-knowledge proof |
+| `nonce` | Provided during presentation creation | Prevents replay attacks |
+
+### Two-Tier Verification Flow
+
+```mermaid
+flowchart TB
+    VP[Verify VP] --> Check{Has publicKeyBase58?}
+
+    Check -->|Yes| Tier1[TIER 1: Optimistic Check]
+    Check -->|No| Tier2[TIER 2: DID Resolution]
+
+    Tier1 --> Extract[Extract publicKeyBase58]
+    Extract --> Derive[Derive address from key]
+    Derive --> Compare{Address matches DID?}
+
+    Compare -->|Match| Fast[✅ FAST PATH<br/>No network call]
+    Compare -->|Mismatch| Fallback[Fall through to Tier 2]
+
+    Fallback --> Tier2
+    Tier2 --> Fetch[Fetch DID document]
+    Fetch --> Lookup{Key in document?}
+
+    Lookup -->|Found & Authorized| Delegate[✅ DELEGATE KEY<br/>Verification succeeds]
+    Lookup -->|Not Found| Reject[❌ FAIL<br/>Key revoked or unauthorized]
+```
+
+### Verification Scenarios
+
+| Scenario | publicKeyBase58 | Address Match | DID Doc Check | Result |
+|----------|----------------|---------------|---------------|--------|
+| **1. BBS Recovery (Controller Key)** | ✅ Present | ✅ Match | Skip | ✅ **PASS (Tier 1)** - Fast path |
+| **2. Delegate Key (Active)** | ✅ Present | ❌ Mismatch | ✅ Found | ✅ **PASS (Tier 2)** - Fallback |
+| **3. Delegate Key (Revoked)** | ✅ Present | ❌ Mismatch | ❌ Not Found | ❌ **FAIL** - Unauthorized |
+| **4. Tampered Public Key** | ✅ Present (fake) | ❌ Mismatch | ❌ Not Found | ❌ **FAIL** - Invalid |
+| **5. Missing publicKeyBase58** | ❌ Absent | N/A | ✅ Found | ✅ **PASS (Tier 2)** - Legacy |
+| **6. Key Rotation** | ✅ Present (old) | ❌ Mismatch | ❌ Removed | ❌ **FAIL** - Revoked |
+
+### Implementation: Presentation Class
+
+The `Presentation` class automatically captures and embeds `publicKeyBase58`:
+
+```javascript
+// In src/vc/presentation.js
+async addCredentialToPresent(credentialLD, options = {}) {
+  const { proof } = json;
+
+  if (!isKvac) {
+    // Smart extraction: prefer proof's publicKeyBase58
+    let publicKeyBase58;
+    if (proof.publicKeyBase58) {
+      // BBS recovery: public key is embedded in the proof
+      publicKeyBase58 = proof.publicKeyBase58;
+    } else {
+      // Fallback: fetch from DID document
+      const keyDocument = await Signature.getVerificationMethod({
+        proof,
+        documentLoader,
+      });
+      publicKeyBase58 = keyDocument.publicKeyBase58;
+    }
+
+    // Store for later embedding in derived credential
+    this.credentialPublicKeys.push(publicKeyBase58);
+  }
+}
+
+deriveCredentials(options) {
+  return credentials.map((credential, credIdx) => {
+    const proof = {
+      type: SIG_NAME_TO_PROOF_NAME[credential.revealedAttributes.proof.type],
+      proofValue: presentation.proof,
+      nonce: presentation.nonce,
+      // ... other fields
+    };
+
+    // Include publicKeyBase58 for optimistic verification
+    if (this.credentialPublicKeys[credIdx]) {
+      proof.publicKeyBase58 = this.credentialPublicKeys[credIdx];
+    }
+
+    return { ...w3cFormattedCredential, proof };
+  });
+}
+```
+
+### Two-Tier Verification Logic
+
+Located in `Bls12381BBSSignatureDock2023.getVerificationMethod()` (lines 106-133):
+
+```javascript
+async getVerificationMethod({ proof, documentLoader }) {
+  const verificationMethodId = typeof proof.verificationMethod === 'object'
+    ? proof.verificationMethod.id
+    : proof.verificationMethod;
+
+  // TIER 1: Optimistic BBS Recovery
+  if (verificationMethodId && proof.publicKeyBase58) {
+    const didPart = verificationMethodId.split('#')[0];
+
+    if (isEthrDID(didPart)) {
+      const publicKeyBuffer = b58.decode(proof.publicKeyBase58);
+      const derivedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
+      const didParts = parseDID(didPart);
+
+      const expectedAddress = didParts.isDualAddress
+        ? didParts.bbsAddress
+        : didParts.address;
+
+      if (derivedAddress.toLowerCase() === expectedAddress.toLowerCase()) {
+        // ✅ SUCCESS: Address matches - use recovery method (no network)
+        return Bls12381BBSRecoveryMethod2023.fromProof(proof, didPart);
+      }
+    }
+  }
+
+  // TIER 2: Fall back to standard DID document resolution
+  return super.getVerificationMethod({ proof, documentLoader });
+}
+```
+
+### Security Guarantees
+
+#### Revocation Works
+
+When a delegate key is removed from the DID document, old VPs fail verification:
+
+```javascript
+// DID document updated (delegate key removed):
+{
+  verificationMethod: [
+    { id: "did:ethr:0x123...#controller", ... }
+    // delegate-1 REMOVED!
+  ]
+}
+
+// Old VP with revoked delegate key:
+{
+  proof: {
+    verificationMethod: "did:ethr:0x123...#delegate-1",
+    publicKeyBase58: "delegateKey..."
+  }
+}
+
+// Verification:
+// Tier 1: derivedAddress ≠ expectedAddress → Mismatch
+// Tier 2: Fetch DID doc → delegate-1 NOT FOUND
+// ❌ FAIL (key revoked)
+```
+
+#### Tampering Detection
+
+Modifying `publicKeyBase58` in the proof is detected:
+
+```javascript
+// Attacker replaces public key
+tamperedVP.proof.publicKeyBase58 = attackerPublicKey;
+
+// Verification:
+// Tier 1: keccak256(attackerPublicKey) ≠ legitimateDID → Mismatch
+// Tier 2: Fetch DID doc → publicKeyBase58 mismatch
+// BBS signature verification fails
+// ❌ FAIL (tampered proof)
+```
+
+### Performance Impact
+
+| VP Verification Type | Network Calls | Latency |
+|---------------------|---------------|---------|
+| Controller key (Tier 1) | 0 | ~50ms (local) |
+| Delegate key (Tier 2) | 1 (DID resolution) | 500-2000ms |
+| Revoked key (Tier 2 fail) | 1 (DID resolution) | 500-2000ms + error |
+
+**Benefit**: Majority of VPs use controller keys → **10-100x faster** verification
+
+### Example: BBS Selective Disclosure
+
+```javascript
+import { Presentation } from '@truvera/credential-sdk/vc/presentation';
+
+// Create presentation with selective disclosure
+const presentation = new Presentation();
+
+// Add credential (automatically extracts publicKeyBase58)
+const credIdx = await presentation.addCredentialToPresent(fullCredential);
+
+// Reveal only selected attributes
+presentation.addAttributeToReveal(credIdx, [
+  'credentialSubject.degree.type',
+  'credentialSubject.alumniOf',
+]);
+
+// Derive credential (publicKeyBase58 embedded in proof)
+const [derivedCred] = presentation.deriveCredentials({ nonce: 'abc123' });
+
+// Derived credential proof includes:
+// - proof.publicKeyBase58 (for optimistic verification)
+// - proof.proofValue (zero-knowledge proof of selective disclosure)
+// - proof.nonce (prevents replay)
+
+// Verify (uses Tier 1 if address matches)
+const result = await verifyCredential(derivedCred, { resolver });
+// No network call needed for controller keys!
+```
+
+### Code Location
+
+| Component | File | Lines |
+|-----------|------|-------|
+| Smart extraction | `src/vc/presentation.js` | 142-155 |
+| Embedding in proof | `src/vc/presentation.js` | 241-243 |
+| Two-tier logic | `src/vc/crypto/Bls12381BBSSignatureDock2023.js` | 106-133 |
+| Recovery method | `src/vc/crypto/Bls12381BBSRecoveryMethod2023.js` | Complete file |
+
+### Design Benefits
+
+| Benefit | Description |
+|---------|-------------|
+| **Performance** | Fast path for controller keys (most common case) |
+| **Flexibility** | Delegate keys supported via fallback |
+| **Security** | Revocation and tampering detection work correctly |
+| **Robustness** | Graceful degradation with clear failure modes |
+| **Consistency** | VCs and VPs use same verification approach |
+
+---
+
+## 8. Dual-Address DIDs
 
 ### Overview
 
@@ -711,7 +965,7 @@ if (result.verified) {
 
 ---
 
-## 9. Test Coverage Summary
+## 10. Test Coverage Summary
 
 | Test File | Tests | Status |
 |-----------|-------|--------|
@@ -724,13 +978,18 @@ if (result.verified) {
 | **ethr-did-dual-address.test.js** | **31** | **PASS** |
 | **ethr-did-dual-address.integration.test.js** | **8** | **PASS** |
 | **ethr-did-delegation.test.js** | **9** | **PASS** |
-| **TOTAL** | **119** | **ALL PASS** |
+| **ethr-vc-issuance-bbs.test.js** | **17** | **PASS** |
+| **TOTAL** | **136** | **ALL PASS** |
+
+**New in this version:**
+- **BBS Selective Disclosure Tests**: 8 new test cases for VP creation with selective attribute disclosure
+- **VP Optimistic Verification Tests**: Verify VP proofs include `publicKeyBase58` for fast verification
 
 See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenarios.
 
 ---
 
-## 10. Comparison: Secp256k1 vs BBS
+## 11. Comparison: Secp256k1 vs BBS
 
 | Aspect | Secp256k1 | BBS (Our Solution) |
 |--------|-----------|-------------------|
@@ -744,7 +1003,7 @@ See [Appendix C](#appendix-c-detailed-test-scenarios) for detailed test scenario
 
 ---
 
-## 11. Limitations and Trade-offs
+## 12. Limitations and Trade-offs
 
 ### Limitations
 
@@ -789,7 +1048,7 @@ This design:
 
 ---
 
-## 12. Future Considerations
+## 13. Future Considerations
 
 1. **Contract-level BBS support**: Could enable on-chain BBS key rotation if needed
 2. **Batch verification**: Optimize for verifying multiple credentials from same issuer
@@ -797,7 +1056,7 @@ This design:
 
 ---
 
-## 13. References
+## 14. References
 
 - [DID Ethr Method Specification](https://github.com/decentralized-identity/ethr-did-resolver/blob/master/doc/did-method-spec.md)
 - [BBS+ Signatures Draft](https://identity.foundation/bbs-signature/draft-irtf-cfrg-bbs-signatures.html)
@@ -834,10 +1093,11 @@ This design:
 | `constants.js` | MODIFIED | Added `Bls12381BBSRecoveryMethod2023Name` constant for the new recovery verification method type. |
 | `index.js` | MODIFIED | Added export for `Bls12381BBSRecoveryMethod2023` class. |
 
-### Source Files - Helpers (`src/vc/`)
+### Source Files - Presentation (`src/vc/`)
 
 | File | Status | Description |
 |------|--------|-------------|
+| `presentation.js` | MODIFIED | Verifiable Presentation creation. Added: `credentialPublicKeys` array to store public keys, smart extraction of `publicKeyBase58` from proof (prefers embedded key, fallbacks to DID resolution), embedding of `publicKeyBase58` in derived credential proofs for two-tier verification. Enables optimistic VP verification. |
 | `helpers.js` | MODIFIED | Signature suite coordinator. Added import for `Bls12381BBSRecoveryMethod2023Name` constant. Updated `getSuiteFromKeyDoc()` to handle recovery method type when selecting appropriate signature suite. |
 
 ### Source Files - Ethr DID Module (`src/modules/ethr-did/`)
@@ -869,7 +1129,7 @@ This design:
 | `ethr-bbs-graduation.test.js` | **NEW** | Tests for DID "graduation" from optimistic to blockchain resolution. |
 | `ethr-did-bbs.test.js` | **NEW** | Unit tests for BBS keypair address derivation and DID creation. |
 | `ethr-did-bbs.integration.test.js` | **NEW** | Integration tests for BBS with real blockchain (9 tests). |
-| `ethr-vc-issuance-bbs.test.js` | **NEW** | BBS credential issuance tests with mock DID resolution. |
+| `ethr-vc-issuance-bbs.test.js` | **NEW** | BBS credential issuance and selective disclosure tests (17 tests). Includes 8 VP tests for selective attribute disclosure, proof structure validation, and optimistic verification. |
 | `ethr-vc-issuance-secp256k1.test.js` | **NEW** | Secp256k1 credential issuance tests (split from original). |
 | `ethr-did-delegation.test.js` | **NEW** | DID delegation tests (9 tests). Tests W3C CID spec compliant delegation with embedded keys, key rotation, and controller validation. |
 | `ethr-did-verify-optimistic.test.js` | **NEW** | Optimistic credential verification tests. |
@@ -888,6 +1148,7 @@ packages/credential-sdk/
 │   │   │   ├── Bls12381BBSSignatureDock2023.js    ◄── MODIFIED: Embed PK
 │   │   │   ├── constants.js                        ◄── MODIFIED: Add constant
 │   │   │   └── index.js                            ◄── MODIFIED: Export
+│   │   ├── presentation.js                         ◄── MODIFIED: VP publicKeyBase58
 │   │   └── helpers.js                              ◄── MODIFIED: Suite routing
 │   └── modules/
 │       └── ethr-did/
@@ -1177,6 +1438,39 @@ Tests W3C CID 1.0 spec compliant delegation with embedded keys.
 | # | Test Case | Scenario | Expected Result |
 |---|-----------|----------|-----------------|
 | 1 | Multiple delegates | CEO + CFO both delegated | Both can issue valid credentials |
+
+---
+
+### C.8 BBS Selective Disclosure Tests (`ethr-vc-issuance-bbs.test.js`)
+
+Tests BBS credential issuance and Verifiable Presentation creation with selective disclosure.
+
+#### VP Creation and Selective Disclosure (8 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Derive credential revealing selected attributes | Hide some attributes, reveal others | Hidden attributes are undefined, revealed attributes present |
+| 2 | Verify derived credential with different verifier | VP created for one verifier, verified by another | verified: true (selective disclosure works) |
+| 3 | Tampered VP fails verification | Modify revealed attribute after derivation | verified: false |
+| 4 | Nested attribute revelation | Reveal `credentialSubject.degree.type` only | Only nested field revealed, sibling hidden |
+| 5 | Metadata preservation | Check if metadata fields preserved in VP | @context, type, issuer preserved |
+| 6 | Multiple VPs from same credential | Create 2 VPs with different disclosed attributes | Both verify independently |
+| 7 | Proof comparison (VC vs VP) | Compare proof structure | Both have publicKeyBase58, different proof types |
+| 8 | VP optimistic verification | Verify VP without network call | Tier 1 succeeds with embedded publicKeyBase58 |
+
+#### Credential Issuance Tests (9 tests)
+
+| # | Test Case | Scenario | Expected Result |
+|---|-----------|----------|-----------------|
+| 1 | Issue BBS credential | Create and sign credential | Signed with Bls12381BBSSignatureDock2023 |
+| 2 | Verify BBS credential | Full verification | verified: true |
+| 3 | Embedded publicKeyBase58 | Check proof structure | Contains publicKeyBase58 field |
+| 4 | Credential with multiple subjects | Complex credentialSubject | All subjects signed correctly |
+| 5 | Credential with array fields | Arrays in credentialSubject | Arrays preserved and signed |
+| 6 | issuanceDate preservation | Check timestamp | issuanceDate in credential |
+| 7 | Custom context | Non-standard @context | Context preserved |
+| 8 | Issuer as object | issuer: {id, name} | Object form supported |
+| 9 | Missing optional fields | Minimal credential | Still signs successfully |
 
 ---
 

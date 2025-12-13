@@ -59,7 +59,7 @@ function checkPresentation(presentation) {
   if (context[0] !== DEFAULT_CONTEXT_V1_URL) {
     throw new Error(
       `"${DEFAULT_CONTEXT_V1_URL}" needs to be first in the `
-        + 'list of contexts.',
+      + 'list of contexts.',
     );
   }
 

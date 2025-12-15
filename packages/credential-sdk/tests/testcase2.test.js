@@ -220,5 +220,73 @@ describe('TESTCASE 2: KYC Credential Verification', () => {
             expect(derivedCred.credentialSubject.idNumber).toBeUndefined();
             expect(derivedCred.credentialSubject.nationality).toBeUndefined();
         }, 30000);
+
+        test('✅ SECURE: System B confirms holder owns the KYC credential', async () => {
+            /**
+             * Utility function to verify holder ownership
+             */
+            function verifyHolderOwnership(derivedCred, authenticatedDID) {
+                const credentialSubjectDID = derivedCred.credentialSubject.id;
+
+                if (!credentialSubjectDID) {
+                    throw new Error('Credential must reveal credentialSubject.id for holder verification');
+                }
+
+                if (credentialSubjectDID !== authenticatedDID) {
+                    throw new Error(
+                        `Holder ownership verification failed: ` +
+                        `credential belongs to ${credentialSubjectDID}, ` +
+                        `but presenter authenticated as ${authenticatedDID}`,
+                    );
+                }
+
+                return true;
+            }
+
+            const { default: Presentation } = await import('../src/vc/presentation');
+            const presentation = new Presentation();
+
+            await presentation.addCredentialToPresent(kycCredential);
+            presentation.addAttributeToReveal(0, [
+                'credentialSubject.id',  // MUST reveal for holder binding
+                'credentialSubject.birthPlace',
+                'credentialSubject.nationality',
+            ]);
+
+            const currentYear = new Date().getFullYear();
+            const eighteenYearsAgo = new Date(currentYear - 18, 0, 1);
+
+            const bounds = {
+                birthDate: {
+                    max: eighteenYearsAgo.toISOString(),
+                },
+            };
+
+            const derivedCredentials = presentation.deriveCredentials({
+                nonce: 'nonce-secure-kyc',
+                bounds,
+            });
+
+            const derivedCred = derivedCredentials[0];
+
+            // User authenticates to System B
+            const authenticatedUserDID = userDID;
+
+            // System B performs two-step verification
+            const cryptoResult = await verifyCredentialOptimistic(derivedCred, {
+                module: systemBModule,
+            });
+
+            expect(cryptoResult.verified).toBe(true);
+
+            // Additional holder ownership check
+            expect(() => {
+                verifyHolderOwnership(derivedCred, authenticatedUserDID);
+            }).not.toThrow();
+
+            expect(derivedCred.credentialSubject.id).toBe(authenticatedUserDID);
+            expect(derivedCred.credentialSubject.birthPlace).toBe('Hanoi');
+            expect(derivedCred.credentialSubject.birthDate).toBeUndefined(); // Hidden by predicate
+        }, 30000);
     });
 });

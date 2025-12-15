@@ -21,6 +21,7 @@ import {
 } from '../src/vc';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
 import { Bls12381BBS23DockVerKeyName } from '../src/vc/crypto/constants';
+import { Secp256k1Keypair } from '../src/keypairs';
 import {
     EthrDIDModule,
     addressToDID,
@@ -73,10 +74,7 @@ describe('TESTCASE 2: KYC Credential Verification', () => {
 
         expect(systemADID).toMatch(/^did:ethr:vietchain:0x[0-9a-fA-F]{40}$/);
 
-        userKeypair = Bls12381BBSKeyPairDock2023.generate({
-            id: 'user-key',
-            controller: 'temp',
-        });
+        userKeypair = Secp256k1Keypair.random();
 
         userDID = addressToDID(keypairToAddress(userKeypair), VIETCHAIN_NETWORK);
 

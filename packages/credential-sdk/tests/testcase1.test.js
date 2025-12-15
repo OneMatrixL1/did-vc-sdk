@@ -20,6 +20,7 @@ import {
 } from '../src/vc';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
 import { Bls12381BBS23DockVerKeyName } from '../src/vc/crypto/constants';
+import { Secp256k1Keypair } from '../src/keypairs';
 import {
     EthrDIDModule,
     addressToDID,
@@ -81,11 +82,8 @@ describe('TESTCASE 1: Basic Verifiable Credential', () => {
 
         expect(issuerDID).toMatch(/^did:ethr:vietchain:0x[0-9a-fA-F]{40}$/);
 
-        // ========== Setup User (Holder) with BBS ==========
-        userKeypair = Bls12381BBSKeyPairDock2023.generate({
-            id: 'user-key',
-            controller: 'temp',
-        });
+        // ========== Setup User (Holder) with Secp256k1 ==========
+        userKeypair = Secp256k1Keypair.random();
 
         userDID = addressToDID(keypairToAddress(userKeypair), VIETCHAIN_NETWORK);
 

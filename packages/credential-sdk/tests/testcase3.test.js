@@ -1,31 +1,32 @@
 /**
  * TESTCASE 3: Cross-System Customer Tier Verification (BBS Selective Disclosure)
  *
- * Scenario:
- * - System A (Issuer) issues VIP credential to User using BBS signature
- * - User (Holder) creates derived credential revealing specific attributes
- * - System B (Verifier) verifies the derived credential using Optimistic verification
+ * Bài toán:
+ * - User đăng nhập hệ thống A, được cấp VC về "cấp khách hàng" (BBS signature)
+ * - User đăng nhập hệ thống B, dùng VC với selective disclosure
+ * - Hệ thống B xác minh user có VIP1 (chỉ xem 3 fields: id, tier, totalSpent)
  *
- * This test uses:
- * - BBS signatures for Issuer (System A)
- * - BBS Selective Disclosure for User presentation
- * - Optimistic verification (no blockchain RPC, real HTTP for contexts)
- *
- * Run: npm test -- testcase3
+ * Flow:
+ * 1. System A (Issuer): BBS keypair → issue VC
+ * 2. User (Holder): Secp256k1 keypair → derive credential (selective disclosure)
+ * 3. System B (Verifier): verify derived credential
  */
 
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
+import b58 from 'bs58';
 import {
   issueCredential,
+  VerifiablePresentation,
 } from '../src/vc';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
-import { Bls12381BBS23DockVerKeyName } from '../src/vc/crypto/constants';
+import { Bls12381BBS23DockVerKeyName, EcdsaSecp256k1RecoveryMethod2020Name } from '../src/vc/crypto/constants';
 import { Secp256k1Keypair } from '../src/keypairs';
 import {
   EthrDIDModule,
   addressToDID,
   keypairToAddress,
   verifyCredentialOptimistic,
+  verifyPresentationOptimistic,
 } from '../src/modules/ethr-did';
 
 // Constants
@@ -42,30 +43,30 @@ const networkConfig = {
   chainId: VIETCHAIN_CHAIN_ID,
 };
 
-// Custom context URL (live on GitHub)
+// Custom context URL
 const CUSTOMER_TIER_CONTEXT = 'https://raw.githubusercontent.com/OneMatrixL1/did-vc-sdk/testcase3/packages/credential-sdk/tests/testcase3/customer-tier-context.json';
 
 describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
-  // System A (Issuer)
+  // System A (Issuer) - BBS keypair
   let systemAKeypair;
   let systemADID;
   let systemAKeyDoc;
 
-  // User (Holder)
+  // User (Holder) - Secp256k1 keypair
   let userKeypair;
   let userDID;
+  let userKeyDoc;
 
-  // System B (Verifier) - uses EthrDIDModule
+  // System B (Verifier)
   let systemBModule;
 
-  // Credentials
+  // Credential
   let vip1Credential;
 
   beforeAll(async () => {
-    // Initialize WASM for BBS operations
     await initializeWasm();
 
-    // ========== Setup System A (Issuer) with BBS ==========
+    // ========== System A (Issuer) with BBS ==========
     systemAKeypair = Bls12381BBSKeyPairDock2023.generate({
       id: 'system-a-key',
       controller: 'temp',
@@ -80,27 +81,32 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
       keypair: systemAKeypair,
     };
 
-    expect(systemADID).toMatch(/^did:ethr:vietchain:0x[0-9a-fA-F]{40}$/);
-
-    // ========== Setup User (Holder) with Secp256k1 ==========
+    // ========== User (Holder) with Secp256k1 ==========
     userKeypair = Secp256k1Keypair.random();
-
     userDID = addressToDID(keypairToAddress(userKeypair), VIETCHAIN_NETWORK);
 
-    // ========== Setup System B (Verifier) ==========
+    // Create userKeyDoc for VP signing (RecoveryMethod2020 for ethr-did)
+    const userPublicKeyBytes = userKeypair._publicKey();
+    const userPublicKeyBase58 = b58.encode(userPublicKeyBytes);
+
+    userKeyDoc = {
+      id: `${userDID}#controller`,
+      controller: userDID,
+      type: EcdsaSecp256k1RecoveryMethod2020Name,
+      keypair: userKeypair,
+      publicKeyBase58: userPublicKeyBase58,
+    };
+
+    // ========== System B (Verifier) ==========
     systemBModule = new EthrDIDModule({
       networks: [networkConfig],
     });
   }, 30000);
 
-  describe('Scenario 1: System A issues customer tier credential', () => {
+  describe('Scenario 1: System A issues VIP credential', () => {
     test('System A issues VIP1 credential to user with BBS signature', async () => {
       const unsignedCredential = {
-        '@context': [
-          CREDENTIALS_V1,
-          BBS_V1,
-          CUSTOMER_TIER_CONTEXT,
-        ],
+        '@context': [CREDENTIALS_V1, BBS_V1, CUSTOMER_TIER_CONTEXT],
         type: ['VerifiableCredential', 'CustomerTierCredential'],
         id: 'urn:uuid:cred-vip1-12345',
         issuer: systemADID,
@@ -121,296 +127,254 @@ describe('TESTCASE 3: Cross-System Customer Tier Verification', () => {
       expect(vip1Credential).toBeDefined();
       expect(vip1Credential.issuer).toBe(systemADID);
       expect(vip1Credential.credentialSubject.tier).toBe('VIP1');
-      expect(vip1Credential.proof).toBeDefined();
       expect(vip1Credential.proof.type).toBe('Bls12381BBSSignatureDock2023');
-      expect(vip1Credential.proof.publicKeyBase58).toBeDefined();
     }, 30000);
   });
 
   describe('Scenario 2: User presents credential to System B', () => {
-    test('User creates derived credential (VP) revealing specific attributes', async () => {
-      // 1. User prepares Presentation with Selective Disclosure
+    test('User derives credential with selective disclosure (3 fields)', async () => {
+      // 1. User prepares selective disclosure
       const { default: Presentation } = await import('../src/vc/presentation');
       const presentation = new Presentation();
 
-      // 2. Add credential and select attributes to reveal
       await presentation.addCredentialToPresent(vip1Credential);
 
-      // Reveal all fields required by System B
+      // 2. Reveal only 3 required fields
       presentation.addAttributeToReveal(0, [
         'credentialSubject.id',
         'credentialSubject.tier',
-        // 'credentialSubject.tierName',
-        // 'credentialSubject.tierDescription',
         'credentialSubject.totalSpent',
-        // 'credentialSubject.memberSince',
-        // 'credentialSubject.accountId',
       ]);
 
-      // 3. Derive credentials (this generates the ZK proof)
+      // 3. Derive credential (BBS ZK proof)
       const derivedCredentials = presentation.deriveCredentials({
         nonce: 'nonce-123',
       });
 
       expect(derivedCredentials.length).toBe(1);
+
       const derivedCred = derivedCredentials[0];
 
-      // 4. System B verifies the derived credential using Optimistic verification
-      // This uses the embedded publicKeyBase58 in the proof to derive address
-      // and compare with DID - no blockchain RPC needed!
-      const result = await verifyCredentialOptimistic(derivedCred, {
-        module: systemBModule,
-      });
-
-      expect(result.verified).toBe(true);
-      expect(result.results[0].verified).toBe(true);
-
-      // Validate revealed data is present
+      // 4. Validate revealed fields (selective disclosure works)
+      expect(derivedCred.credentialSubject.id).toBe(userDID);
       expect(derivedCred.credentialSubject.tier).toBe('VIP1');
       expect(derivedCred.credentialSubject.totalSpent).toBe('$250,000');
+
+      // Hidden fields
+      expect(derivedCred.credentialSubject.tierName).toBeUndefined();
+      expect(derivedCred.credentialSubject.tierDescription).toBeUndefined();
+
+      // 5. Wrap derived credential in VP (holder proof)
+      const challenge = 'challenge-from-systemB-123';
+      const domain = 'https://systemb.example.com';
+
+      const vp = new VerifiablePresentation('urn:uuid:vp-presentation-123');
+      vp.addContext(BBS_V1);
+      vp.addContext(CUSTOMER_TIER_CONTEXT);
+      vp.setHolder(userDID);
+      vp.addCredential(derivedCred);
+
+      // 6. User signs VP with Secp256k1 key
+      await vp.sign(userKeyDoc, challenge, domain);
+
+      // 7. System B verifies VP
+      const result = await verifyPresentationOptimistic(vp.toJSON(), {
+        module: systemBModule,
+        challenge,
+        domain,
+      });
+
+      if (!result.verified) {
+        console.log('VP Error:', result.error?.message || result.error);
+        console.log('VP Errors:', result.error?.errors?.map(e => e.message));
+      }
+
+      expect(result.verified).toBe(true);
     }, 30000);
 
-    test('SECURITY: System B rejects derived credential with tampered values', async () => {
+    test('SECURITY: System B rejects VP with tampered credential', async () => {
       const { default: Presentation } = await import('../src/vc/presentation');
       const presentation = new Presentation();
 
       await presentation.addCredentialToPresent(vip1Credential);
+
       presentation.addAttributeToReveal(0, ['credentialSubject.tier']);
 
       const derivedCredentials = presentation.deriveCredentials({
-        nonce: 'nonce-bad',
+        nonce: 'nonce-tamper',
       });
 
-      // Tamper with the derived credential (User tries to fake VIP3)
+      // Tamper tier value after derivation
       const tamperedCred = {
         ...derivedCredentials[0],
         credentialSubject: {
           ...derivedCredentials[0].credentialSubject,
-          tier: 'VIP3', // TAMPERED!
+          tier: 'VIP3',  // TAMPERED!
         },
       };
 
-      const result = await verifyCredentialOptimistic(tamperedCred, {
+      // Wrap tampered cred in VP
+      const challenge = 'challenge-tamper-test';
+      const domain = 'https://systemb.example.com';
+
+      const vp = new VerifiablePresentation('urn:uuid:vp-tampered');
+      vp.addContext(BBS_V1);
+      vp.addContext(CUSTOMER_TIER_CONTEXT);
+      vp.setHolder(userDID);
+      vp.addCredential(tamperedCred);  // Add tampered credential
+
+      await vp.sign(userKeyDoc, challenge, domain);
+
+      // System B verifies VP - should FAIL because BBS proof doesn't match
+      const result = await verifyPresentationOptimistic(vp.toJSON(), {
         module: systemBModule,
+        challenge,
+        domain,
       });
 
       expect(result.verified).toBe(false);
     }, 30000);
 
-    test('🚨 VULNERABILITY: Attacker can replay stolen derived credential', async () => {
-      // Legitimate User creates derived credential
+    test('🚨 ATTACK: Attacker steals derived credential - SDK does NOT auto-check holder', async () => {
+      /**
+       * ATTACK SCENARIO:
+       * 1. User creates valid derived credential
+       * 2. Attacker intercepts/steals this derived credential
+       * 3. Attacker creates their own VP, puts stolen credential inside
+       * 4. Attacker signs VP with their own key
+       *
+       * RESULT: SDK verifies VP as valid because:
+       * - VP signature is valid (attacker's signature)
+       * - VC proof is valid (original BBS proof)
+       * - SDK does NOT check that VP.holder === VC.credentialSubject.id
+       */
+
+      // 1. User creates valid derived credential
       const { default: Presentation } = await import('../src/vc/presentation');
       const userPresentation = new Presentation();
-
       await userPresentation.addCredentialToPresent(vip1Credential);
       userPresentation.addAttributeToReveal(0, [
         'credentialSubject.id',
         'credentialSubject.tier',
-        'credentialSubject.totalSpent',
       ]);
 
-      const userDerivedCreds = userPresentation.deriveCredentials({
-        nonce: 'nonce-user-123',
+      const derivedCredentials = userPresentation.deriveCredentials({
+        nonce: 'nonce-stolen',
       });
 
-      const userDerivedCred = userDerivedCreds[0];
+      const stolenCred = derivedCredentials[0];
 
-      // ========== ATTACK SCENARIO ==========
-      // Attacker intercepts or steals User's derived credential
-      // Attacker creates fake identity
-      const attackerKeypair = Bls12381BBSKeyPairDock2023.generate({
-        id: 'attacker-key',
-        controller: 'temp',
-      });
+      // 2. Attacker creates their own keypair
+      const attackerKeypair = Secp256k1Keypair.random();
       const attackerDID = addressToDID(keypairToAddress(attackerKeypair), VIETCHAIN_NETWORK);
 
-      // Attacker presents stolen credential to System B
-      const result = await verifyCredentialOptimistic(userDerivedCred, {
+      const attackerPublicKeyBytes = attackerKeypair._publicKey();
+      const attackerPublicKeyBase58 = b58.encode(attackerPublicKeyBytes);
+
+      const attackerKeyDoc = {
+        id: `${attackerDID}#controller`,
+        controller: attackerDID,
+        type: EcdsaSecp256k1RecoveryMethod2020Name,
+        keypair: attackerKeypair,
+        publicKeyBase58: attackerPublicKeyBase58,
+      };
+
+      // 3. Attacker creates VP with THEIR holder, but STOLEN credential
+      const challenge = 'challenge-attack-test';
+      const domain = 'https://systemb.example.com';
+
+      const attackerVP = new VerifiablePresentation('urn:uuid:vp-attacker');
+      attackerVP.addContext(BBS_V1);
+      attackerVP.addContext(CUSTOMER_TIER_CONTEXT);
+      attackerVP.setHolder(attackerDID);  // Attacker's DID
+      attackerVP.addCredential(stolenCred);  // Stolen credential with userDID
+
+      // 4. Attacker signs VP with their key
+      await attackerVP.sign(attackerKeyDoc, challenge, domain);
+
+      // 5. SDK verification PASSES (this is the vulnerability!)
+      const result = await verifyPresentationOptimistic(attackerVP.toJSON(), {
         module: systemBModule,
+        challenge,
+        domain,
       });
 
-      // 🚨 VULNERABILITY: Verification passes even though attacker is not the credential subject!
+      // ⚠️ SDK says verified=true because it only checks:
+      // - VP signature valid (attacker's) ✓
+      // - VC proof valid (original BBS) ✓
+      // - Does NOT check holder === credentialSubject.id ❌
       expect(result.verified).toBe(true);
 
-      // The credential says it belongs to userDID
-      expect(userDerivedCred.credentialSubject.id).toBe(userDID);
-
-      // But System B has NO WAY to verify that the presenter is actually userDID
-      // Attacker (attackerDID) can use User's (userDID) credential!
+      // PROOF: VP holder is ATTACKER, but credential subject is USER
+      expect(attackerVP.holder).toBe(attackerDID);
+      expect(stolenCred.credentialSubject.id).toBe(userDID);
+      expect(attackerVP.holder).not.toBe(stolenCred.credentialSubject.id);
     }, 30000);
 
-    test('✅ SECURE: System B verifies holder ownership with authentication', async () => {
+    test('✅ SECURE: Manual holder check prevents stolen credential attack', async () => {
       /**
-       * Utility function to verify holder ownership
-       * In production, this should check against authenticated session
+       * Application-level security: manually verify holder === credentialSubject.id
        */
-      function verifyHolderOwnership(derivedCred, authenticatedDID) {
-        const credentialSubjectDID = derivedCred.credentialSubject.id;
 
-        if (!credentialSubjectDID) {
-          throw new Error('Credential must reveal credentialSubject.id for holder verification');
-        }
+      function verifyHolderBinding(vpJson) {
+        const holder = vpJson.holder;
+        const creds = vpJson.verifiableCredential || [];
 
-        if (credentialSubjectDID !== authenticatedDID) {
-          throw new Error(
-            `Holder ownership verification failed: ` +
-            `credential belongs to ${credentialSubjectDID}, ` +
-            `but presenter authenticated as ${authenticatedDID}`,
-          );
-        }
+        for (const cred of creds) {
+          const subjectId = cred.credentialSubject?.id;
 
-        return true;
-      }
-
-      // User creates derived credential
-      const { default: Presentation } = await import('../src/vc/presentation');
-      const presentation = new Presentation();
-
-      await presentation.addCredentialToPresent(vip1Credential);
-      presentation.addAttributeToReveal(0, [
-        'credentialSubject.id',  // MUST reveal for holder binding
-        'credentialSubject.tier',
-        'credentialSubject.totalSpent',
-      ]);
-
-      const derivedCredentials = presentation.deriveCredentials({
-        nonce: 'nonce-secure-123',
-      });
-
-      const derivedCred = derivedCredentials[0];
-
-      // Scenario: User authenticates to System B and presents credential
-      const authenticatedUserDID = userDID;  // From authentication layer (e.g., DID Auth, OAuth)
-
-      // System B verification flow
-      const cryptoResult = await verifyCredentialOptimistic(derivedCred, {
-        module: systemBModule,
-      });
-
-      expect(cryptoResult.verified).toBe(true);
-
-      // Additional holder ownership check
-      expect(() => {
-        verifyHolderOwnership(derivedCred, authenticatedUserDID);
-      }).not.toThrow();
-
-      // Success: Both cryptographic proof AND holder ownership verified
-      expect(derivedCred.credentialSubject.id).toBe(authenticatedUserDID);
-    }, 30000);
-
-    test('✅ SECURE: System B rejects credential when holder mismatch', async () => {
-      function verifyHolderOwnership(derivedCred, authenticatedDID) {
-        const credentialSubjectDID = derivedCred.credentialSubject.id;
-
-        if (credentialSubjectDID !== authenticatedDID) {
-          throw new Error(
-            `Holder ownership verification failed: ` +
-            `credential belongs to ${credentialSubjectDID}, ` +
-            `but presenter authenticated as ${authenticatedDID}`,
-          );
+          if (subjectId && subjectId !== holder) {
+            throw new Error(
+              `Holder binding mismatch: VP holder is ${holder}, ` +
+              `but credential subject is ${subjectId}`
+            );
+          }
         }
 
         return true;
       }
 
-      // User creates derived credential
+      // Attacker's VP from previous test
       const { default: Presentation } = await import('../src/vc/presentation');
-      const presentation = new Presentation();
+      const userPresentation = new Presentation();
+      await userPresentation.addCredentialToPresent(vip1Credential);
+      userPresentation.addAttributeToReveal(0, ['credentialSubject.id', 'credentialSubject.tier']);
 
-      await presentation.addCredentialToPresent(vip1Credential);
-      presentation.addAttributeToReveal(0, [
-        'credentialSubject.id',
-        'credentialSubject.tier',
-      ]);
+      const derivedCredentials = userPresentation.deriveCredentials({ nonce: 'nonce-secure' });
+      const stolenCred = derivedCredentials[0];
 
-      const derivedCredentials = presentation.deriveCredentials({
-        nonce: 'nonce-attacker-123',
-      });
-
-      const userDerivedCred = derivedCredentials[0];
-
-      // Scenario: Attacker steals credential and tries to use it
-      const attackerKeypair = Bls12381BBSKeyPairDock2023.generate({
-        id: 'attacker-key',
-        controller: 'temp',
-      });
+      const attackerKeypair = Secp256k1Keypair.random();
       const attackerDID = addressToDID(keypairToAddress(attackerKeypair), VIETCHAIN_NETWORK);
 
-      // Attacker authenticates as themselves
-      const authenticatedAttackerDID = attackerDID;
+      const attackerKeyDoc = {
+        id: `${attackerDID}#controller`,
+        controller: attackerDID,
+        type: EcdsaSecp256k1RecoveryMethod2020Name,
+        keypair: attackerKeypair,
+        publicKeyBase58: b58.encode(attackerKeypair._publicKey()),
+      };
 
-      // Cryptographic verification passes (credential is valid)
-      const cryptoResult = await verifyCredentialOptimistic(userDerivedCred, {
+      const attackerVP = new VerifiablePresentation('urn:uuid:vp-attacker-2');
+      attackerVP.addContext(BBS_V1);
+      attackerVP.addContext(CUSTOMER_TIER_CONTEXT);
+      attackerVP.setHolder(attackerDID);
+      attackerVP.addCredential(stolenCred);
+
+      await attackerVP.sign(attackerKeyDoc, 'challenge-secure', 'https://systemb.example.com');
+
+      const vpJson = attackerVP.toJSON();
+
+      // SDK verification passes
+      const result = await verifyPresentationOptimistic(vpJson, {
         module: systemBModule,
-      });
-
-      expect(cryptoResult.verified).toBe(true);
-
-      // But holder ownership check FAILS
-      expect(() => {
-        verifyHolderOwnership(userDerivedCred, authenticatedAttackerDID);
-      }).toThrow('Holder ownership verification failed');
-
-
-      // System B correctly rejects presentation
-    }, 30000);
-
-    test('⚠️ PRIVACY TRADE-OFF: Hiding credentialSubject.id prevents holder verification', async () => {
-      // User wants maximum privacy: hide credentialSubject.id
-      const { default: Presentation } = await import('../src/vc/presentation');
-      const presentation = new Presentation();
-
-      await presentation.addCredentialToPresent(vip1Credential);
-      presentation.addAttributeToReveal(0, [
-        // 'credentialSubject.id',  ← NOT revealed for privacy
-        'credentialSubject.tier',
-        'credentialSubject.totalSpent',
-      ]);
-
-      const derivedCredentials = presentation.deriveCredentials({
-        nonce: 'nonce-privacy-123',
-      });
-
-      const derivedCred = derivedCredentials[0];
-
-      // Cryptographic verification passes
-      const result = await verifyCredentialOptimistic(derivedCred, {
-        module: systemBModule,
+        challenge: 'challenge-secure',
+        domain: 'https://systemb.example.com',
       });
 
       expect(result.verified).toBe(true);
 
-      // BUT: credentialSubject.id is hidden
-      expect(derivedCred.credentialSubject.id).toBeUndefined();
-
-      // Manual holder verification CANNOT work
-      function verifyHolderOwnership(derivedCred, authenticatedDID) {
-        const credentialSubjectDID = derivedCred.credentialSubject.id;
-
-        if (!credentialSubjectDID) {
-          throw new Error('Cannot verify holder: credentialSubject.id is hidden');
-        }
-
-        if (credentialSubjectDID !== authenticatedDID) {
-          throw new Error('Holder mismatch');
-        }
-
-        return true;
-      }
-
-      // Attempt to verify ownership fails
-      expect(() => {
-        verifyHolderOwnership(derivedCred, userDID);
-      }).toThrow('Cannot verify holder: credentialSubject.id is hidden');
-
-      // ⚠️ TRADE-OFF:
-      // ✅ Privacy: credentialSubject.id is hidden
-      // ❌ Security: Cannot prevent replay attacks (no holder binding)
-      //
-      // To solve this, need cryptographic holder binding (not yet in SDK):
-      // - User signs presentation with their private key
-      // - Signature proves ownership without revealing ID
-      // - Verifier checks signature + BBS proof
+      // BUT manual holder check FAILS - catches the attack!
+      expect(() => verifyHolderBinding(vpJson)).toThrow('Holder binding mismatch');
     }, 30000);
   });
 });

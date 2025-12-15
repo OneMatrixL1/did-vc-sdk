@@ -207,5 +207,61 @@ describe('TESTCASE 1: Basic Verifiable Credential', () => {
 
             expect(result.verified).toBe(false);
         }, 30000);
+
+        test('✅ SECURE: Verifier confirms holder owns the credential', async () => {
+            /**
+             * Utility function to verify holder ownership
+             */
+            function verifyHolderOwnership(derivedCred, authenticatedDID) {
+                const credentialSubjectDID = derivedCred.credentialSubject.id;
+
+                if (!credentialSubjectDID) {
+                    throw new Error('Credential must reveal credentialSubject.id for holder verification');
+                }
+
+                if (credentialSubjectDID !== authenticatedDID) {
+                    throw new Error(
+                        `Holder ownership verification failed: ` +
+                        `credential belongs to ${credentialSubjectDID}, ` +
+                        `but presenter authenticated as ${authenticatedDID}`,
+                    );
+                }
+
+                return true;
+            }
+
+            const { default: Presentation } = await import('../src/vc/presentation');
+            const presentation = new Presentation();
+
+            await presentation.addCredentialToPresent(credential);
+            presentation.addAttributeToReveal(0, [
+                'credentialSubject.id',  // MUST reveal for holder binding
+                'credentialSubject.firstName',
+                'credentialSubject.nationality',
+            ]);
+
+            const derivedCredentials = presentation.deriveCredentials({
+                nonce: 'nonce-secure-123',
+            });
+
+            const derivedCred = derivedCredentials[0];
+
+            // User authenticates to Verifier
+            const authenticatedUserDID = userDID;
+
+            // Verifier performs two-step verification
+            const cryptoResult = await verifyCredentialOptimistic(derivedCred, {
+                module: verifierModule,
+            });
+
+            expect(cryptoResult.verified).toBe(true);
+
+            // Additional holder ownership check
+            expect(() => {
+                verifyHolderOwnership(derivedCred, authenticatedUserDID);
+            }).not.toThrow();
+
+            expect(derivedCred.credentialSubject.id).toBe(authenticatedUserDID);
+        }, 30000);
     });
 });

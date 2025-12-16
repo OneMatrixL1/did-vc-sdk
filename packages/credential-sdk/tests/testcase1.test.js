@@ -1,15 +1,17 @@
 /**
  * TESTCASE 1: Basic Verifiable Credential with BBS Selective Disclosure
  *
- * Bài toán:
- * - Issuer cấp VC cơ bản (passport info) cho User bằng BBS signature
- * - User tạo VP với selective disclosure (chỉ reveal vài fields)
- * - Verifier verify VP bằng verifyPresentationOptimistic
+ * Scenario:
+ * - Issuer issues a basic verifiable credential to User using BBS signature
+ * - User (Holder) creates derived credential revealing specific attributes
+ * - Verifier verifies the derived credential using Optimistic verification
  *
- * Flow:
- * 1. Issuer: BBS keypair → issueCredential
- * 2. User (Holder): Secp256k1 keypair → derive credential → wrap in VP → sign VP
- * 3. Verifier: verifyPresentationOptimistic
+ * This test uses:
+ * - BBS signatures for Issuer
+ * - BBS Selective Disclosure for User presentation
+ * - Optimistic verification (no blockchain RPC, real HTTP for contexts)
+ *
+ * Run: npm test -- testcase1
  */
 
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';

@@ -49,6 +49,8 @@ export default class Presentation {
    */
   constructor() {
     this.presBuilder = new PresentationBuilder();
+    // Store public keys for each credential to enable optimistic verification
+    this.credentialPublicKeys = [];
   }
 
   /**
@@ -137,13 +139,29 @@ export default class Presentation {
     }
 
     if (!isKvac) {
-      const keyDocument = await Signature.getVerificationMethod({
-        proof,
-        documentLoader,
-      });
+      // For BBS recovery, prefer publicKeyBase58 from proof if available
+      // This enables optimistic verification without fetching DID document
+      let publicKeyBase58;
+      if (proof.publicKeyBase58) {
+        // BBS recovery: public key is embedded in the proof
+        publicKeyBase58 = proof.publicKeyBase58;
+      } else {
+        // Standard case: fetch from DID document
+        const keyDocument = await Signature.getVerificationMethod({
+          proof,
+          documentLoader,
+        });
+        publicKeyBase58 = keyDocument.publicKeyBase58;
+      }
 
-      const pkRaw = b58.decode(keyDocument.publicKeyBase58);
+      const pkRaw = b58.decode(publicKeyBase58);
       pk = new PublicKey(pkRaw);
+
+      // Store publicKeyBase58 for optimistic verification in derived credentials
+      this.credentialPublicKeys.push(publicKeyBase58);
+    } else {
+      // KVAC doesn't use public keys
+      this.credentialPublicKeys.push(null);
     }
 
     const convertedCredential = Signature.convertCredentialForPresBuilding({
@@ -185,7 +203,7 @@ export default class Presentation {
       );
     }
 
-    return credentials.map((credential) => {
+    return credentials.map((credential, credIdx) => {
       if (!credential.revealedAttributes.proof) {
         throw new Error('Credential proof is not revealed, it should be');
       }
@@ -196,6 +214,32 @@ export default class Presentation {
         throw new Error(
           `Failed to map credential signature type to the proof type: ${credential.revealedAttributes.proof.type}`,
         );
+      }
+
+      // Build the proof object
+      const proof = {
+        proofPurpose: 'assertionMethod',
+        created: date,
+        ...credential.revealedAttributes.proof,
+        type,
+        // Question: Why each cred will have the same proof, nonce, context, etc. They don't apply here. And is the same proof repeatedly verified?
+        proofValue: presentation.proof,
+        nonce: presentation.nonce,
+        context: presentation.context,
+        attributeCiphertexts: presentation.attributeCiphertexts,
+        attributeEqualities: presentation.spec.attributeEqualities,
+        boundedPseudonyms: presentation.spec.boundedPseudonyms,
+        unboundedPseudonyms: presentation.spec.unboundedPseudonyms,
+        version: credential.version,
+        // This is the presentation version and not the credential version. Continuing the stupidity by adding presentation version to the credential version so that it can be later retrieved
+        presVersion: presentation.version,
+        sigType: credential.sigType,
+        bounds: credential.bounds,
+      };
+
+      // Include publicKeyBase58 for optimistic off-chain verification (same as VC)
+      if (this.credentialPublicKeys[credIdx]) {
+        proof.publicKeyBase58 = this.credentialPublicKeys[credIdx];
       }
 
       const w3cFormattedCredential = {
@@ -211,25 +255,7 @@ export default class Presentation {
           credential.revealedAttributes.issuer
           || credential.revealedAttributes.proof.verificationMethod.split('#')[0],
         issuanceDate: credential.revealedAttributes.issuanceDate || date,
-        proof: {
-          proofPurpose: 'assertionMethod',
-          created: date,
-          ...credential.revealedAttributes.proof,
-          type,
-          // Question: Why each cred will have the same proof, nonce, context, etc. They don't apply here. And is the same proof repeatedly verified?
-          proofValue: presentation.proof,
-          nonce: presentation.nonce,
-          context: presentation.context,
-          attributeCiphertexts: presentation.attributeCiphertexts,
-          attributeEqualities: presentation.spec.attributeEqualities,
-          boundedPseudonyms: presentation.spec.boundedPseudonyms,
-          unboundedPseudonyms: presentation.spec.unboundedPseudonyms,
-          version: credential.version,
-          // This is the presentation version and not the credential version. Continuing the stupidity by adding presentation version to the credential version so that it can be later retrieved
-          presVersion: presentation.version,
-          sigType: credential.sigType,
-          bounds: credential.bounds,
-        },
+        proof,
       };
 
       if (credential.status) {

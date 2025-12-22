@@ -73,12 +73,12 @@ export default class Bls12381BBSKeyPairDock2023 extends DockCryptoKeyPair {
    * 2. Sign the G1 point with the BLS12-381 secret key
    * 3. Return the signature bytes (96 bytes compressed G1)
    *
-   * @param {Uint8Array} messageHashBytes - 32-byte Keccak256 hash of the message
+   * @param {Uint8Array} messageBytes - 32-byte Keccak256 hash of the message
    * @param {Uint8Array|string} dstBytes - Domain Separation Tag (e.g., "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_")
    * @returns {Promise<Uint8Array>} 96-byte signature (compressed G1 point)
    * @throws {Error} If no private key is available
    */
-  async signBLS(messageHashBytes, dstBytes) {
+  signBLS(messageBytes, dstBytes) {
     if (!this.privateKeyBuffer) {
       throw new Error('No private key to sign with. Cannot perform BLS signature.');
     }
@@ -88,10 +88,10 @@ export default class Bls12381BBSKeyPairDock2023 extends DockCryptoKeyPair {
       ? new TextEncoder().encode(dstBytes)
       : new Uint8Array(dstBytes);
 
-    // Ensure messageHashBytes is Uint8Array
-    const messageHash = messageHashBytes instanceof Uint8Array
-      ? messageHashBytes
-      : new Uint8Array(messageHashBytes);
+    // Ensure messageBytes is Uint8Array
+    const messageHash = messageBytes instanceof Uint8Array
+      ? messageBytes
+      : new Uint8Array(messageBytes);
 
     // The secret key is stored as raw bytes (32 bytes for BLS12-381 scalar)
     // Convert to Uint8Array since privateKeyBuffer may be a regular Array or Buffer

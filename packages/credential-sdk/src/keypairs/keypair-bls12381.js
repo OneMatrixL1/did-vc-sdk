@@ -12,19 +12,8 @@
  * @module keypairs/keypair-bls12381
  */
 
+import { bls12_381 } from '@noble/curves/bls12-381';
 import { ethers } from 'ethers';
-
-let bls12_381Module = null;
-
-async function getBls12381() {
-    if (!bls12_381Module) {
-        const module = await import('@noble/curves/bls12-381');
-
-        bls12_381Module = module.bls12_381;
-    }
-
-    return bls12_381Module;
-}
 
 /**
  * Pure BLS12-381 keypair for smart contract BLS verification.
@@ -48,10 +37,8 @@ export default class Bls12381Keypair {
      * Generate a random BLS12-381 keypair.
      * @returns {Promise<Bls12381Keypair>} New keypair
      */
-    static async generate() {
-        const bls = await getBls12381();
-
-        const secretKey = bls.utils.randomPrivateKey();
+    static generate() {
+        const secretKey = bls12_381.utils.randomPrivateKey();
 
         return Bls12381Keypair.fromSecretKey(secretKey);
     }
@@ -61,9 +48,7 @@ export default class Bls12381Keypair {
      * @param {Uint8Array|Array<number>} secretKeyBytes - 32-byte secret key
      * @returns {Promise<Bls12381Keypair>} Keypair
      */
-    static async fromSecretKey(secretKeyBytes) {
-        const bls = await getBls12381();
-
+    static fromSecretKey(secretKeyBytes) {
         const secretKey = secretKeyBytes instanceof Uint8Array
             ? secretKeyBytes
             : new Uint8Array(secretKeyBytes);
@@ -74,8 +59,8 @@ export default class Bls12381Keypair {
 
         // Derive G2 public key manually: pk = G2_BASE * sk
         // This ensures mathematical consistency with our manual signing below
-        const skScalar = bls.fields.Fr.fromBytes(secretKey);
-        const g2Point = bls.G2.ProjectivePoint.BASE.multiply(skScalar);
+        const skScalar = bls12_381.fields.Fr.fromBytes(secretKey);
+        const g2Point = bls12_381.G2.ProjectivePoint.BASE.multiply(skScalar);
 
         const publicKeyCompressed = g2Point.toRawBytes(true);
         const publicKeyUncompressed = g2Point.toRawBytes(false);
@@ -126,9 +111,7 @@ export default class Bls12381Keypair {
      * @param {string|Uint8Array} dstBytes - Domain Separation Tag (required)
      * @returns {Promise<Uint8Array>} 96-byte uncompressed G1 signature
      */
-    async signBLS(messageBytes, dstBytes) {
-        const bls = await getBls12381();
-
+    signBLS(messageBytes, dstBytes) {
         const dst = typeof dstBytes === 'string'
             ? new TextEncoder().encode(dstBytes)
             : new Uint8Array(dstBytes);
@@ -138,10 +121,10 @@ export default class Bls12381Keypair {
             : new Uint8Array(messageBytes);
 
         // Manual Hash-to-Curve G1 with custom DST
-        const messagePoint = bls.G1.hashToCurve(message, { DST: dst });
+        const messagePoint = bls12_381.G1.hashToCurve(message, { DST: dst });
 
         // Manual Sign: signature = messagePoint * secretKey
-        const skScalar = bls.fields.Fr.fromBytes(this.secretKey);
+        const skScalar = bls12_381.fields.Fr.fromBytes(this.secretKey);
         const signaturePoint = messagePoint.multiply(skScalar);
 
         // Return uncompressed G1 (96 bytes)

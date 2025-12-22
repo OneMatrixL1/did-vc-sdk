@@ -116,7 +116,7 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
                 ethers.utils.keccak256('0x1234'),
             );
 
-            await expect(publicOnlyKeypair.signBLS(messageHash, BLS_DST)).rejects.toThrow(
+            expect(() => publicOnlyKeypair.signBLS(messageHash, BLS_DST)).toThrow(
                 /No private key/,
             );
         });
@@ -126,7 +126,7 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
                 ethers.utils.keccak256('0x1234567890abcdef'),
             );
 
-            const signature = await bbsKeypair.signBLS(messageHash, BLS_DST);
+            const signature = bbsKeypair.signBLS(messageHash, BLS_DST);
 
             // G1 point compressed is 48 bytes, but some implementations use 96
             // Check that it's a Uint8Array with reasonable length
@@ -140,7 +140,7 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
             );
 
             // Should not throw when DST is a string
-            const signature = await bbsKeypair.signBLS(messageHash, BLS_DST);
+            const signature = bbsKeypair.signBLS(messageHash, BLS_DST);
 
             expect(signature).toBeInstanceOf(Uint8Array);
         });
@@ -152,7 +152,7 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
             const dstBytes = new TextEncoder().encode(BLS_DST);
 
             // Should not throw when DST is Uint8Array
-            const signature = await bbsKeypair.signBLS(messageHash, dstBytes);
+            const signature = bbsKeypair.signBLS(messageHash, dstBytes);
 
             expect(signature).toBeInstanceOf(Uint8Array);
         });
@@ -161,7 +161,7 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
             const messageHash = ethers.utils.arrayify(
                 ethers.utils.keccak256('0x123456'),
             );
-            const signature = await bbsKeypair.signBLS(messageHash, BLS_DST);
+            const signature = bbsKeypair.signBLS(messageHash, BLS_DST);
 
             const sigHex = Bls12381BBSKeyPairDock2023.signatureToHex(signature);
 
@@ -181,8 +181,8 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
                 ethers.utils.keccak256('0xdeadbeef'),
             );
 
-            const sig1 = await bbsKeypair.signBLS(messageHash, BLS_DST);
-            const sig2 = await bbsKeypair.signBLS(messageHash, BLS_DST);
+            const sig1 = bbsKeypair.signBLS(messageHash, BLS_DST);
+            const sig2 = bbsKeypair.signBLS(messageHash, BLS_DST);
 
             expect(Array.from(sig1)).toEqual(Array.from(sig2));
         });
@@ -191,8 +191,8 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
             const hash1 = ethers.utils.arrayify(ethers.utils.keccak256('0x1111'));
             const hash2 = ethers.utils.arrayify(ethers.utils.keccak256('0x2222'));
 
-            const sig1 = await bbsKeypair.signBLS(hash1, BLS_DST);
-            const sig2 = await bbsKeypair.signBLS(hash2, BLS_DST);
+            const sig1 = bbsKeypair.signBLS(hash1, BLS_DST);
+            const sig2 = bbsKeypair.signBLS(hash2, BLS_DST);
 
             expect(Array.from(sig1)).not.toEqual(Array.from(sig2));
         });
@@ -202,8 +202,8 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
                 ethers.utils.keccak256('0xabcd'),
             );
 
-            const sig1 = await bbsKeypair.signBLS(messageHash, 'DST_ONE');
-            const sig2 = await bbsKeypair.signBLS(messageHash, 'DST_TWO');
+            const sig1 = bbsKeypair.signBLS(messageHash, 'DST_ONE');
+            const sig2 = bbsKeypair.signBLS(messageHash, 'DST_TWO');
 
             expect(Array.from(sig1)).not.toEqual(Array.from(sig2));
         });
@@ -335,14 +335,12 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
                 [bbsAddress, newOwnerAddress, nonce, chainId],
             );
 
-            // Step 4: Hash message
-            const messageHash = ethers.utils.keccak256(packed);
-            const messageHashBytes = ethers.utils.arrayify(messageHash);
+            // Step 4: Sign with BLS
+            const packedUint8Array = ethers.utils.arrayify(packed);
 
-            // Step 5: Sign with BLS
-            const signature = await bbsKeypair.signBLS(messageHashBytes, BLS_DST);
+            const signature = await bbsKeypair.signBLS(packedUint8Array, BLS_DST);
 
-            // Step 6: Convert to hex for contract
+            // Step 5: Convert to hex for contract
             const pubKeyHex = bbsKeypair.publicKeyHex;
             const sigHex = Bls12381BBSKeyPairDock2023.signatureToHex(signature);
 
@@ -357,7 +355,6 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
             console.log('Nonce:', nonce.toString());
             console.log('Chain ID:', chainId);
             console.log('Packed Message:', packed);
-            console.log('Message Hash:', messageHash);
             console.log('Public Key (hex):', pubKeyHex);
             console.log('Signature (hex):', sigHex);
         }, 30000);

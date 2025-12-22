@@ -706,6 +706,171 @@ class EthrDIDModule extends AbstractDIDModule {
     const txHash = await ethrDid.changeOwner(checksummedAddress);
     return await waitForTransaction(txHash, provider);
   }
+
+  /**
+   * Change the owner of a DID using BLS12-381 signature verification.
+   * This method is designed for Bls12381Keypair (pure BLS, standard G2 derivation).
+   *
+   * IMPORTANT: Do NOT use Bls12381BBSKeyPairDock2023 (BBS keypair) - it uses
+   * non-standard G2 derivation and is incompatible with contract verification.
+   *
+   * The BLS signature verification matches the smart contract logic:
+   * 1. Pack message: abi.encodePacked(identity, newOwner, nonce, chainId)
+   * 2. Hash message: keccak256(packed)
+   * 3. Sign with BLS: hashToPoint(DST, hash) + scalar multiply with secret key
+   *
+   * @param {Object} blsKeypair - Bls12381Keypair instance (NOT BBS keypair)
+   * @param {string} newOwnerAddress - Ethereum address of new owner
+   * @param {Object} [options] - Additional options
+   * @param {string} [options.networkName] - Network name (uses default if not specified)
+   * @param {Object} [options.txSigner] - Secp256k1Keypair or ethers.Wallet to sign the transaction
+   * @returns {Promise<Object>} Transaction receipt
+   * @throws {Error} If keypair doesn't have signBLS method or contract call fails
+   *
+   * @example
+   * const blsKeypair = await Bls12381Keypair.generate();
+   * const fundedKeypair = Secp256k1Keypair.random(); // Must have ETH for gas
+   * const receipt = await module.changeOwnerBLS(blsKeypair, '0xNewOwner123...', {
+   *   txSigner: fundedKeypair,
+   * });
+   */
+  async changeOwnerBLS(blsKeypair, newOwnerAddress, options = {}) {
+    // Domain Separation Tag - IETF standard for hash-to-curve
+    // Must match the smart contract exactly
+    const BLS_DST = 'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_';
+    const { networkName = null, txSigner = null } = options;
+
+    // Validate keypair has the required methods/properties
+    if (typeof blsKeypair.signBLS !== 'function') {
+      throw new Error(
+        'Keypair must have signBLS method. Use Bls12381Keypair.generate() or Bls12381Keypair.fromSecretKey().',
+      );
+    }
+
+    if (!blsKeypair.publicKeyHex) {
+      throw new Error('Keypair must have publicKeyHex property.');
+    }
+
+    if (!blsKeypair.address) {
+      throw new Error('Keypair must have address property.');
+    }
+
+    const name = networkName || this.defaultNetwork;
+    const networkConfig = this.networks.get(name);
+
+    if (!networkConfig) {
+      throw new Error(`Network not found: ${name}`);
+    }
+
+    const provider = this.#getProvider(name);
+
+    // Step 1: Get public key hex and identity from keypair
+    // Bls12381Keypair provides these directly with correct derivation
+    const pubKeyHex = blsKeypair.publicKeyHex;
+    const identity = blsKeypair.address;
+
+    // Step 2: Ensure new owner address is checksummed
+    const newOwner = ethers.utils.getAddress(newOwnerAddress);
+
+    // Step 3: Create contract interface for the BLS-enabled registry
+    // ABI fragment for changeOwnerBLS function
+    const blsRegistryAbi = [
+      'function changeOwnerBLS(bytes calldata publicKey, bytes calldata signature, address newOwner) external',
+      'function nonce(address identity) external view returns (uint256)',
+    ];
+
+    const registry = new ethers.Contract(
+      networkConfig.registry,
+      blsRegistryAbi,
+      provider,
+    );
+
+    // Step 4: Fetch nonce for this identity
+    const nonce = await registry.nonce(identity);
+
+    // Step 5: Get chain ID from network
+    const { chainId } = await provider.getNetwork();
+
+    // Step 6: Pack the message per smart contract specification
+    // packed = abi.encodePacked(identity, newOwner, nonce, chainId)
+    const packedMessage = ethers.utils.solidityPack(
+      ['address', 'address', 'uint256', 'uint256'],
+      [identity, newOwner, nonce, chainId],
+    );
+
+    // Step 7: The contract performs hash-to-point on strict raw packed bytes.
+    // Do NOT hash with Keccak256 or verification will fail.
+    const messageBytes = ethers.utils.arrayify(packedMessage);
+
+    // Step 8: Sign using BLS with the DST
+    const signatureBytes = await blsKeypair.signBLS(messageBytes, BLS_DST);
+
+    // Step 9: Convert signature to hex for contract call
+    // pubKeyHex was already computed at step 1
+    const sigHex = blsKeypair.constructor.signatureToHex
+      ? blsKeypair.constructor.signatureToHex(signatureBytes)
+      : `0x${Array.from(signatureBytes).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+
+    // Step 10: Create signer for transaction submission
+    // Since BBS can't sign Ethereum transactions, we need a separate funded account
+    let signer;
+
+    if (txSigner) {
+      // If txSigner is a Secp256k1Keypair, convert to ethers Wallet
+      if (txSigner.privateKey && typeof txSigner.privateKey === 'function') {
+        const privateKeyBytes = txSigner.privateKey();
+        const privateKeyHex = `0x${Array.from(privateKeyBytes)
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('')}`;
+
+        signer = new ethers.Wallet(privateKeyHex, provider);
+      } else if (txSigner._isSigner) {
+        // Already an ethers Signer
+        signer = txSigner.connect(provider);
+      } else {
+        throw new Error('txSigner must be a Secp256k1Keypair or ethers.Wallet');
+      }
+    } else {
+      throw new Error(
+        'txSigner is required. BBS keypairs cannot sign Ethereum transactions. '
+        + 'Provide a funded Secp256k1Keypair or ethers.Wallet to pay for gas.',
+      );
+    }
+
+    const registryWithSigner = registry.connect(signer);
+
+    // Step 11: Try callStatic first to get revert reason, then submit
+    try {
+      // Call static first to check if the call would succeed
+      await registryWithSigner.callStatic.changeOwnerBLS(pubKeyHex, sigHex, newOwner);
+
+      // If callStatic succeeds, send the actual transaction
+      const tx = await registryWithSigner.changeOwnerBLS(pubKeyHex, sigHex, newOwner);
+
+      return await waitForTransaction(tx.hash, provider);
+    } catch (error) {
+      // Extract detailed error information
+      let errorDetails = formatEthersError(error);
+
+      if (error.error && error.error.data) {
+        try {
+          const iface = new ethers.utils.Interface([
+            'error Error(string reason)',
+          ]);
+          const decoded = iface.parseError(error.error.data);
+
+          if (decoded) {
+            errorDetails = decoded.args[0];
+          }
+        } catch {
+          errorDetails = `${errorDetails} (data: ${error.error.data})`;
+        }
+      }
+
+      throw new Error(`changeOwnerBLS failed: ${errorDetails}`);
+    }
+  }
 }
 
 export default EthrDIDModule;
+

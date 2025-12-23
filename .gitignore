@@ -31,3 +31,4 @@ package-lock.json
 tsconfig*buildinfo
 out/
 *.log
+openspec/

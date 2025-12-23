@@ -93,6 +93,11 @@ export default class Bls12381BBSKeyPairDock2023 extends DockCryptoKeyPair {
       ? messageBytes
       : new Uint8Array(messageBytes);
 
+    // Validate message hash length
+    if (messageHash.length !== 32) {
+      throw new Error(`Message hash must be exactly 32 bytes, got ${messageHash.length}`);
+    }
+
     // The secret key is stored as raw bytes (32 bytes for BLS12-381 scalar)
     // Convert to Uint8Array since privateKeyBuffer may be a regular Array or Buffer
     const secretKeyBytes = this.privateKeyBuffer instanceof Uint8Array

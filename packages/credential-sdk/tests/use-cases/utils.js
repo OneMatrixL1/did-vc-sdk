@@ -111,6 +111,7 @@ export function deriveCredential(credential, revealFields, nonce) {
   presentation.addCredentialToPresent(credential);
   presentation.addAttributeToReveal(0, revealFields);
   const derivedCredentials = presentation.deriveCredentials({ nonce });
+
   return derivedCredentials[0];
 }
 

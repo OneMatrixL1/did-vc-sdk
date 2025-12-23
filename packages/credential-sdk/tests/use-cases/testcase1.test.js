@@ -147,6 +147,8 @@ describe('TESTCASE 1: KYC Verification', () => {
         domain: VERIFIER_DOMAIN,
         contexts: [KYC_CONTEXT],
       });
+      const util = require('util');
+      console.log('vp', util.inspect(vp, { depth: null, colors: true }));
 
       const vpJson = vp.toJSON();
 

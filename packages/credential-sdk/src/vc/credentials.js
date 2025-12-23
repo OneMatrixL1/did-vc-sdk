@@ -36,6 +36,7 @@ import {
   processIfKvac,
 } from './helpers';
 import { ensureValidDatetime } from '../utils';
+import { DIDServiceClient } from '../api-client';
 
 import {
   EcdsaSecp256k1Signature2019,
@@ -552,8 +553,27 @@ export async function issueCredential(
     }
   }
 
-  // Sign and return the credential with jsonld-signatures otherwise
-  return jsigs.sign(cred, {
+  // Fetch DID owner history
+  let didOwnerHistory = null;
+  try {
+    const didClient = new DIDServiceClient();
+    const did = cred.credentialSubject.id;
+    if (did) {
+      didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+    }
+  } catch (error) {
+    // Log error but don't fail the credential issuance
+    console.warn('Failed to fetch DID owner history:', error.message);
+  }
+
+  // Add didOwner as a top-level field (not in proof) to avoid BBS+ encoding issues
+  // This field won't be part of the cryptographic proof but will be included in the credential
+  if (didOwnerHistory) {
+    cred.didOwnerProof = didOwnerHistory;
+  }
+
+  // Sign the credential with jsonld-signatures
+  const signedCredential = await jsigs.sign(cred, {
     purpose: purpose || new CredentialIssuancePurpose(),
     documentLoader: docLoader,
     suite,
@@ -561,6 +581,8 @@ export async function issueCredential(
     expansionMap,
     addSuiteContext,
   });
+
+  return signedCredential;
 }
 
 /**

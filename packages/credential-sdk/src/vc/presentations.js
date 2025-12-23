@@ -11,6 +11,7 @@ import b58 from 'bs58';
 import { getPrivateStatus, verifyCredential } from './credentials';
 /// import DIDResolver from "../resolver/did/did-resolver"; // eslint-disable-line
 import { isCredVerGte060 } from './crypto/common/DockCryptoSignature';
+import { DIDServiceClient } from '../api-client';
 
 import defaultDocumentLoader from './document-loader';
 import { getSuiteFromKeyDoc } from './helpers';
@@ -256,6 +257,22 @@ export async function signPresentation(
     suite,
     addSuiteContext,
   });
+
+  // Fetch DID owner history and add AFTER signing to avoid JSON-LD context issues
+  try {
+    const didClient = new DIDServiceClient();
+    const did = presentation.holder;
+    if (did) {
+      const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+      console.log('didOwnerHistory', didOwnerHistory);
+      if (didOwnerHistory) {
+        signed.didOwnerProof = didOwnerHistory;
+      }
+    }
+  } catch (error) {
+    // Log error but don't fail the presentation signing
+    console.warn('Failed to fetch DID owner history:', error.message);
+  }
 
   // Sometimes jsigs returns proof like [null, { proof }]
   // check for that case here and if there's only 1 proof store object instead

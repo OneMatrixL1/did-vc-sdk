@@ -227,17 +227,16 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
         test('message packing matches contract logic', () => {
             const identity = bbsAddress;
             const newOwner = '0x1234567890123456789012345678901234567890';
-            const nonce = 0;
             const chainId = VIETCHAIN_CHAIN_ID;
 
-            // Pack message: abi.encodePacked(identity, newOwner, nonce, chainId)
+            // Pack message: abi.encodePacked(identity, newOwner, chainId)
             const packed = ethers.utils.solidityPack(
-                ['address', 'address', 'uint256', 'uint256'],
-                [identity, newOwner, nonce, chainId],
+                ['address', 'address', 'uint256'],
+                [identity, newOwner, chainId],
             );
 
-            // Should be 20 + 20 + 32 + 32 = 104 bytes = 208 hex chars + 0x
-            expect(packed.length).toBe(210);
+            // Should be 20 + 20 + 32 = 72 bytes = 144 hex chars + 0x
+            expect(packed.length).toBe(146);
 
             // Should contain identity at the beginning
             expect(packed.toLowerCase()).toContain(identity.toLowerCase().slice(2));
@@ -245,8 +244,8 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
 
         test('keccak256 hash produces 32 bytes', () => {
             const packed = ethers.utils.solidityPack(
-                ['address', 'address', 'uint256', 'uint256'],
-                [bbsAddress, '0x0000000000000000000000000000000000000001', 0, VIETCHAIN_CHAIN_ID],
+                ['address', 'address', 'uint256'],
+                [bbsAddress, '0x0000000000000000000000000000000000000001', VIETCHAIN_CHAIN_ID],
             );
 
             const hash = ethers.utils.keccak256(packed);
@@ -261,20 +260,6 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
     // ===========================================================================
 
     describe('Contract Interaction', () => {
-        test('can read nonce from contract', async () => {
-            const registryAbi = ['function nonce(address identity) view returns (uint256)'];
-            const registry = new ethers.Contract(
-                BLS_REGISTRY_ADDRESS,
-                registryAbi,
-                provider,
-            );
-
-            const nonce = await registry.nonce(bbsAddress);
-
-            expect(nonce).toBeDefined();
-            expect(typeof nonce.toNumber()).toBe('number');
-        }, 30000);
-
         test('can get chainId from provider', async () => {
             const network = await provider.getNetwork();
 

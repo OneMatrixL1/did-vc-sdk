@@ -38,9 +38,9 @@ export default class Bls12381BBSKeyPairDock2023 extends DockCryptoKeyPair {
    * Returns the public key as uncompressed hex string (0x-prefixed).
    * Smart contracts typically expect uncompressed G2 points (192 bytes).
    * This method decompresses the 96-byte compressed G2 to 192-byte uncompressed format.
-   * @returns {Promise<string>} 0x-prefixed hex string (384 characters for 192 bytes)
+   * @returns {string} 0x-prefixed hex string (384 characters for 192 bytes)
    */
-  async getPublicKeyUncompressedHex() {
+  getPublicKeyUncompressedHex() {
     if (!this.publicKeyBuffer) {
       throw new Error('No public key available');
     }
@@ -71,11 +71,11 @@ export default class Bls12381BBSKeyPairDock2023 extends DockCryptoKeyPair {
    * The signing process:
    * 1. Hash the message to a G1 point using hashToG1(DST, messageHash)
    * 2. Sign the G1 point with the BLS12-381 secret key
-   * 3. Return the signature bytes (96 bytes compressed G1)
+   * 3. Return the signature bytes (96 bytes uncompressed G1)
    *
    * @param {Uint8Array} messageBytes - 32-byte Keccak256 hash of the message
    * @param {Uint8Array|string} dstBytes - Domain Separation Tag (e.g., "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_")
-   * @returns {Uint8Array} 96-byte signature (compressed G1 point)
+   * @returns {Uint8Array} 96-byte signature (uncompressed G1 point)
    * @throws {Error} If no private key is available
    */
   signBLS(messageBytes, dstBytes) {

@@ -75,7 +75,7 @@ export default class Bls12381BBSKeyPairDock2023 extends DockCryptoKeyPair {
    *
    * @param {Uint8Array} messageBytes - 32-byte Keccak256 hash of the message
    * @param {Uint8Array|string} dstBytes - Domain Separation Tag (e.g., "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_")
-   * @returns {Promise<Uint8Array>} 96-byte signature (compressed G1 point)
+   * @returns {Uint8Array} 96-byte signature (compressed G1 point)
    * @throws {Error} If no private key is available
    */
   signBLS(messageBytes, dstBytes) {

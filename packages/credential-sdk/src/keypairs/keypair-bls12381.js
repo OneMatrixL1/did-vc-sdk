@@ -35,7 +35,7 @@ export default class Bls12381Keypair {
 
     /**
      * Generate a random BLS12-381 keypair.
-     * @returns {Promise<Bls12381Keypair>} New keypair
+     * @returns {Bls12381Keypair} New keypair
      */
     static generate() {
         const secretKey = bls12_381.utils.randomPrivateKey();
@@ -46,7 +46,7 @@ export default class Bls12381Keypair {
     /**
      * Create keypair from a 32-byte secret key.
      * @param {Uint8Array|Array<number>} secretKeyBytes - 32-byte secret key
-     * @returns {Promise<Bls12381Keypair>} Keypair
+     * @returns {Bls12381Keypair} Keypair
      */
     static fromSecretKey(secretKeyBytes) {
         const secretKey = secretKeyBytes instanceof Uint8Array
@@ -71,9 +71,9 @@ export default class Bls12381Keypair {
     /**
      * Create keypair from hex-encoded secret key.
      * @param {string} secretKeyHex - 0x-prefixed or raw hex secret key
-     * @returns {Promise<Bls12381Keypair>} Keypair
+     * @returns {Bls12381Keypair} Keypair
      */
-    static async fromSecretKeyHex(secretKeyHex) {
+    static fromSecretKeyHex(secretKeyHex) {
         const hex = secretKeyHex.startsWith('0x') ? secretKeyHex.slice(2) : secretKeyHex;
         const secretKey = new Uint8Array(Buffer.from(hex, 'hex'));
 
@@ -109,7 +109,7 @@ export default class Bls12381Keypair {
      *
      * @param {Uint8Array} messageBytes - Payload to sign (raw bytes)
      * @param {string|Uint8Array} dstBytes - Domain Separation Tag (required)
-     * @returns {Promise<Uint8Array>} 96-byte uncompressed G1 signature
+     * @returns {Uint8Array} 96-byte uncompressed G1 signature
      */
     signBLS(messageBytes, dstBytes) {
         const dst = typeof dstBytes === 'string'

@@ -708,17 +708,18 @@ class EthrDIDModule extends AbstractDIDModule {
   }
 
   /**
-   * Change the owner of a DID using BLS12-381 signature verification.
+   * Change the owner of a DID using BLS12-381 signature verification (EIP-712 style).
    * This method is designed for Bls12381Keypair (pure BLS, standard G2 derivation).
    *
    * IMPORTANT: Do NOT use Bls12381BBSKeyPairDock2023 (BBS keypair) - it uses
    * non-standard G2 derivation and is incompatible with contract verification.
    *
-   * The BLS signature verification matches the smart contract logic:
-   * 1. Pack message: abi.encodePacked(identity, newOwner, nonce, chainId)
-   * 2. Hash message: keccak256(packed)
-   * 3. Sign with BLS: hashToPoint(DST, hash) + scalar multiply with secret key
+   * The BLS signature verification matches the smart contract EIP-712 logic:
+   * 1. Compute structHash: keccak256(abi.encode(BLS_CHANGE_OWNER_TYPEHASH, identity, newOwner, nonce))
+   * 2. Compute digest: keccak256(0x1901 || DOMAIN_SEPARATOR || structHash)
+   * 3. Sign with BLS: hashToPoint(DST, digest) + scalar multiply with secret key
    *
+   * @param {string} identity - The DID identity address to change owner of
    * @param {Object} blsKeypair - Bls12381Keypair instance (NOT BBS keypair)
    * @param {string} newOwnerAddress - Ethereum address of new owner
    * @param {Object} [options] - Additional options
@@ -730,14 +731,21 @@ class EthrDIDModule extends AbstractDIDModule {
    * @example
    * const blsKeypair = await Bls12381Keypair.generate();
    * const fundedKeypair = Secp256k1Keypair.random(); // Must have ETH for gas
-   * const receipt = await module.changeOwnerBLS(blsKeypair, '0xNewOwner123...', {
+   * const identity = blsKeypair.address; // or any identity the BLS key controls
+   * const receipt = await module.changeOwnerBLS(identity, blsKeypair, '0xNewOwner123...', {
    *   txSigner: fundedKeypair,
    * });
    */
-  async changeOwnerBLS(blsKeypair, newOwnerAddress, options = {}) {
+  async changeOwnerBLS(identity, blsKeypair, newOwnerAddress, options = {}) {
     // Domain Separation Tag - IETF standard for hash-to-curve
     // Must match the smart contract exactly
     const BLS_DST = 'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_';
+
+    // EIP-712 TypeHash for BLS change owner
+    const BLS_CHANGE_OWNER_TYPEHASH = ethers.utils.keccak256(
+      ethers.utils.toUtf8Bytes('BLSChangeOwner(address identity,address newOwner,uint256 nonce)'),
+    );
+
     const { networkName = null, txSigner = null } = options;
 
     // Validate keypair has the required methods/properties
@@ -764,19 +772,16 @@ class EthrDIDModule extends AbstractDIDModule {
 
     const provider = this.#getProvider(name);
 
-    // Step 1: Get public key hex and identity from keypair
-    // Bls12381Keypair provides these directly with correct derivation
-    const pubKeyHex = blsKeypair.publicKeyHex;
-    const identity = blsKeypair.address;
-
-    // Step 2: Ensure new owner address is checksummed
+    // Step 1: Normalize addresses
+    const identityAddress = ethers.utils.getAddress(identity);
     const newOwner = ethers.utils.getAddress(newOwnerAddress);
+    const pubKeyHex = blsKeypair.publicKeyHex;
 
-    // Step 3: Create contract interface for the BLS-enabled registry
-    // ABI fragment for changeOwnerBLS function
+    // Step 2: Create contract interface for the BLS-enabled registry
     const blsRegistryAbi = [
-      'function changeOwnerBLS(bytes calldata publicKey, bytes calldata signature, address newOwner) external',
+      'function changeOwnerBLS(address identity, bytes calldata publicKey, bytes calldata signature, address newOwner) external',
       'function nonce(address identity) external view returns (uint256)',
+      'function DOMAIN_SEPARATOR() external view returns (bytes32)',
     ];
 
     const registry = new ethers.Contract(
@@ -785,38 +790,44 @@ class EthrDIDModule extends AbstractDIDModule {
       provider,
     );
 
-    // Step 4: Fetch nonce for this identity
-    const nonce = await registry.nonce(identity);
+    // Step 3: Fetch nonce and DOMAIN_SEPARATOR from contract
+    const [nonce, domainSeparator] = await Promise.all([
+      registry.nonce(identityAddress),
+      registry.DOMAIN_SEPARATOR(),
+    ]);
 
-    // Step 5: Get chain ID from network
-    const { chainId } = await provider.getNetwork();
-
-    // Step 6: Pack the message per smart contract specification
-    // packed = abi.encodePacked(identity, newOwner, nonce, chainId)
-    const packedMessage = ethers.utils.solidityPack(
-      ['address', 'address', 'uint256', 'uint256'],
-      [identity, newOwner, nonce, chainId],
+    // Step 4: Compute structHash per EIP-712
+    // structHash = keccak256(abi.encode(BLS_CHANGE_OWNER_TYPEHASH, identity, newOwner, nonce))
+    const structHash = ethers.utils.keccak256(
+      ethers.utils.defaultAbiCoder.encode(
+        ['bytes32', 'address', 'address', 'uint256'],
+        [BLS_CHANGE_OWNER_TYPEHASH, identityAddress, newOwner, nonce],
+      ),
     );
 
-    // Step 7: The contract performs hash-to-point on strict raw packed bytes.
-    // Do NOT hash with Keccak256 or verification will fail.
-    const messageBytes = ethers.utils.arrayify(packedMessage);
+    // Step 5: Compute EIP-712 digest
+    // digest = keccak256(0x1901 || DOMAIN_SEPARATOR || structHash)
+    const digest = ethers.utils.keccak256(
+      ethers.utils.solidityPack(
+        ['bytes2', 'bytes32', 'bytes32'],
+        ['0x1901', domainSeparator, structHash],
+      ),
+    );
 
-    // Step 8: Sign using BLS with the DST
-    const signatureBytes = await blsKeypair.signBLS(messageBytes, BLS_DST);
+    // Step 6: Sign the digest with BLS
+    // The contract does: hashToPoint(BLS_DST, abi.encodePacked(digest))
+    const digestBytes = ethers.utils.arrayify(digest);
+    const signatureBytes = blsKeypair.signBLS(digestBytes, BLS_DST);
 
-    // Step 9: Convert signature to hex for contract call
-    // pubKeyHex was already computed at step 1
+    // Step 7: Convert signature to hex for contract call
     const sigHex = blsKeypair.constructor.signatureToHex
       ? blsKeypair.constructor.signatureToHex(signatureBytes)
       : `0x${Array.from(signatureBytes).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
 
-    // Step 10: Create signer for transaction submission
-    // Since BBS can't sign Ethereum transactions, we need a separate funded account
+    // Step 8: Create signer for transaction submission
     let signer;
 
     if (txSigner) {
-      // If txSigner is a Secp256k1Keypair, convert to ethers Wallet
       if (txSigner.privateKey && typeof txSigner.privateKey === 'function') {
         const privateKeyBytes = txSigner.privateKey();
         const privateKeyHex = `0x${Array.from(privateKeyBytes)
@@ -825,31 +836,27 @@ class EthrDIDModule extends AbstractDIDModule {
 
         signer = new ethers.Wallet(privateKeyHex, provider);
       } else if (txSigner._isSigner) {
-        // Already an ethers Signer
         signer = txSigner.connect(provider);
       } else {
         throw new Error('txSigner must be a Secp256k1Keypair or ethers.Wallet');
       }
     } else {
       throw new Error(
-        'txSigner is required. BBS keypairs cannot sign Ethereum transactions. '
+        'txSigner is required. BLS keypairs cannot sign Ethereum transactions. '
         + 'Provide a funded Secp256k1Keypair or ethers.Wallet to pay for gas.',
       );
     }
 
     const registryWithSigner = registry.connect(signer);
 
-    // Step 11: Try callStatic first to get revert reason, then submit
+    // Step 9: Try callStatic first to get revert reason, then submit
     try {
-      // Call static first to check if the call would succeed
-      await registryWithSigner.callStatic.changeOwnerBLS(pubKeyHex, sigHex, newOwner);
+      await registryWithSigner.callStatic.changeOwnerBLS(identityAddress, pubKeyHex, sigHex, newOwner);
 
-      // If callStatic succeeds, send the actual transaction
-      const tx = await registryWithSigner.changeOwnerBLS(pubKeyHex, sigHex, newOwner);
+      const tx = await registryWithSigner.changeOwnerBLS(identityAddress, pubKeyHex, sigHex, newOwner);
 
       return await waitForTransaction(tx.hash, provider);
     } catch (error) {
-      // Extract detailed error information
       let errorDetails = formatEthersError(error);
 
       if (error.error && error.error.data) {

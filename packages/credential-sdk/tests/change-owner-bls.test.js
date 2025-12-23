@@ -3,17 +3,17 @@
  *
  * Use Case:
  * - Test the BLS12-381 signature-based ownership transfer for ethr DIDs
- * - BBS keypair can change DID ownership using BLS signatures verified on-chain
+ * - BLS keypair can change DID ownership using BLS signatures verified on-chain
  *
- * Flow:
- * 1. Generate a BBS keypair
- * 2. Derive identity (Ethereum address) from BBS public key
- * 3. Create message: abi.encodePacked(identity, newOwner, nonce, chainId)
- * 4. Sign with BLS: hashToPoint(DST, keccak256(message)) * secretKey
+ * Flow (EIP-712 style):
+ * 1. Generate a BLS keypair
+ * 2. Compute structHash: keccak256(abi.encode(BLS_CHANGE_OWNER_TYPEHASH, identity, newOwner, nonce))
+ * 3. Compute digest: keccak256(0x1901 || DOMAIN_SEPARATOR || structHash)
+ * 4. Sign with BLS: hashToPoint(DST, digest) * secretKey
  * 5. Submit changeOwnerBLS transaction to the registry contract
  *
  * Contract:
- * - EthereumDIDRegistry with BLS support: 0x23f935167613bB06F4C6e997197B866E668E71AB
+ * - EthereumDIDRegistry with BLS support: 0xF517eb2C8DfdfA6Ed6fe78Bbe80E7121C7586334
  */
 
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
@@ -36,7 +36,7 @@ const VIETCHAIN_CHAIN_ID = 84005;
 const BLS_DST = 'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_';
 
 // BLS-enabled registry contract
-const BLS_REGISTRY_ADDRESS = '0x61d67c3D219c3Eb4B4B5AC9a5bB9c8646bb065Eb';
+const BLS_REGISTRY_ADDRESS = '0xF517eb2C8DfdfA6Ed6fe78Bbe80E7121C7586334';
 
 const NETWORK_CONFIG = {
     name: VIETCHAIN_NETWORK,
@@ -293,18 +293,26 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
             };
 
             await expect(
-                ethrModule.changeOwnerBLS(fakeKeypair, '0x0000000000000000000000000000000000000001'),
+                ethrModule.changeOwnerBLS(
+                    '0x0000000000000000000000000000000000000001',
+                    fakeKeypair,
+                    '0x0000000000000000000000000000000000000002',
+                ),
             ).rejects.toThrow(/signBLS/);
         });
 
         test('changeOwnerBLS validates keypair has publicKeyHex', async () => {
             const fakeKeypair = {
-                signBLS: async () => new Uint8Array(96),
+                signBLS: () => new Uint8Array(96),
                 // Missing publicKeyHex and address
             };
 
             await expect(
-                ethrModule.changeOwnerBLS(fakeKeypair, '0x0000000000000000000000000000000000000001'),
+                ethrModule.changeOwnerBLS(
+                    '0x0000000000000000000000000000000000000001',
+                    fakeKeypair,
+                    '0x0000000000000000000000000000000000000002',
+                ),
             ).rejects.toThrow(/publicKeyHex/);
         });
     });
@@ -314,31 +322,48 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
     // ===========================================================================
 
     describe('E2E: changeOwnerBLS Full Flow', () => {
-        test('can construct full changeOwnerBLS message and signature', async () => {
+        test('can construct full changeOwnerBLS message and signature (EIP-712)', async () => {
             const newOwnerAddress = '0x0000000000000000000000000000000000000001';
 
-            // Step 1: Get nonce
-            const registryAbi = ['function nonce(address identity) view returns (uint256)'];
+            // EIP-712 TypeHash
+            const BLS_CHANGE_OWNER_TYPEHASH = ethers.utils.keccak256(
+                ethers.utils.toUtf8Bytes('BLSChangeOwner(address identity,address newOwner,uint256 nonce)'),
+            );
+
+            // Step 1: Get nonce and DOMAIN_SEPARATOR from contract
+            const registryAbi = [
+                'function nonce(address identity) view returns (uint256)',
+                'function DOMAIN_SEPARATOR() view returns (bytes32)',
+            ];
             const registry = new ethers.Contract(
                 BLS_REGISTRY_ADDRESS,
                 registryAbi,
                 provider,
             );
-            const nonce = await registry.nonce(bbsAddress);
+            const [nonce, domainSeparator] = await Promise.all([
+                registry.nonce(bbsAddress),
+                registry.DOMAIN_SEPARATOR(),
+            ]);
 
-            // Step 2: Get chainId
-            const { chainId } = await provider.getNetwork();
-
-            // Step 3: Pack message
-            const packed = ethers.utils.solidityPack(
-                ['address', 'address', 'uint256', 'uint256'],
-                [bbsAddress, newOwnerAddress, nonce, chainId],
+            // Step 2: Compute structHash
+            const structHash = ethers.utils.keccak256(
+                ethers.utils.defaultAbiCoder.encode(
+                    ['bytes32', 'address', 'address', 'uint256'],
+                    [BLS_CHANGE_OWNER_TYPEHASH, bbsAddress, newOwnerAddress, nonce],
+                ),
             );
 
-            // Step 4: Sign with BLS
-            const packedUint8Array = ethers.utils.arrayify(packed);
+            // Step 3: Compute EIP-712 digest
+            const digest = ethers.utils.keccak256(
+                ethers.utils.solidityPack(
+                    ['bytes2', 'bytes32', 'bytes32'],
+                    ['0x1901', domainSeparator, structHash],
+                ),
+            );
 
-            const signature = await bbsKeypair.signBLS(packedUint8Array, BLS_DST);
+            // Step 4: Sign the digest with BLS
+            const digestBytes = ethers.utils.arrayify(digest);
+            const signature = bbsKeypair.signBLS(digestBytes, BLS_DST);
 
             // Step 5: Convert to hex for contract
             const pubKeyHex = bbsKeypair.publicKeyHex;
@@ -349,12 +374,13 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
             expect(sigHex).toMatch(/^0x[0-9a-fA-F]+$/);
             expect(sigHex.length).toBeGreaterThanOrEqual(98); // 0x + at least 48 bytes
 
-            console.log('=== changeOwnerBLS Test Data ===');
+            console.log('=== changeOwnerBLS Test Data (EIP-712) ===');
             console.log('Identity:', bbsAddress);
             console.log('New Owner:', newOwnerAddress);
             console.log('Nonce:', nonce.toString());
-            console.log('Chain ID:', chainId);
-            console.log('Packed Message:', packed);
+            console.log('DOMAIN_SEPARATOR:', domainSeparator);
+            console.log('structHash:', structHash);
+            console.log('Digest:', digest);
             console.log('Public Key (hex):', pubKeyHex);
             console.log('Signature (hex):', sigHex);
         }, 30000);
@@ -362,10 +388,11 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
         test('changeOwnerBLS requires txSigner parameter', async () => {
             // Import Bls12381Keypair for this test
             const { Bls12381Keypair } = await import('../src/keypairs');
-            const testKeypair = await Bls12381Keypair.generate();
+            const testKeypair = Bls12381Keypair.generate();
 
             await expect(
                 ethrModule.changeOwnerBLS(
+                    testKeypair.address, // identity
                     testKeypair,
                     '0x0000000000000000000000000000000000000001',
                     {}, // No txSigner provided
@@ -390,14 +417,18 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
                 const fundedKeypair = new Secp256k1Keypair(privateKeyBytes, 'private');
 
                 // Generate pure BLS12-381 keypair (NOT BBS)
-                const blsKeypair = await Bls12381Keypair.generate();
+                const blsKeypair = Bls12381Keypair.generate();
 
                 // Generate new random address as new owner
                 const newOwnerKeypair = Secp256k1Keypair.random();
                 const newOwnerAddress = keypairToAddress(newOwnerKeypair);
 
-                // Call changeOwnerBLS with the funded keypair as txSigner
+                // The identity is derived from the BLS public key
+                const identity = blsKeypair.address;
+
+                // Call changeOwnerBLS with identity, keypair, newOwner
                 const receipt = await ethrModule.changeOwnerBLS(
+                    identity,
                     blsKeypair,
                     newOwnerAddress,
                     { txSigner: fundedKeypair },

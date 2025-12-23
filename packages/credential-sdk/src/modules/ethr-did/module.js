@@ -715,7 +715,7 @@ class EthrDIDModule extends AbstractDIDModule {
    * non-standard G2 derivation and is incompatible with contract verification.
    *
    * The BLS signature verification matches the smart contract EIP-712 logic:
-   * 1. Compute structHash: keccak256(abi.encode(BLS_CHANGE_OWNER_TYPEHASH, identity, newOwner, nonce))
+   * 1. Compute structHash: keccak256(abi.encode(BLS_CHANGE_OWNER_TYPEHASH, identity, newOwner))
    * 2. Compute digest: keccak256(0x1901 || DOMAIN_SEPARATOR || structHash)
    * 3. Sign with BLS: hashToPoint(DST, digest) + scalar multiply with secret key
    *
@@ -741,9 +741,9 @@ class EthrDIDModule extends AbstractDIDModule {
     // Must match the smart contract exactly
     const BLS_DST = 'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_';
 
-    // EIP-712 TypeHash for BLS change owner
+    // EIP-712 TypeHash for BLS change owner (no nonce)
     const BLS_CHANGE_OWNER_TYPEHASH = ethers.utils.keccak256(
-      ethers.utils.toUtf8Bytes('BLSChangeOwner(address identity,address newOwner,uint256 nonce)'),
+      ethers.utils.toUtf8Bytes('BLSChangeOwner(address identity,address newOwner)'),
     );
 
     const { networkName = null, txSigner = null } = options;
@@ -780,7 +780,6 @@ class EthrDIDModule extends AbstractDIDModule {
     // Step 2: Create contract interface for the BLS-enabled registry
     const blsRegistryAbi = [
       'function changeOwnerBLS(address identity, bytes calldata publicKey, bytes calldata signature, address newOwner) external',
-      'function nonce(address identity) external view returns (uint256)',
       'function DOMAIN_SEPARATOR() external view returns (bytes32)',
     ];
 
@@ -790,18 +789,15 @@ class EthrDIDModule extends AbstractDIDModule {
       provider,
     );
 
-    // Step 3: Fetch nonce and DOMAIN_SEPARATOR from contract
-    const [nonce, domainSeparator] = await Promise.all([
-      registry.nonce(identityAddress),
-      registry.DOMAIN_SEPARATOR(),
-    ]);
+    // Step 3: Fetch DOMAIN_SEPARATOR from contract
+    const domainSeparator = await registry.DOMAIN_SEPARATOR();
 
-    // Step 4: Compute structHash per EIP-712
-    // structHash = keccak256(abi.encode(BLS_CHANGE_OWNER_TYPEHASH, identity, newOwner, nonce))
+    // Step 4: Compute structHash per EIP-712 (no nonce)
+    // structHash = keccak256(abi.encode(BLS_CHANGE_OWNER_TYPEHASH, identity, newOwner))
     const structHash = ethers.utils.keccak256(
       ethers.utils.defaultAbiCoder.encode(
-        ['bytes32', 'address', 'address', 'uint256'],
-        [BLS_CHANGE_OWNER_TYPEHASH, identityAddress, newOwner, nonce],
+        ['bytes32', 'address', 'address'],
+        [BLS_CHANGE_OWNER_TYPEHASH, identityAddress, newOwner],
       ),
     );
 

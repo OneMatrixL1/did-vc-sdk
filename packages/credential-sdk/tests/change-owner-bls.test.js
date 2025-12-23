@@ -7,13 +7,13 @@
  *
  * Flow (EIP-712 style):
  * 1. Generate a BLS keypair
- * 2. Compute structHash: keccak256(abi.encode(BLS_CHANGE_OWNER_TYPEHASH, identity, newOwner, nonce))
+ * 2. Compute structHash: keccak256(abi.encode(BLS_CHANGE_OWNER_TYPEHASH, identity, newOwner))
  * 3. Compute digest: keccak256(0x1901 || DOMAIN_SEPARATOR || structHash)
  * 4. Sign with BLS: hashToPoint(DST, digest) * secretKey
  * 5. Submit changeOwnerBLS transaction to the registry contract
  *
  * Contract:
- * - EthereumDIDRegistry with BLS support: 0xF517eb2C8DfdfA6Ed6fe78Bbe80E7121C7586334
+ * - EthereumDIDRegistry with BLS support: 0x072d2ef63AB49297D8Ea638e93BC6fbd09B7C870
  */
 
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
@@ -36,7 +36,7 @@ const VIETCHAIN_CHAIN_ID = 84005;
 const BLS_DST = 'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_';
 
 // BLS-enabled registry contract
-const BLS_REGISTRY_ADDRESS = '0xF517eb2C8DfdfA6Ed6fe78Bbe80E7121C7586334';
+const BLS_REGISTRY_ADDRESS = '0x072d2ef63AB49297D8Ea638e93BC6fbd09B7C870';
 
 const NETWORK_CONFIG = {
     name: VIETCHAIN_NETWORK,
@@ -325,14 +325,13 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
         test('can construct full changeOwnerBLS message and signature (EIP-712)', async () => {
             const newOwnerAddress = '0x0000000000000000000000000000000000000001';
 
-            // EIP-712 TypeHash
+            // EIP-712 TypeHash (no nonce)
             const BLS_CHANGE_OWNER_TYPEHASH = ethers.utils.keccak256(
-                ethers.utils.toUtf8Bytes('BLSChangeOwner(address identity,address newOwner,uint256 nonce)'),
+                ethers.utils.toUtf8Bytes('BLSChangeOwner(address identity,address newOwner)'),
             );
 
-            // Step 1: Get nonce and DOMAIN_SEPARATOR from contract
+            // Step 1: Get DOMAIN_SEPARATOR from contract
             const registryAbi = [
-                'function nonce(address identity) view returns (uint256)',
                 'function DOMAIN_SEPARATOR() view returns (bytes32)',
             ];
             const registry = new ethers.Contract(
@@ -340,16 +339,13 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
                 registryAbi,
                 provider,
             );
-            const [nonce, domainSeparator] = await Promise.all([
-                registry.nonce(bbsAddress),
-                registry.DOMAIN_SEPARATOR(),
-            ]);
+            const domainSeparator = await registry.DOMAIN_SEPARATOR();
 
-            // Step 2: Compute structHash
+            // Step 2: Compute structHash (no nonce)
             const structHash = ethers.utils.keccak256(
                 ethers.utils.defaultAbiCoder.encode(
-                    ['bytes32', 'address', 'address', 'uint256'],
-                    [BLS_CHANGE_OWNER_TYPEHASH, bbsAddress, newOwnerAddress, nonce],
+                    ['bytes32', 'address', 'address'],
+                    [BLS_CHANGE_OWNER_TYPEHASH, bbsAddress, newOwnerAddress],
                 ),
             );
 
@@ -377,7 +373,6 @@ describe('TESTCASE: changeOwnerBLS Flow', () => {
             console.log('=== changeOwnerBLS Test Data (EIP-712) ===');
             console.log('Identity:', bbsAddress);
             console.log('New Owner:', newOwnerAddress);
-            console.log('Nonce:', nonce.toString());
             console.log('DOMAIN_SEPARATOR:', domainSeparator);
             console.log('structHash:', structHash);
             console.log('Digest:', digest);

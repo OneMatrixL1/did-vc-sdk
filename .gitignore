@@ -32,3 +32,5 @@ tsconfig*buildinfo
 out/
 *.log
 openspec/
+AGENTS.md
+CLAUDE.md

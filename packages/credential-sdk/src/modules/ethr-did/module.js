@@ -27,8 +27,6 @@ import {
   generateDefaultDocument,
   createDualDID,
   publicKeyToAddress,
-  createChangeOwnerWithPubkeyTypedData,
-  computeChangeOwnerWithPubkeyHash,
   signWithBLSKeypair,
 } from './utils';
 
@@ -744,84 +742,43 @@ class EthrDIDModule extends AbstractDIDModule {
     }
 
     const networkConfig = this.networks.get(networkName);
-    const provider = this.#getProvider(networkName);
-
-    // Get registry contract address
-    const registryAddress = ethers.utils.getAddress(networkConfig.registry);
-
-    // Ensure identity address is checksummed
-    const identityAddress = ethers.utils.getAddress(did.split(':').pop().split(':')[0]);
 
     // Ensure new owner address is checksummed
     const checksummedNewOwner = ethers.utils.getAddress(newOwnerAddress);
 
-    // Get signer address from BBS public key
-    const signerAddress = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
-
-    // Verify signer is current owner
-    const ethrDid = await this.#createEthrDID(
-      { privateKey: () => '0x' + '0'.repeat(64) }, // Dummy for address extraction
-      networkName,
-    );
-
-    const currentOwner = await ethrDid.identityOwner(identityAddress);
-    if (signerAddress !== currentOwner) {
-      throw new Error(
-        `BBS public key address (${signerAddress}) is not the current owner (${currentOwner})`,
-      );
-    }
-
     try {
-      // Query current pubkey nonce from contract
-      const registryContract = new ethers.Contract(
-        registryAddress,
-        ['function pubkeyNonce(address) public view returns (uint256)'],
-        provider,
+      // Create EthrDID instance for the identity
+      const ethrDid = await this.#createEthrDID(
+        { privateKey: () => '0x' + '0'.repeat(64) }, // Dummy key for read-only operations
+        networkName,
       );
 
-      const currentNonce = await registryContract.pubkeyNonce(signerAddress);
+      // Update the EthrDID's address to the identity being modified
+      ethrDid.address = ethers.utils.getAddress(did.split(':').pop().split(':')[0]);
 
-      // Create EIP-712 typed data
-      const typedData = createChangeOwnerWithPubkeyTypedData(
-        identityAddress,
-        signerAddress,
+      // Get the EIP-712 hash for signing
+      const hash = await ethrDid.createChangeOwnerWithPubkeyHash(
         checksummedNewOwner,
-        currentNonce,
-        registryAddress,
-        networkConfig.chainId || 1,
+        bbsKeypair.publicKeyBuffer,
       );
 
-      // Compute EIP-712 hash
-      const hash = computeChangeOwnerWithPubkeyHash(typedData);
-
-      // Sign with BBS keypair
+      // Sign the hash with BLS keypair
       const signature = await signWithBLSKeypair(hash, bbsKeypair);
 
-      // Submit transaction to contract
-      const signer = provider.getSigner();
-      const registryInterface = new ethers.utils.Interface([
-        'function changeOwnerWithPubkey(address identity, address newOwner, uint256 pubkeyNonceParam, bytes calldata publicKey, bytes calldata signature) external',
-      ]);
-
-      const data = registryInterface.encodeFunctionData('changeOwnerWithPubkey', [
-        identityAddress,
+      // Submit the transaction using the ethr-did library
+      const txHash = await ethrDid.changeOwnerWithPubkey(
         checksummedNewOwner,
-        currentNonce,
         bbsKeypair.publicKeyBuffer,
         signature,
-      ]);
+      );
 
-      const tx = await signer.sendTransaction({
-        to: registryAddress,
-        data,
-      });
-
-      // Wait for confirmation
-      const receipt = await tx.wait(confirmations);
+      // Get the receipt to return transaction details
+      const provider = this.#getProvider(networkName);
+      const receipt = await provider.getTransactionReceipt(txHash);
 
       return {
-        txHash: receipt.transactionHash,
-        blockNumber: receipt.blockNumber,
+        txHash,
+        blockNumber: receipt?.blockNumber,
         success: true,
         ...receipt,
       };

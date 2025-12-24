@@ -44,56 +44,6 @@ export function publicKeyToAddress(publicKeyBytes) {
  * @param {number} chainId - The chain ID
  * @returns {{domain: {name: string, version: string, chainId: number, verifyingContract: string}, types: {EIP712Domain: Array, ChangeOwnerWithPubkey: Array}, primaryType: string, message: {identity: string, signer: string, newOwner: string, nonce: string}}} EIP-712 typed data
  */
-export function createChangeOwnerWithPubkeyTypedData(
-  identity,
-  signer,
-  newOwner,
-  nonce,
-  registryAddress,
-  chainId,
-) {
-  return {
-    domain: {
-      name: 'EthereumDIDRegistry',
-      version: '1',
-      chainId,
-      verifyingContract: registryAddress,
-    },
-    types: {
-      ChangeOwnerWithPubkey: [
-        { name: 'identity', type: 'address' },
-        { name: 'signer', type: 'address' },
-        { name: 'newOwner', type: 'address' },
-        { name: 'nonce', type: 'uint256' },
-      ],
-    },
-    primaryType: 'ChangeOwnerWithPubkey',
-    message: {
-      identity: ethers.utils.getAddress(identity),
-      signer: ethers.utils.getAddress(signer),
-      newOwner: ethers.utils.getAddress(newOwner),
-      nonce: ethers.BigNumber.from(nonce).toString(),
-    },
-  };
-}
-
-/**
- * Compute EIP-712 hash for ChangeOwnerWithPubkey
- * @param {Object} typedData - EIP-712 typed data object
- * @returns {string} The message hash (0x-prefixed)
- */
-export function computeChangeOwnerWithPubkeyHash(typedData) {
-  const domainSeparator = ethers.utils._TypedDataEncoder.hashDomain(typedData.domain);
-  const hashStruct = ethers.utils._TypedDataEncoder.hashStruct(
-    typedData.primaryType,
-    typedData.types,
-    typedData.message,
-  );
-  const hash = ethers.utils.keccak256(
-    ethers.utils.solidityPack(['bytes2', 'bytes32', 'bytes32'], ['0x1901', domainSeparator, hashStruct]),
-  );
-  return hash;
-}
 
 /**
  * Sign a hash with BBS keypair for owner change

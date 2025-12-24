@@ -1,6 +1,0 @@
-[submodule "packages/ethr-did"]
-	path = packages/ethr-did
-	url = https://github.com/OneMatrixL1/ethr-did.git
-[submodule "packages/ethr-did-resolver"]
-	path = packages/ethr-did-resolver
-	url = https://github.com/OneMatrixL1/ethr-did-resolver.git

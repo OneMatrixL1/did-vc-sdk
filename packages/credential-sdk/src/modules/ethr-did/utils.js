@@ -60,12 +60,6 @@ export function createChangeOwnerWithPubkeyTypedData(
       verifyingContract: registryAddress,
     },
     types: {
-      EIP712Domain: [
-        { name: 'name', type: 'string' },
-        { name: 'version', type: 'string' },
-        { name: 'chainId', type: 'uint256' },
-        { name: 'verifyingContract', type: 'address' },
-      ],
       ChangeOwnerWithPubkey: [
         { name: 'identity', type: 'address' },
         { name: 'signer', type: 'address' },
@@ -103,18 +97,15 @@ export function computeChangeOwnerWithPubkeyHash(typedData) {
 
 /**
  * Sign a hash with BBS keypair for owner change
+ * Uses the DockCryptoKeyPair signer pattern for consistency
  * @param {Uint8Array|string} hashToSign - The EIP-712 hash (0x-prefixed hex string or bytes)
- * @param {Object} bbsKeypair - BBS keypair with privateKeyBuffer and constructor.Signature
+ * @param {Object} bbsKeypair - BBS keypair instance with signer() method
  * @returns {Promise<Uint8Array>} The BLS signature bytes
- * @throws {Error} If keypair doesn't have private key or constructor.Signature
+ * @throws {Error} If signing fails
  */
 export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
   if (!bbsKeypair.privateKeyBuffer) {
     throw new Error('BBS keypair requires private key for signing');
-  }
-
-  if (!bbsKeypair.constructor || !bbsKeypair.constructor.Signature) {
-    throw new Error('BBS keypair must have Signature class available');
   }
 
   // Convert hash string to bytes if needed
@@ -127,23 +118,51 @@ export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
     hashBytes = new Uint8Array(hashToSign);
   }
 
-  // Import what we need from the crypto library
-  const { BBSSignature, BBSSecretKey } = bbsKeypair.constructor;
-
-  if (!BBSSignature || !BBSSecretKey) {
-    throw new Error('BBS keypair constructor missing required cryptographic classes');
-  }
-
   try {
+    // Use the keypair's signer() method if available
+    if (bbsKeypair.signer && typeof bbsKeypair.signer === 'function') {
+      const signer = bbsKeypair.signer();
+      if (signer && signer.sign && typeof signer.sign === 'function') {
+        const signature = await signer.sign({ data: [hashBytes] });
+        return new Uint8Array(signature);
+      }
+    }
+
+    // Fallback: direct access to constructor classes
+    if (!bbsKeypair.constructor || !bbsKeypair.constructor.Signature) {
+      throw new Error('BBS keypair must have Signature class available');
+    }
+
+    let BBSSignature = bbsKeypair.constructor.Signature;
+    let BBSSecretKey = bbsKeypair.constructor.SecretKey;
+    let BBSSignatureParams = bbsKeypair.constructor.SignatureParams;
+    const defaultLabelBytes = bbsKeypair.constructor.defaultLabelBytes;
+
+    // Fallback to parent constructor if not found
+    if (!BBSSignature || !BBSSecretKey) {
+      const Parent = Object.getPrototypeOf(bbsKeypair.constructor);
+      if (Parent && Parent !== Object) {
+        BBSSignature = BBSSignature || Parent.Signature;
+        BBSSecretKey = BBSSecretKey || Parent.SecretKey;
+        BBSSignatureParams = BBSSignatureParams || Parent.SignatureParams;
+      }
+    }
+
+    if (!BBSSignature || !BBSSecretKey || !BBSSignatureParams) {
+      throw new Error('BBS keypair constructor missing required cryptographic classes');
+    }
+
     // Create secret key from buffer
     const sk = new BBSSecretKey(new Uint8Array(bbsKeypair.privateKeyBuffer));
 
+    // Get signature params for 1 message
+    const sigParams = BBSSignatureParams.getSigParamsOfRequiredSize(1, defaultLabelBytes);
+
     // Sign the hash as a single message
-    // BBSSignature.generate expects [message] as array of messages
-    const signature = BBSSignature.generate([hashBytes], sk);
+    const signature = BBSSignature.generate([hashBytes], sk, sigParams, false);
 
     // Return signature bytes
-    return signature.value;
+    return new Uint8Array(signature.value);
   } catch (e) {
     throw new Error(`Failed to sign with BBS keypair: ${e.message}`);
   }

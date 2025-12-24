@@ -98,6 +98,8 @@ git commit -m "feat: add ethr-did and ethr-did-resolver as git submodules"
 
 ## Phase 3: Update Yarn Workspaces
 
+> **Note**: This project uses Yarn v1.x, which requires `file:` paths for local dependencies. If you were to upgrade to Yarn 3+ (Berry), you could use the `workspace:*` protocol instead, but the current setup uses `file:../` paths for compatibility.
+
 ### Step 3.1: Update Root package.json
 Edit `package.json` at the root and add the new packages to the workspaces array:
 
@@ -119,8 +121,8 @@ Edit `packages/credential-sdk/package.json` and update:
 ```json
 {
   "dependencies": {
-    "ethr-did": "workspace:*",
-    "ethr-did-resolver": "workspace:*"
+    "ethr-did": "file:../ethr-did",
+    "ethr-did-resolver": "file:../ethr-did-resolver"
   }
 }
 ```
@@ -181,7 +183,7 @@ git push origin feature/custom-key-types
 cd ../../
 ```
 
-## Phase 6: CI/CD Integration
+## Phase 4: CI/CD Integration
 
 When you push changes to GitHub, ensure your repository's CI/CD configuration includes submodule handling.
 

@@ -31,5 +31,6 @@ package-lock.json
 tsconfig*buildinfo
 out/
 *.log
-.claude/commands/openspec
-openspec
+openspec/
+AGENTS.md
+CLAUDE.md

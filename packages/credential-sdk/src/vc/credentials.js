@@ -553,25 +553,6 @@ export async function issueCredential(
     }
   }
 
-  // Fetch DID owner history
-  let didOwnerHistory = null;
-  try {
-    const didClient = new DIDServiceClient();
-    const did = cred.credentialSubject.id;
-    if (did) {
-      didOwnerHistory = await didClient.getDIDOwnerHistory(did);
-    }
-  } catch (error) {
-    // Log error but don't fail the credential issuance
-    console.warn('Failed to fetch DID owner history:', error.message);
-  }
-
-  // Add didOwner as a top-level field (not in proof) to avoid BBS+ encoding issues
-  // This field won't be part of the cryptographic proof but will be included in the credential
-  if (didOwnerHistory) {
-    cred.didOwnerProof = didOwnerHistory;
-  }
-
   // Sign the credential with jsonld-signatures
   const signedCredential = await jsigs.sign(cred, {
     purpose: purpose || new CredentialIssuancePurpose(),
@@ -581,6 +562,18 @@ export async function issueCredential(
     expansionMap,
     addSuiteContext,
   });
+
+  // Fetch DID owner history
+  try {
+    const didClient = new DIDServiceClient();
+    const did = cred.credentialSubject.id;
+    const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+    if (didOwnerHistory.length > 0) {
+      signedCredential.didOwnerProof = didOwnerHistory;
+    }
+  } catch (error) {
+    throw new Error('Failed to fetch DID owner history:', error.message);
+  }
 
   return signedCredential;
 }

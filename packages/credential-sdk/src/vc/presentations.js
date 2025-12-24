@@ -228,6 +228,8 @@ export async function verifyPresentation(presentation, options = {}) {
  * @param {DIDResolver} [resolver] - Resolver for DIDs.
  * @param {Boolean} [compactProof] - Whether to compact the JSON-LD or not.
  * @param {object} [presentationPurpose] - Optional presentation purpose to override default AuthenticationProofPurpose
+ * @param {Boolean} [addSuiteContext] - Whether to add suite context or not.
+ * @param {object} [expansionMap] - An expansion map for custom properties.
  * @return {Promise<VerifiablePresentation>} A VerifiablePresentation with a proof.
  */
 export async function signPresentation(
@@ -248,6 +250,7 @@ export async function signPresentation(
     });
 
   const documentLoader = defaultDocumentLoader(resolver);
+
   const signed = await jsigs.sign(presentation, {
     purpose,
     documentLoader,
@@ -258,20 +261,16 @@ export async function signPresentation(
     addSuiteContext,
   });
 
-  // Fetch DID owner history and add AFTER signing to avoid JSON-LD context issues
+  // Fetch DID owner history
   try {
     const didClient = new DIDServiceClient();
-    const did = presentation.holder;
-    if (did) {
-      const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
-      console.log('didOwnerHistory', didOwnerHistory);
-      if (didOwnerHistory) {
-        signed.didOwnerProof = didOwnerHistory;
-      }
+    const did = signed.holder || presentation.holder;
+    const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+    if (didOwnerHistory.length > 0) {
+      signed.didOwnerProof = didOwnerHistory;
     }
   } catch (error) {
-    // Log error but don't fail the presentation signing
-    console.warn('Failed to fetch DID owner history:', error.message);
+    throw new Error('Failed to fetch DID owner history:', error.message);
   }
 
   // Sometimes jsigs returns proof like [null, { proof }]
@@ -282,6 +281,7 @@ export async function signPresentation(
       signed.proof = validProofs.pop();
     }
   }
+
   return signed;
 }
 

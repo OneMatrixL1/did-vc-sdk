@@ -107,8 +107,12 @@ export async function issueCredentialWithBBS(issuerKeyDoc, unsignedCredential) {
  * Derives a credential with selective disclosure
  */
 export function deriveCredential(credential, revealFields, nonce) {
+  // Remove didOwnerProof before derivation as it's not part of the credential schema
+  // and will cause encoding errors in BBS+ presentation builder
+  const { didOwnerProof, ...credentialWithoutProof } = credential;
+
   const presentation = new Presentation();
-  presentation.addCredentialToPresent(credential);
+  presentation.addCredentialToPresent(credentialWithoutProof);
   presentation.addAttributeToReveal(0, revealFields);
   const derivedCredentials = presentation.deriveCredentials({ nonce });
 

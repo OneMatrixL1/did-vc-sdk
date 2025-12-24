@@ -12,6 +12,163 @@ import { ethers } from 'ethers';
 export const ETHR_BBS_KEY_ID = '#keys-bbs';
 
 /**
+ * Derive Ethereum address from a public key (supports multiple curves)
+ * @param {Uint8Array|Array<number>} publicKeyBytes - Public key bytes
+ * @returns {string} Ethereum address (0x prefixed, checksummed)
+ * @throws {Error} If public key length is not supported
+ */
+export function publicKeyToAddress(publicKeyBytes) {
+  // Convert to Uint8Array if it's a plain array
+  const keyBytes = publicKeyBytes instanceof Uint8Array
+    ? publicKeyBytes
+    : new Uint8Array(publicKeyBytes);
+
+  // BLS12-381 G2 public key (96 bytes)
+  if (keyBytes.length === 96) {
+    const hash = ethers.utils.keccak256(keyBytes);
+    // hash is 0x-prefixed hex string, take last 40 chars (20 bytes)
+    const address = `0x${hash.slice(-40)}`;
+    return ethers.utils.getAddress(address); // Return checksummed
+  }
+
+  throw new Error(`Unsupported public key length: ${keyBytes.length}. Supported: 96 bytes (BLS12-381)`);
+}
+
+/**
+ * Construct EIP-712 typed data for ChangeOwnerWithPubkey
+ * @param {string} identity - The DID identity address
+ * @param {string} signer - The signer address (derived from public key)
+ * @param {string} newOwner - The new owner address
+ * @param {number|string} nonce - The nonce value
+ * @param {string} registryAddress - The registry contract address
+ * @param {number} chainId - The chain ID
+ * @returns {{domain: {name: string, version: string, chainId: number, verifyingContract: string}, types: {EIP712Domain: Array, ChangeOwnerWithPubkey: Array}, primaryType: string, message: {identity: string, signer: string, newOwner: string, nonce: string}}} EIP-712 typed data
+ */
+export function createChangeOwnerWithPubkeyTypedData(
+  identity,
+  signer,
+  newOwner,
+  nonce,
+  registryAddress,
+  chainId,
+) {
+  return {
+    domain: {
+      name: 'EthereumDIDRegistry',
+      version: '1',
+      chainId,
+      verifyingContract: registryAddress,
+    },
+    types: {
+      ChangeOwnerWithPubkey: [
+        { name: 'identity', type: 'address' },
+        { name: 'signer', type: 'address' },
+        { name: 'newOwner', type: 'address' },
+        { name: 'nonce', type: 'uint256' },
+      ],
+    },
+    primaryType: 'ChangeOwnerWithPubkey',
+    message: {
+      identity: ethers.utils.getAddress(identity),
+      signer: ethers.utils.getAddress(signer),
+      newOwner: ethers.utils.getAddress(newOwner),
+      nonce: ethers.BigNumber.from(nonce).toString(),
+    },
+  };
+}
+
+/**
+ * Compute EIP-712 hash for ChangeOwnerWithPubkey
+ * @param {Object} typedData - EIP-712 typed data object
+ * @returns {string} The message hash (0x-prefixed)
+ */
+export function computeChangeOwnerWithPubkeyHash(typedData) {
+  const domainSeparator = ethers.utils._TypedDataEncoder.hashDomain(typedData.domain);
+  const hashStruct = ethers.utils._TypedDataEncoder.hashStruct(
+    typedData.primaryType,
+    typedData.types,
+    typedData.message,
+  );
+  const hash = ethers.utils.keccak256(
+    ethers.utils.solidityPack(['bytes2', 'bytes32', 'bytes32'], ['0x1901', domainSeparator, hashStruct]),
+  );
+  return hash;
+}
+
+/**
+ * Sign a hash with BBS keypair for owner change
+ * Uses the DockCryptoKeyPair signer pattern for consistency
+ * @param {Uint8Array|string} hashToSign - The EIP-712 hash (0x-prefixed hex string or bytes)
+ * @param {Object} bbsKeypair - BBS keypair instance with signer() method
+ * @returns {Promise<Uint8Array>} The BLS signature bytes
+ * @throws {Error} If signing fails
+ */
+export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
+  if (!bbsKeypair.privateKeyBuffer) {
+    throw new Error('BBS keypair requires private key for signing');
+  }
+
+  // Convert hash string to bytes if needed
+  let hashBytes;
+  if (typeof hashToSign === 'string') {
+    // Remove '0x' prefix if present
+    const hexString = hashToSign.startsWith('0x') ? hashToSign.slice(2) : hashToSign;
+    hashBytes = new Uint8Array(Buffer.from(hexString, 'hex'));
+  } else {
+    hashBytes = new Uint8Array(hashToSign);
+  }
+
+  try {
+    // Use the keypair's signer() method if available
+    if (bbsKeypair.signer && typeof bbsKeypair.signer === 'function') {
+      const signer = bbsKeypair.signer();
+      if (signer && signer.sign && typeof signer.sign === 'function') {
+        const signature = await signer.sign({ data: [hashBytes] });
+        return new Uint8Array(signature);
+      }
+    }
+
+    // Fallback: direct access to constructor classes
+    if (!bbsKeypair.constructor || !bbsKeypair.constructor.Signature) {
+      throw new Error('BBS keypair must have Signature class available');
+    }
+
+    let BBSSignature = bbsKeypair.constructor.Signature;
+    let BBSSecretKey = bbsKeypair.constructor.SecretKey;
+    let BBSSignatureParams = bbsKeypair.constructor.SignatureParams;
+    const defaultLabelBytes = bbsKeypair.constructor.defaultLabelBytes;
+
+    // Fallback to parent constructor if not found
+    if (!BBSSignature || !BBSSecretKey) {
+      const Parent = Object.getPrototypeOf(bbsKeypair.constructor);
+      if (Parent && Parent !== Object) {
+        BBSSignature = BBSSignature || Parent.Signature;
+        BBSSecretKey = BBSSecretKey || Parent.SecretKey;
+        BBSSignatureParams = BBSSignatureParams || Parent.SignatureParams;
+      }
+    }
+
+    if (!BBSSignature || !BBSSecretKey || !BBSSignatureParams) {
+      throw new Error('BBS keypair constructor missing required cryptographic classes');
+    }
+
+    // Create secret key from buffer
+    const sk = new BBSSecretKey(new Uint8Array(bbsKeypair.privateKeyBuffer));
+
+    // Get signature params for 1 message
+    const sigParams = BBSSignatureParams.getSigParamsOfRequiredSize(1, defaultLabelBytes);
+
+    // Sign the hash as a single message
+    const signature = BBSSignature.generate([hashBytes], sk, sigParams, false);
+
+    // Return signature bytes
+    return new Uint8Array(signature.value);
+  } catch (e) {
+    throw new Error(`Failed to sign with BBS keypair: ${e.message}`);
+  }
+}
+
+/**
  * Derive Ethereum address from BBS public key
  * @param {Uint8Array|Array<number>} bbsPublicKey - BBS public key (96 bytes, compressed G2 point)
  * @returns {string} Ethereum address (0x prefixed, checksummed)

@@ -26,6 +26,10 @@ import {
   ETHR_BBS_KEY_ID,
   generateDefaultDocument,
   createDualDID,
+  publicKeyToAddress,
+  createChangeOwnerWithPubkeyTypedData,
+  computeChangeOwnerWithPubkeyHash,
+  signWithBLSKeypair,
 } from './utils';
 
 /**
@@ -705,6 +709,125 @@ class EthrDIDModule extends AbstractDIDModule {
     const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.changeOwner(checksummedAddress);
     return await waitForTransaction(txHash, provider);
+  }
+
+  /**
+   * Change the owner of a DID using public key signature (supports BLS12-381)
+   * @param {string} did - DID to update
+   * @param {string} newOwnerAddress - Ethereum address of new owner
+   * @param {Object} bbsKeypair - BBS keypair for signing (with privateKeyBuffer and constructor.Signature)
+   * @param {Object} [options] - Additional options
+   * @param {number} [options.confirmations=1] - Number of confirmations to wait for
+   * @returns {Promise<Object>} Transaction receipt
+   * @throws {Error} If BBS keypair doesn't have private key or if transaction fails
+   */
+  async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, options = {}) {
+    const { confirmations = 1 } = options;
+
+    // Validate inputs
+    if (!did || typeof did !== 'string') {
+      throw new Error('Valid DID string is required');
+    }
+    if (!newOwnerAddress || typeof newOwnerAddress !== 'string') {
+      throw new Error('Valid new owner address is required');
+    }
+    if (!bbsKeypair || !bbsKeypair.publicKeyBuffer) {
+      throw new Error('Valid BBS keypair with publicKeyBuffer is required');
+    }
+
+    const { network } = parseDID(did);
+    const networkName = network || this.defaultNetwork;
+
+    // Validate network exists
+    if (!this.networks.has(networkName)) {
+      throw new Error(`Unknown network: ${networkName}`);
+    }
+
+    const networkConfig = this.networks.get(networkName);
+    const provider = this.#getProvider(networkName);
+
+    // Get registry contract address
+    const registryAddress = ethers.utils.getAddress(networkConfig.registry);
+
+    // Ensure identity address is checksummed
+    const identityAddress = ethers.utils.getAddress(did.split(':').pop().split(':')[0]);
+
+    // Ensure new owner address is checksummed
+    const checksummedNewOwner = ethers.utils.getAddress(newOwnerAddress);
+
+    // Get signer address from BBS public key
+    const signerAddress = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
+
+    // Verify signer is current owner
+    const ethrDid = await this.#createEthrDID(
+      { privateKey: () => '0x' + '0'.repeat(64) }, // Dummy for address extraction
+      networkName,
+    );
+
+    const currentOwner = await ethrDid.identityOwner(identityAddress);
+    if (signerAddress !== currentOwner) {
+      throw new Error(
+        `BBS public key address (${signerAddress}) is not the current owner (${currentOwner})`,
+      );
+    }
+
+    try {
+      // Query current pubkey nonce from contract
+      const registryContract = new ethers.Contract(
+        registryAddress,
+        ['function pubkeyNonce(address) public view returns (uint256)'],
+        provider,
+      );
+
+      const currentNonce = await registryContract.pubkeyNonce(signerAddress);
+
+      // Create EIP-712 typed data
+      const typedData = createChangeOwnerWithPubkeyTypedData(
+        identityAddress,
+        signerAddress,
+        checksummedNewOwner,
+        currentNonce,
+        registryAddress,
+        networkConfig.chainId || 1,
+      );
+
+      // Compute EIP-712 hash
+      const hash = computeChangeOwnerWithPubkeyHash(typedData);
+
+      // Sign with BBS keypair
+      const signature = await signWithBLSKeypair(hash, bbsKeypair);
+
+      // Submit transaction to contract
+      const signer = provider.getSigner();
+      const registryInterface = new ethers.utils.Interface([
+        'function changeOwnerWithPubkey(address identity, address newOwner, uint256 pubkeyNonceParam, bytes calldata publicKey, bytes calldata signature) external',
+      ]);
+
+      const data = registryInterface.encodeFunctionData('changeOwnerWithPubkey', [
+        identityAddress,
+        checksummedNewOwner,
+        currentNonce,
+        bbsKeypair.publicKeyBuffer,
+        signature,
+      ]);
+
+      const tx = await signer.sendTransaction({
+        to: registryAddress,
+        data,
+      });
+
+      // Wait for confirmation
+      const receipt = await tx.wait(confirmations);
+
+      return {
+        txHash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber,
+        success: true,
+        ...receipt,
+      };
+    } catch (error) {
+      throw new Error(`Failed to change owner with public key: ${formatEthersError(error)}`);
+    }
   }
 }
 

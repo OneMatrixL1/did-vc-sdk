@@ -720,8 +720,6 @@ class EthrDIDModule extends AbstractDIDModule {
    * @throws {Error} If BBS keypair doesn't have private key or if transaction fails
    */
   async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, options = {}) {
-    const { confirmations = 1 } = options;
-
     // Validate inputs
     if (!did || typeof did !== 'string') {
       throw new Error('Valid DID string is required');
@@ -740,8 +738,6 @@ class EthrDIDModule extends AbstractDIDModule {
     if (!this.networks.has(networkName)) {
       throw new Error(`Unknown network: ${networkName}`);
     }
-
-    const networkConfig = this.networks.get(networkName);
 
     // Ensure new owner address is checksummed
     const checksummedNewOwner = ethers.utils.getAddress(newOwnerAddress);

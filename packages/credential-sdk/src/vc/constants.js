@@ -18,3 +18,12 @@ export const expandedSchemaProperty = `${DEFAULT_CONTEXT_URL}#credentialSchema`;
 export const credentialIDField = '@id';
 export const credentialContextField = '@context';
 export const credentialTypeField = '@type';
+
+export const didOwnerProofContext = {
+    '@context': {
+        didOwnerProof: {
+            '@id': 'https://www.w3.org/2018/credentials#didOwnerProof',
+            '@type': '@json',
+        },
+    },
+};

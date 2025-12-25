@@ -59,7 +59,9 @@ describe('BBS Address-Based Recovery Verification', () => {
 
   describe('Bls12381BBSRecoveryMethod2023', () => {
     test('constructs from public key and controller', () => {
-      const publicKeyBase58 = b58.encode(new Uint8Array(bbsKeypair.publicKeyBuffer));
+      // Use uncompressed G2 public key (192 bytes)
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+      const publicKeyBase58 = b58.encode(new Uint8Array(uncompressedPubkey));
       const address = keypairToAddress(bbsKeypair);
 
       const method = new Bls12381BBSRecoveryMethod2023(publicKeyBase58, ethrDID, address);
@@ -71,7 +73,9 @@ describe('BBS Address-Based Recovery Verification', () => {
     });
 
     test('fromProof extracts public key and validates DID address', () => {
-      const publicKeyBase58 = b58.encode(new Uint8Array(bbsKeypair.publicKeyBuffer));
+      // Use uncompressed G2 public key (192 bytes)
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+      const publicKeyBase58 = b58.encode(new Uint8Array(uncompressedPubkey));
       const proof = { publicKeyBase58 };
 
       const method = Bls12381BBSRecoveryMethod2023.fromProof(proof, ethrDID);
@@ -94,11 +98,12 @@ describe('BBS Address-Based Recovery Verification', () => {
       const invalidKey = b58.encode(new Uint8Array(64).fill(1));
       expect(() => {
         Bls12381BBSRecoveryMethod2023.fromProof({ publicKeyBase58: invalidKey }, ethrDID);
-      }).toThrow('Invalid BBS public key length: expected 96 bytes, got 64');
+      }).toThrow('Invalid BBS public key length: expected 192 bytes (uncompressed G2), got 64');
     });
 
     test('verifier factory rejects mismatched address', async () => {
-      const publicKeyBuffer = new Uint8Array(bbsKeypair.publicKeyBuffer);
+      // Use uncompressed G2 public key (192 bytes)
+      const publicKeyBuffer = new Uint8Array(bbsKeypair.getPublicKeyBufferUncompressed());
       const wrongAddress = '0x0000000000000000000000000000000000000000';
 
       const verifier = Bls12381BBSRecoveryMethod2023.verifierFactory(
@@ -139,8 +144,9 @@ describe('BBS Address-Based Recovery Verification', () => {
       expect(signedVC.proof.type).toBe('Bls12381BBSSignatureDock2023');
       expect(signedVC.proof.publicKeyBase58).toBeDefined();
 
-      // Verify the embedded public key matches the keypair
-      const expectedPublicKey = b58.encode(new Uint8Array(bbsKeypair.publicKeyBuffer));
+      // Verify the embedded public key matches the keypair (uncompressed G2, 192 bytes)
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+      const expectedPublicKey = b58.encode(new Uint8Array(uncompressedPubkey));
       expect(signedVC.proof.publicKeyBase58).toBe(expectedPublicKey);
     });
   });
@@ -226,7 +232,9 @@ describe('BBS Address-Based Recovery Verification', () => {
         id: 'wrong-key',
         controller: 'temp',
       });
-      const wrongPublicKey = b58.encode(new Uint8Array(wrongKeypair.publicKeyBuffer));
+      // Use uncompressed G2 public key (192 bytes)
+      const wrongUncompressed = wrongKeypair.getPublicKeyBufferUncompressed();
+      const wrongPublicKey = b58.encode(new Uint8Array(wrongUncompressed));
 
       const tamperedCredential = {
         ...signedCredential,
@@ -246,7 +254,8 @@ describe('BBS Address-Based Recovery Verification', () => {
 
   describe('Address Derivation Validation', () => {
     test('derived address from public key matches DID address', () => {
-      const publicKeyBuffer = new Uint8Array(bbsKeypair.publicKeyBuffer);
+      // Use uncompressed G2 public key (192 bytes)
+      const publicKeyBuffer = new Uint8Array(bbsKeypair.getPublicKeyBufferUncompressed());
       const derivedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
 
       // Extract address from DID
@@ -265,8 +274,9 @@ describe('BBS Address-Based Recovery Verification', () => {
         controller: 'temp',
       });
 
-      const address1 = bbsPublicKeyToAddress(new Uint8Array(keypair1.publicKeyBuffer));
-      const address2 = bbsPublicKeyToAddress(new Uint8Array(keypair2.publicKeyBuffer));
+      // Use uncompressed G2 public keys (192 bytes)
+      const address1 = bbsPublicKeyToAddress(new Uint8Array(keypair1.getPublicKeyBufferUncompressed()));
+      const address2 = bbsPublicKeyToAddress(new Uint8Array(keypair2.getPublicKeyBufferUncompressed()));
 
       expect(address1).not.toBe(address2);
     });
@@ -396,6 +406,9 @@ describe('BBS Address-Based Recovery Verification', () => {
       const nonEthrDID = 'did:example:issuer123';
 
       // Create mock DID document for verification
+      // For non-ethr DIDs, use compressed G2 public key (96 bytes) as expected by standard verification
+      // Note: ethr DIDs use uncompressed (192 bytes) for address derivation, but non-ethr DIDs
+      // use the standard compressed format from the crypto library
       const publicKeyBase58 = b58.encode(new Uint8Array(bbsKeypair.publicKeyBuffer));
       const keyId = `${nonEthrDID}#keys-bbs`;
 

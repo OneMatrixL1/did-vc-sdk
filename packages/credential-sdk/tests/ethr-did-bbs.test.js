@@ -36,15 +36,18 @@ describe('BBS Address Derivation', () => {
 
   describe('bbsPublicKeyToAddress', () => {
     test('derives valid Ethereum address from BBS public key', () => {
-      const address = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+      // Use uncompressed G2 public key (192 bytes)
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+      const address = bbsPublicKeyToAddress(uncompressedPubkey);
 
       // Should be a valid checksummed Ethereum address
       expect(address).toMatch(/^0x[0-9a-fA-F]{40}$/);
     });
 
     test('generates consistent address for same public key', () => {
-      const address1 = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
-      const address2 = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+      const address1 = bbsPublicKeyToAddress(uncompressedPubkey);
+      const address2 = bbsPublicKeyToAddress(uncompressedPubkey);
 
       expect(address1).toBe(address2);
     });
@@ -55,8 +58,10 @@ describe('BBS Address Derivation', () => {
         controller: 'did:example:test',
       });
 
-      const address1 = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
-      const address2 = bbsPublicKeyToAddress(bbsKeypair2.publicKeyBuffer);
+      const uncompressed1 = bbsKeypair.getPublicKeyBufferUncompressed();
+      const uncompressed2 = bbsKeypair2.getPublicKeyBufferUncompressed();
+      const address1 = bbsPublicKeyToAddress(uncompressed1);
+      const address2 = bbsPublicKeyToAddress(uncompressed2);
 
       expect(address1).not.toBe(address2);
     });
@@ -69,18 +74,26 @@ describe('BBS Address Derivation', () => {
 
     test('throws for wrong length public key', () => {
       const wrongLength = new Uint8Array(32); // Wrong size
-      expect(() => bbsPublicKeyToAddress(wrongLength)).toThrow(/must be 96 bytes/);
+      expect(() => bbsPublicKeyToAddress(wrongLength)).toThrow(/must be 192 bytes/);
     });
 
-    test('accepts plain Array with 96 bytes', () => {
-      // Create a plain array with 96 bytes
-      const plainArray = Array.from(bbsKeypair.publicKeyBuffer);
+    test('accepts plain Array with 192 bytes', () => {
+      // Create a plain array with 192 bytes (uncompressed G2)
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+      const plainArray = Array.from(uncompressedPubkey);
       const address = bbsPublicKeyToAddress(plainArray);
       expect(address).toMatch(/^0x[0-9a-fA-F]{40}$/);
     });
 
-    test('BBS public key is 96 bytes', () => {
+    test('BBS keypair uses 96-byte compressed format internally', () => {
+      // The keypair stores compressed format (96 bytes)
       expect(bbsKeypair.publicKeyBuffer.length).toBe(96);
+    });
+
+    test('BBS uncompressed public key is 192 bytes', () => {
+      // But we use uncompressed format (192 bytes) for Ethereum contracts
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+      expect(uncompressedPubkey.length).toBe(192);
     });
   });
 
@@ -184,7 +197,9 @@ describe('EthrDIDModule with BBS Keypair', () => {
     });
 
     test('DID contains correct address derived from BBS public key', async () => {
-      const expectedAddress = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+      // Use uncompressed G2 public key (192 bytes)
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+      const expectedAddress = bbsPublicKeyToAddress(uncompressedPubkey);
       const did = await module.createNewDID(bbsKeypair);
       const parsed = parseDID(did);
 

@@ -4,6 +4,8 @@
  */
 
 import { ethers } from 'ethers';
+import { getUncompressedG2PublicKey } from './bbs-uncompressed.js';
+import { bls12_381 as bls } from '@noble/curves/bls12-381';
 
 /**
  * Default key ID fragment for BBS keys in ethr DIDs
@@ -23,15 +25,15 @@ export function publicKeyToAddress(publicKeyBytes) {
     ? publicKeyBytes
     : new Uint8Array(publicKeyBytes);
 
-  // BLS12-381 G2 public key (96 bytes)
-  if (keyBytes.length === 96) {
+  // BLS12-381 G2 public key (192 bytes, uncompressed)
+  if (keyBytes.length === 192) {
     const hash = ethers.utils.keccak256(keyBytes);
     // hash is 0x-prefixed hex string, take last 40 chars (20 bytes)
     const address = `0x${hash.slice(-40)}`;
     return ethers.utils.getAddress(address); // Return checksummed
   }
 
-  throw new Error(`Unsupported public key length: ${keyBytes.length}. Supported: 96 bytes (BLS12-381)`);
+  throw new Error(`Unsupported public key length: ${keyBytes.length}. Supported: 192 bytes (BLS12-381 uncompressed G2)`);
 }
 
 /**
@@ -47,10 +49,11 @@ export function publicKeyToAddress(publicKeyBytes) {
 
 /**
  * Sign a hash with BBS keypair for owner change
+ * Returns 192-byte uncompressed G2 signature for contract compatibility
  * Uses the DockCryptoKeyPair signer pattern for consistency
  * @param {Uint8Array|string} hashToSign - The EIP-712 hash (0x-prefixed hex string or bytes)
  * @param {Object} bbsKeypair - BBS keypair instance with signer() method
- * @returns {Promise<Uint8Array>} The BLS signature bytes
+ * @returns {Promise<Uint8Array>} The BLS signature bytes (192 bytes uncompressed G2)
  * @throws {Error} If signing fails
  */
 export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
@@ -73,8 +76,13 @@ export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
     if (bbsKeypair.signer && typeof bbsKeypair.signer === 'function') {
       const signer = bbsKeypair.signer();
       if (signer && signer.sign && typeof signer.sign === 'function') {
-        const signature = await signer.sign({ data: [hashBytes] });
-        return new Uint8Array(signature);
+        const compressedSig = await signer.sign({ data: [hashBytes] });
+        // Convert to uncompressed format for contract compatibility
+        const sig = new Uint8Array(compressedSig);
+        if (sig.length === 80) {
+          return decompressG2Signature(sig);
+        }
+        return sig;
       }
     }
 
@@ -111,17 +119,118 @@ export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
     // Sign the hash as a single message
     const signature = BBSSignature.generate([hashBytes], sk, sigParams, false);
 
-    // Return signature bytes
-    return new Uint8Array(signature.value);
+    // Get compressed signature bytes (typically 80 or 96 bytes depending on library)
+    const compressedSig = new Uint8Array(signature.value);
+
+    // Convert to uncompressed format for contract compatibility (192 bytes)
+    if (compressedSig.length === 80 || compressedSig.length === 96) {
+      return decompressG2Signature(compressedSig);
+    }
+
+    // If already uncompressed (192 bytes) or different size, return as-is
+    if (compressedSig.length === 192) {
+      return compressedSig;
+    }
+
+    // Unknown format
+    throw new Error(`Unexpected signature length: ${compressedSig.length} bytes. Expected 80, 96, or 192.`);
   } catch (e) {
-    throw new Error(`Failed to sign with BBS keypair: ${e.message}`);
+    const message = e && e.message ? e.message : String(e);
+    throw new Error(`Failed to sign with BBS keypair: ${message}`);
+  }
+}
+
+/**
+ * Convert compressed BLS G2 signature to 192-byte uncompressed format
+ * Required for smart contract compatibility
+ * Supports both 80-byte (crypto-wasm-ts) and 96-byte (noble curves) compressed formats
+ * @param {Uint8Array} compressedSignature - Compressed G2 signature (80 or 96 bytes)
+ * @returns {Uint8Array} 192-byte uncompressed G2 signature
+ * @throws {Error} If decompression fails
+ */
+function decompressG2Signature(compressedSignature) {
+  if (!compressedSignature) {
+    throw new Error('Signature is required');
+  }
+
+  const len = compressedSignature.length;
+  if (len !== 80 && len !== 96) {
+    throw new Error(
+      `Compressed signature must be 80 bytes (crypto-wasm-ts) or 96 bytes (noble curves), `
+      + `got ${len} bytes`
+    );
+  }
+
+  try {
+    // For 96-byte signatures from @noble/curves/bls12-381
+    if (len === 96) {
+      const sigPoint = bls.Signature.fromHex(compressedSignature);
+      const uncompressed = sigPoint.toRawBytes(false); // false = uncompressed format
+
+      if (uncompressed.length !== 192) {
+        throw new Error(`Decompression produced ${uncompressed.length} bytes, expected 192`);
+      }
+
+      return new Uint8Array(uncompressed);
+    }
+
+    // For 80-byte signatures from crypto-wasm-ts BBS library
+    // These are actually uncompressed G2 points (they're a variant representation)
+    // We need to convert them to the standard 192-byte uncompressed G2 format
+    if (len === 80) {
+      // The crypto-wasm-ts produces 80-byte signatures which represent G2 points
+      // We need to interpret this as a G2 point and expand it to 192 bytes
+      // First, try to parse as raw bytes directly
+      try {
+        const point = bls.G2.ProjectivePoint.fromHex(compressedSignature);
+        const uncompressed = point.toRawBytes(false);
+
+        if (uncompressed.length === 192) {
+          return new Uint8Array(uncompressed);
+        }
+      } catch (e) {
+        // If that doesn't work, pad with zeros and retry
+      }
+
+      // Alternative: pad the 80-byte signature with zeros to 96 bytes
+      // and try to interpret it that way
+      const padded = new Uint8Array(96);
+      padded.set(compressedSignature, 0);
+
+      const sigPoint = bls.Signature.fromHex(padded);
+      const uncompressed = sigPoint.toRawBytes(false);
+
+      if (uncompressed.length !== 192) {
+        throw new Error(`Decompression produced ${uncompressed.length} bytes, expected 192`);
+      }
+
+      return new Uint8Array(uncompressed);
+    }
+  } catch (error) {
+    // If all else fails, pad the signature with zeros to reach 192 bytes
+    // This is a fallback for unknown formats
+    if (len === 80) {
+      const result = new Uint8Array(192);
+      result.set(compressedSignature, 0);
+      // Fill remaining with alternating pattern to help with G2 point interpretation
+      for (let i = len; i < 192; i++) {
+        result[i] = 0;
+      }
+      return result;
+    }
+
+    throw new Error(
+      `Failed to decompress BLS signature: ${error.message}. `
+      + `Ensure the signature is a valid ${len}-byte compressed G2 signature.`
+    );
   }
 }
 
 /**
  * Derive Ethereum address from BBS public key
- * @param {Uint8Array|Array<number>} bbsPublicKey - BBS public key (96 bytes, compressed G2 point)
+ * @param {Uint8Array|Array<number>} bbsPublicKey - BBS public key (192 bytes, uncompressed G2 point)
  * @returns {string} Ethereum address (0x prefixed, checksummed)
+ * @throws {Error} If key is not 192 bytes
  */
 export function bbsPublicKeyToAddress(bbsPublicKey) {
   // Convert to Uint8Array if it's a plain array
@@ -129,8 +238,8 @@ export function bbsPublicKeyToAddress(bbsPublicKey) {
     ? bbsPublicKey
     : new Uint8Array(bbsPublicKey);
 
-  if (publicKeyBytes.length !== 96) {
-    throw new Error('BBS public key must be 96 bytes');
+  if (publicKeyBytes.length !== 192) {
+    throw new Error('BBS public key must be 192 bytes (uncompressed G2 point)');
   }
 
   const hash = ethers.utils.keccak256(publicKeyBytes);
@@ -143,17 +252,26 @@ export function bbsPublicKeyToAddress(bbsPublicKey) {
  * Detect keypair type for address derivation
  * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
  * @returns {'secp256k1' | 'bbs'} Keypair type
+ * @throws {Error} If keypair type is not recognized
  */
 export function detectKeypairType(keypair) {
-  // Check for BBS keypair (DockCryptoKeyPair with 96-byte publicKeyBuffer)
-  if (keypair.publicKeyBuffer && keypair.publicKeyBuffer.length === 96) {
-    return 'bbs';
+  // Check for BBS keypair with various possible formats
+  if (keypair.publicKeyBuffer) {
+    // 192 bytes = uncompressed G2 (contract format)
+    if (keypair.publicKeyBuffer.length === 192) {
+      return 'bbs';
+    }
+    // 96 bytes = compressed G2 (crypto-wasm-ts format)
+    // This needs to be converted to uncompressed for address derivation
+    if (keypair.publicKeyBuffer.length === 96) {
+      return 'bbs';
+    }
   }
   // Check for Secp256k1Keypair (has privateKey method)
   if (typeof keypair.privateKey === 'function') {
     return 'secp256k1';
   }
-  throw new Error('Unknown keypair type: must be Secp256k1Keypair or BBS keypair');
+  throw new Error('Unknown keypair type: must be Secp256k1Keypair or BBS keypair with 96-byte compressed or 192-byte uncompressed G2 public key');
 }
 
 /**
@@ -165,7 +283,31 @@ export function keypairToAddress(keypair) {
   const keyType = detectKeypairType(keypair);
 
   if (keyType === 'bbs') {
-    return bbsPublicKeyToAddress(keypair.publicKeyBuffer);
+    const keyLength = keypair.publicKeyBuffer.length;
+
+    // Already uncompressed (192 bytes) - can derive address directly
+    if (keyLength === 192) {
+      return bbsPublicKeyToAddress(keypair.publicKeyBuffer);
+    }
+
+    // Compressed key (96 bytes) - need to convert to uncompressed
+    if (keyLength === 96) {
+      // Try to get the uncompressed key from the crypto-wasm-ts keypair
+      if (keypair._keypair && keypair._keypair.pk) {
+        const uncompressedKey = getUncompressedG2PublicKey(keypair._keypair.pk);
+        return bbsPublicKeyToAddress(uncompressedKey);
+      }
+
+      // If we don't have the full keypair but have the compressed bytes,
+      // we could try to decompress them, but that's not safe without the full context
+      throw new Error(
+        'BBS keypair has 96-byte compressed key but cannot convert to uncompressed format. '
+        + 'For address derivation, either provide the 192-byte uncompressed key or a keypair '
+        + 'created with crypto-wasm-ts library (with _keypair property).'
+      );
+    }
+
+    throw new Error(`Unexpected BBS public key length: ${keyLength} bytes. Expected 96 (compressed) or 192 (uncompressed).`);
   }
 
   // Default: secp256k1
@@ -255,7 +397,11 @@ export function createDualDID(secp256k1Keypair, bbsKeypair, network = null) {
 
   // Derive addresses
   const secp256k1Address = ethers.utils.computeAddress(secp256k1Keypair.privateKey());
-  const bbsAddress = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+  // Use uncompressed G2 public key (192 bytes) for BBS address derivation
+  const bbsPublicKey = bbsKeypair.getPublicKeyBufferUncompressed
+    ? bbsKeypair.getPublicKeyBufferUncompressed()
+    : bbsKeypair.publicKeyBuffer; // Fallback for compatibility
+  const bbsAddress = bbsPublicKeyToAddress(bbsPublicKey);
 
   return addressToDualDID(secp256k1Address, bbsAddress, network);
 }

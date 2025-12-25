@@ -8,7 +8,7 @@ export default {
     "^.+\\.(ts|js)$": ["babel-jest", { rootMode: "upward" }],
   },
   transformIgnorePatterns: [
-    "/node_modules/(?!@polkadot|@babel|multiformats|@docknetwork|@stablelib)",
+    "/node_modules/(?!@polkadot|@babel|multiformats|@docknetwork|@stablelib|ethr-did|@scure|did-jwt|ethr-did-resolver)",
   ],
   workerIdleMemoryLimit: "1G",
   verbose: true,

@@ -69,8 +69,12 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
     };
 
     // Add publicKeyBase58 if keypair is available (for ethr DID address verification)
+    // Use uncompressed G2 format (192 bytes) for Ethereum contract compatibility
     if (keypair && keypair.publicKeyBuffer) {
-      baseSigner.publicKeyBase58 = b58.encode(new Uint8Array(keypair.publicKeyBuffer));
+      const uncompressedPubkey = keypair.getPublicKeyBufferUncompressed
+        ? keypair.getPublicKeyBufferUncompressed()
+        : keypair.publicKeyBuffer; // Fallback if method not available
+      baseSigner.publicKeyBase58 = b58.encode(new Uint8Array(uncompressedPubkey));
     }
 
     return baseSigner;

@@ -55,7 +55,8 @@ describe('Dual-Address ethr DIDs', () => {
 
     // Derive addresses
     secp256k1Address = ethers.utils.computeAddress(secp256k1Keypair.privateKey());
-    bbsAddress = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+    // Use uncompressed G2 public key (192 bytes) for BBS address derivation
+    bbsAddress = bbsPublicKeyToAddress(bbsKeypair.getPublicKeyBufferUncompressed());
   });
 
   describe('parseDID()', () => {
@@ -230,7 +231,9 @@ describe('Dual-Address ethr DIDs', () => {
   describe('BBS Recovery Method with Dual-Address DIDs', () => {
     test('fromProof uses bbsAddress for dual-address DID', () => {
       const dualDID = createDualDID(secp256k1Keypair, bbsKeypair);
-      const publicKeyBase58 = b58.encode(new Uint8Array(bbsKeypair.publicKeyBuffer));
+      // Use uncompressed G2 public key (192 bytes)
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+      const publicKeyBase58 = b58.encode(new Uint8Array(uncompressedPubkey));
       const proof = { publicKeyBase58 };
 
       const method = Bls12381BBSRecoveryMethod2023.fromProof(proof, dualDID);
@@ -242,7 +245,9 @@ describe('Dual-Address ethr DIDs', () => {
 
     test('verifier accepts matching BBS keypair', async () => {
       const dualDID = createDualDID(secp256k1Keypair, bbsKeypair);
-      const publicKeyBase58 = b58.encode(new Uint8Array(bbsKeypair.publicKeyBuffer));
+      // Use uncompressed G2 public key (192 bytes) for proof
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+      const publicKeyBase58 = b58.encode(new Uint8Array(uncompressedPubkey));
       const proof = { publicKeyBase58 };
 
       const method = Bls12381BBSRecoveryMethod2023.fromProof(proof, dualDID);
@@ -261,7 +266,9 @@ describe('Dual-Address ethr DIDs', () => {
         id: 'different-key',
         controller: 'temp',
       });
-      const wrongPublicKeyBase58 = b58.encode(new Uint8Array(differentBBSKeypair.publicKeyBuffer));
+      // Use uncompressed G2 public key (192 bytes)
+      const wrongUncompressed = differentBBSKeypair.getPublicKeyBufferUncompressed();
+      const wrongPublicKeyBase58 = b58.encode(new Uint8Array(wrongUncompressed));
       const proof = { publicKeyBase58: wrongPublicKeyBase58 };
 
       const method = Bls12381BBSRecoveryMethod2023.fromProof(proof, dualDID);

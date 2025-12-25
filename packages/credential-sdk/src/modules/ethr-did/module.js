@@ -714,12 +714,13 @@ class EthrDIDModule extends AbstractDIDModule {
    * @param {string} did - DID to update
    * @param {string} newOwnerAddress - Ethereum address of new owner
    * @param {Object} bbsKeypair - BBS keypair for signing (with privateKeyBuffer and constructor.Signature)
+   * @param {import('../../keypairs/keypair-secp256k1').default} gasPayerKeypair - Secp256k1 keypair for paying gas fees
    * @param {Object} [options] - Additional options
    * @param {number} [options.confirmations=1] - Number of confirmations to wait for
    * @returns {Promise<Object>} Transaction receipt
    * @throws {Error} If BBS keypair doesn't have private key or if transaction fails
    */
-  async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, options = {}) {
+  async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, gasPayerKeypair, options = {}) {
     // Validate inputs
     if (!did || typeof did !== 'string') {
       throw new Error('Valid DID string is required');
@@ -727,8 +728,11 @@ class EthrDIDModule extends AbstractDIDModule {
     if (!newOwnerAddress || typeof newOwnerAddress !== 'string') {
       throw new Error('Valid new owner address is required');
     }
-    if (!bbsKeypair || !bbsKeypair.publicKeyBuffer) {
-      throw new Error('Valid BBS keypair with publicKeyBuffer is required');
+    if (!bbsKeypair || !bbsKeypair.publicKeyBuffer || !bbsKeypair.getPublicKeyBufferUncompressed) {
+      throw new Error('Valid BBS keypair with publicKeyBuffer and getPublicKeyBufferUncompressed() is required');
+    }
+    if (!gasPayerKeypair) {
+      throw new Error('Gas payer keypair is required for transaction signing');
     }
 
     const { network } = parseDID(did);
@@ -743,19 +747,19 @@ class EthrDIDModule extends AbstractDIDModule {
     const checksummedNewOwner = ethers.utils.getAddress(newOwnerAddress);
 
     try {
-      // Create EthrDID instance for the identity
-      const ethrDid = await this.#createEthrDID(
-        { privateKey: () => '0x' + '0'.repeat(64) }, // Dummy key for read-only operations
-        networkName,
-      );
+      // Create EthrDID instance using the gas payer keypair for transaction signing
+      const ethrDid = await this.#createEthrDID(gasPayerKeypair, networkName);
 
       // Update the EthrDID's address to the identity being modified
       ethrDid.address = ethers.utils.getAddress(did.split(':').pop().split(':')[0]);
 
+      // Get uncompressed G2 public key (192 bytes) for Ethereum contract
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+
       // Get the EIP-712 hash for signing
       const hash = await ethrDid.createChangeOwnerWithPubkeyHash(
         checksummedNewOwner,
-        bbsKeypair.publicKeyBuffer,
+        uncompressedPubkey,
       );
 
       // Sign the hash with BLS keypair
@@ -764,7 +768,7 @@ class EthrDIDModule extends AbstractDIDModule {
       // Submit the transaction using the ethr-did library
       const txHash = await ethrDid.changeOwnerWithPubkey(
         checksummedNewOwner,
-        bbsKeypair.publicKeyBuffer,
+        uncompressedPubkey,
         signature,
       );
 

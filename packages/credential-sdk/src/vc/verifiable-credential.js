@@ -1,6 +1,6 @@
 import { expandJSONLD } from './helpers';
 import { issueCredential, verifyCredential } from './credentials';
-import { DEFAULT_CONTEXT, DEFAULT_TYPE } from './constants';
+import { DEFAULT_CONTEXT, DEFAULT_TYPE, didOwnerProofContext } from './constants';
 
 import { validateCredentialSchema } from './schema';
 import { DIDServiceClient } from '../api-client';
@@ -263,10 +263,12 @@ class VerifiableCredential {
     // Fetch DID owner history and attach before signing
     try {
       const didClient = new DIDServiceClient();
-      const did = this.credentialSubject.id;
-      const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
-      if (didOwnerHistory.length > 0) {
-        this.didOwnerProof = didOwnerHistory;
+      const did = this.credentialSubject.id || this.credentialSubject[0]?.id;
+      if (did) {
+        const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+        if (didOwnerHistory && didOwnerHistory.length > 0) {
+          this.didOwnerProof = didOwnerHistory;
+        }
       }
     } catch (error) {
       throw new Error('Failed to fetch DID owner history:', error.message);

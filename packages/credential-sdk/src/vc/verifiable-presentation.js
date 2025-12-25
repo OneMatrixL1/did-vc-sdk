@@ -196,9 +196,11 @@ class VerifiablePresentation {
     try {
       const didClient = new DIDServiceClient();
       const did = this.holder;
-      const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
-      if (didOwnerHistory.length > 0) {
-        this.didOwnerProof = didOwnerHistory;
+      if (did) {
+        const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+        if (didOwnerHistory && didOwnerHistory.length > 0) {
+          this.didOwnerProof = didOwnerHistory;
+        }
       }
     } catch (error) {
       throw new Error('Failed to fetch DID owner history:', error.message);

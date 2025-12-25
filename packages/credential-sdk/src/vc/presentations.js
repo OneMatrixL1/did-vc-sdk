@@ -270,9 +270,11 @@ export async function signPresentation(
     try {
       const didClient = new DIDServiceClient();
       const did = presentation.holder; // Presentations have 'holder', not 'credentialSubject.id'
-      const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
-      if (didOwnerHistory.length > 0) {
-        presentation.didOwnerProof = didOwnerHistory;
+      if (did) {
+        const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+        if (didOwnerHistory && didOwnerHistory.length > 0) {
+          presentation.didOwnerProof = didOwnerHistory;
+        }
       }
     } catch (error) {
       throw new Error('Failed to fetch DID owner history:', error.message);

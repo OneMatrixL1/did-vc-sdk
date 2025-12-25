@@ -572,10 +572,12 @@ export async function issueCredential(
     // Fetch DID owner history
     try {
       const didClient = new DIDServiceClient();
-      const did = cred.credentialSubject.id;
-      const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
-      if (didOwnerHistory.length > 0) {
-        cred.didOwnerProof = didOwnerHistory;
+      const did = cred.credentialSubject?.id || cred.credentialSubject?.[0]?.id;
+      if (did) {
+        const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+        if (didOwnerHistory && didOwnerHistory.length > 0) {
+          cred.didOwnerProof = didOwnerHistory;
+        }
       }
     } catch (error) {
       throw new Error('Failed to fetch DID owner history:', error.message);

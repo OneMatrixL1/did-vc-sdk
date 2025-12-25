@@ -47,17 +47,29 @@ class DIDServiceClient extends AbstractApiClient {
         const parseDIDAddress = (didString) => {
             const parts = didString.split(':');
             // Get the last part which should be the address
-            const address = parts[parts.length - 1];
+            let address = parts[parts.length - 1];
 
-            // Validate it looks like an Ethereum address
+            // Normalize address - add 0x prefix if not present
+            if (!address.startsWith('0x')) {
+                address = '0x' + address;
+            }
+
+            // Validate it looks like an Ethereum address (with or without 0x prefix)
             if (!address || !address.match(/^0x[a-fA-F0-9]{40}$/)) {
-                throw new Error(`Invalid DID format: unable to extract valid address from ${didString}`);
+                // Invalid format, return null instead of throwing error
+                console.warn(`Invalid DID format: unable to extract valid address from ${didString}`);
+                return null;
             }
 
             return address;
         };
 
         const identity = parseDIDAddress(did);
+
+        // If DID format is invalid, return empty array (no owner history available)
+        if (!identity) {
+            return [];
+        }
 
         // TODO: Replace with real API call when available
         // Mock data for testing

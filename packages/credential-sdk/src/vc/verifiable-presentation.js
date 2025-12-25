@@ -1,4 +1,5 @@
 import { signPresentation, verifyPresentation } from './presentations';
+import { didOwnerProofContext } from './constants';
 
 import {
   ensureObjectWithId,
@@ -9,6 +10,7 @@ import {
 } from '../utils';
 
 import VerifiableCredential from './verifiable-credential';
+import { DIDServiceClient } from '../api-client';
 // import DIDResolver from "../resolver/did/did-resolver"; // eslint-disable-line
 
 const DEFAULT_CONTEXT = 'https://www.w3.org/2018/credentials/v1';
@@ -184,6 +186,24 @@ class VerifiablePresentation {
    * @returns {Promise<VerifiablePresentation>}
    */
   async sign(keyDoc, challenge, domain, resolver = null, compactProof = true) {
+    // Add custom context for didOwnerProof to make it valid in JSON-LD
+    // Add the context if not already present
+    if (!this.context.some(ctx => typeof ctx === 'object' && ctx['@context']?.didOwnerProof)) {
+      this.addContext(didOwnerProofContext);
+    }
+
+    // Fetch DID owner history and attach before signing
+    try {
+      const didClient = new DIDServiceClient();
+      const did = this.holder;
+      const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+      if (didOwnerHistory.length > 0) {
+        this.didOwnerProof = didOwnerHistory;
+      }
+    } catch (error) {
+      throw new Error('Failed to fetch DID owner history:', error.message);
+    }
+
     const signedVP = await signPresentation(
       this.toJSON(),
       keyDoc,

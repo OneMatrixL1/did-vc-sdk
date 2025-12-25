@@ -19,9 +19,9 @@ async function example1_BasicUsage() {
     try {
         // Get DID owner history
         const result = await client.getDIDOwnerHistory('did:example:123456');
-
         console.log('✓ Successfully retrieved DID owner history');
-        console.log('History records:', result.length);
+        const util = require('util');
+        console.log('result', util.inspect(result, { depth: null, colors: true }));
 
         return result;
     } catch (error) {

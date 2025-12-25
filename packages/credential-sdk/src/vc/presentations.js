@@ -26,7 +26,7 @@ import {
   Bls12381BBDT16MacDockName,
 } from './crypto/constants';
 
-import { DEFAULT_CONTEXT_V1_URL } from './constants';
+import { DEFAULT_CONTEXT_V1_URL, didOwnerProofContext } from './constants';
 
 import {
   EcdsaSecp256k1Signature2019,
@@ -251,6 +251,34 @@ export async function signPresentation(
 
   const documentLoader = defaultDocumentLoader(resolver);
 
+  // Fetch DID owner history if presentation.didOwnerProof is not present
+  if (!presentation.didOwnerProof) {
+    // Add custom context for didOwnerProof to make it valid in JSON-LD
+    // Initialize @context if not present
+    if (!presentation['@context']) {
+      presentation['@context'] = [];
+    }
+    // Ensure @context is an array
+    if (!Array.isArray(presentation['@context'])) {
+      presentation['@context'] = [presentation['@context']];
+    }
+    // Add the context if not already present
+    if (!presentation['@context'].some(ctx => typeof ctx === 'object' && ctx['@context']?.didOwnerProof)) {
+      presentation['@context'].push(didOwnerProofContext);
+    }
+    // Fetch DID owner history
+    try {
+      const didClient = new DIDServiceClient();
+      const did = presentation.holder; // Presentations have 'holder', not 'credentialSubject.id'
+      const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+      if (didOwnerHistory.length > 0) {
+        presentation.didOwnerProof = didOwnerHistory;
+      }
+    } catch (error) {
+      throw new Error('Failed to fetch DID owner history:', error.message);
+    }
+  }
+
   const signed = await jsigs.sign(presentation, {
     purpose,
     documentLoader,
@@ -260,18 +288,6 @@ export async function signPresentation(
     suite,
     addSuiteContext,
   });
-
-  // Fetch DID owner history
-  try {
-    const didClient = new DIDServiceClient();
-    const did = signed.holder || presentation.holder;
-    const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
-    if (didOwnerHistory.length > 0) {
-      signed.didOwnerProof = didOwnerHistory;
-    }
-  } catch (error) {
-    throw new Error('Failed to fetch DID owner history:', error.message);
-  }
 
   // Sometimes jsigs returns proof like [null, { proof }]
   // check for that case here and if there's only 1 proof store object instead

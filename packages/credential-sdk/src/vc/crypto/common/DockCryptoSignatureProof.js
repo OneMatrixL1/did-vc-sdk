@@ -6,7 +6,6 @@ import { withExtendedStaticProperties } from '../../../utils/inheritance';
 import CustomLinkedDataSignature from './CustomLinkedDataSignature';
 
 import { isCredVerGte060 } from './DockCryptoSignature';
-import { compressG2PublicKey } from '../../../modules/ethr-did/bbs-uncompressed';
 
 const SUITE_CONTEXT_URL = 'https://www.w3.org/2018/credentials/v1';
 

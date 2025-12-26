@@ -62,17 +62,6 @@ export function publicKeyToAddress(publicKeyBytes) {
 }
 
 /**
- * Construct EIP-712 typed data for ChangeOwnerWithPubkey
- * @param {string} identity - The DID identity address
- * @param {string} signer - The signer address (derived from public key)
- * @param {string} newOwner - The new owner address
- * @param {number|string} nonce - The nonce value
- * @param {string} registryAddress - The registry contract address
- * @param {number} chainId - The chain ID
- * @returns {{domain: {name: string, version: string, chainId: number, verifyingContract: string}, types: {EIP712Domain: Array, ChangeOwnerWithPubkey: Array}, primaryType: string, message: {identity: string, signer: string, newOwner: string, nonce: string}}} EIP-712 typed data
- */
-
-/**
  * Sign a hash with BBS keypair for owner change
  * Returns 192-byte uncompressed G2 signature for contract compatibility
  * Uses the DockCryptoKeyPair signer pattern for consistency

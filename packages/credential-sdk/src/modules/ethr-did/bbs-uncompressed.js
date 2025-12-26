@@ -91,79 +91,7 @@ export function compressG2PublicKey(uncompressedKey) {
   }
 }
 
-/**
- * Create public key buffer suitable for contract interaction
- *
- * This function ensures the public key is in the 192-byte uncompressed format
- * required by EthereumDIDRegistry contract's BLS verification precompiles.
- *
- * @param {Object} keypair - BBS keypair instance
- * @returns {Uint8Array} 192-byte uncompressed G2 public key for contract use
- * @throws {Error} If uncompressed serialization is not available
- */
-export function createContractPublicKeyBuffer(keypair) {
-  if (!keypair || !keypair.pk) {
-    throw new Error('Keypair must have pk (public key) property');
-  }
-
-  return getUncompressedG2PublicKey(keypair.pk);
-}
-
-/**
- * Migration helper: Understand the key format transition
- *
- * This helper documents the breaking change and provides guidance for migration.
- *
- * **Old Format (Compressed G2)**:
- * - Size: 96 bytes
- * - Format: x-coordinate only, y-coordinate computed from curve equation
- * - Used: Previously by SDK for BBS signatures
- * - NOT compatible with: Ethereum smart contract precompiles
- *
- * **New Format (Uncompressed G2)**:
- * - Size: 192 bytes
- * - Format: Both x and y coordinates explicitly stored
- * - Structure: [x0_hi(48), x0_lo(48), x1_hi(48), x1_lo(48), y0_hi(48), y0_lo(48), y1_hi(48), y1_lo(48)]
- * - Used: Required for smart contract BLS verification
- * - Compatible with: EIP-2537 BLS12-381 precompiles
- *
- * **Migration Path**:
- * 1. Update @docknetwork/crypto-wasm-ts to support uncompressed serialization
- * 2. Use `getUncompressedG2PublicKey()` to get contract-compatible keys
- * 3. Regenerate all BBS keypairs and Ethereum addresses
- * 4. Update test data with new 192-byte keys
- * 5. Redeploy smart contract with updated expectations
- *
- * @returns {Object} Migration information object
- */
-export function getMigrationInfo() {
-  return {
-    status: 'AWAITING_LIBRARY_SUPPORT',
-    description: 'Uncompressed G2 serialization support needed in @docknetwork/crypto-wasm-ts',
-    oldFormat: {
-      name: 'Compressed G2',
-      size: 96,
-      compatible: false,
-    },
-    newFormat: {
-      name: 'Uncompressed G2',
-      size: 192,
-      compatible: true,
-    },
-    breakingChange: true,
-    requiredActions: [
-      'Update @docknetwork/crypto-wasm-ts library',
-      'Regenerate all BBS keypairs',
-      'Recalculate all Ethereum addresses',
-      'Update all test data',
-      'Redeploy smart contract',
-    ],
-  };
-}
-
 export default {
   getUncompressedG2PublicKey,
   compressG2PublicKey,
-  createContractPublicKeyBuffer,
-  getMigrationInfo,
 };

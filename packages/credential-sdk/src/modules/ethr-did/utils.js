@@ -4,7 +4,6 @@
  */
 
 import { ethers } from 'ethers';
-import { getUncompressedG2PublicKey } from './bbs-uncompressed.js';
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
 
 /**
@@ -53,11 +52,11 @@ export function publicKeyToAddress(publicKeyBytes) {
 
   // Derive address from uncompressed key
   const hashBytes = ethers.utils.arrayify(
-    ethers.utils.keccak256(uncompressedKey)
+    ethers.utils.keccak256(uncompressedKey),
   );
   const addressBytes = hashBytes.slice(-20);
   return ethers.utils.getAddress(
-    ethers.utils.hexlify(addressBytes)
+    ethers.utils.hexlify(addressBytes),
   );
 }
 
@@ -72,22 +71,99 @@ export function bbsPublicKeyToAddress(bbsPublicKey) {
 
 /**
  * Detect keypair type for address derivation
- * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
+ *
+ * Uses a two-tier approach for robust type detection:
+ * 1. Primary: Constructor name matching (most reliable)
+ * 2. Fallback: Distinguishing property checks (for edge cases)
+ *
+ * Type Identification:
+ * - Secp256k1Keypair: Extends DockKeypair, has keyPair property and privateKey() method
+ * - BBS Keypairs: All extend DockCryptoKeyPair, have publicKeyBuffer/privateKeyBuffer
+ *   and signer()/verifier() methods
+ *
+ * Supported BBS Keypair Classes:
+ * - Bls12381BBSKeyPairDock2023 (BBS signatures, 2023 version)
+ * - Bls12381BBSKeyPairDock2022 (BBS+ signatures, 2022 version)
+ * - Bls12381G2KeyPairDock2022 (BLS12-381 G2 keys)
+ * - Bls12381PSKeyPairDock2023 (PS signatures)
+ * - Bls12381BDDT16KeyPairDock2024 (BDDT16 bound signatures)
+ * - Bls12381BBDT16KeyPairDock2024 (BBDT16 blind signatures)
+ *
+ * @param {Object} keypair - Keypair instance (Secp256k1Keypair or BBS-based)
  * @returns {'secp256k1' | 'bbs'} Keypair type
+ * @throws {Error} If keypair type cannot be determined
+ *
+ * @example
+ * const secp = new Secp256k1Keypair(seed);
+ * detectKeypairType(secp); // 'secp256k1'
+ *
+ * @example
+ * const bbs = Bls12381BBSKeyPairDock2023.generate({ id: 'key1' });
+ * detectKeypairType(bbs); // 'bbs'
  */
 export function detectKeypairType(keypair) {
-  // Check for BBS keypair (DockCryptoKeyPair with 96-byte or 192-byte publicKeyBuffer)
-  if (keypair.publicKeyBuffer) {
-    const len = keypair.publicKeyBuffer.length;
-    if (len === 96 || len === 192) {
-      return 'bbs';
-    }
+  if (!keypair || typeof keypair !== 'object') {
+    throw new Error('Invalid keypair: must be an object');
   }
-  // Check for Secp256k1Keypair (has privateKey method)
-  if (typeof keypair.privateKey === 'function') {
+
+  // Primary detection: Check constructor name for explicit type identification
+  const constructorName = keypair.constructor?.name;
+
+  // BBS keypair classes (all extend DockCryptoKeyPair)
+  const bbsKeypairNames = [
+    'Bls12381BBSKeyPairDock2023',
+    'Bls12381BBSKeyPairDock2022',
+    'Bls12381G2KeyPairDock2022',
+    'Bls12381PSKeyPairDock2023',
+    'Bls12381BDDT16KeyPairDock2024',
+    'Bls12381BBDT16KeyPairDock2024',
+    'DockCryptoKeyPair',
+  ];
+
+  if (constructorName === 'Secp256k1Keypair') {
     return 'secp256k1';
   }
-  throw new Error('Unknown keypair type: must be Secp256k1Keypair or BBS keypair');
+
+  if (bbsKeypairNames.includes(constructorName)) {
+    return 'bbs';
+  }
+
+  // Fallback detection: Check for distinguishing properties
+  // This handles edge cases where constructor name might be unavailable or modified
+
+  // DockCryptoKeyPair signature:
+  // - publicKeyBuffer/privateKeyBuffer (Uint8Array properties)
+  // - signer()/verifier() methods (for jsonld-signatures integration)
+  const hasDockCryptoProperties = (
+    'publicKeyBuffer' in keypair
+    && 'privateKeyBuffer' in keypair
+    && typeof keypair.signer === 'function'
+    && typeof keypair.verifier === 'function'
+  );
+
+  if (hasDockCryptoProperties) {
+    return 'bbs';
+  }
+
+  // Secp256k1Keypair signature:
+  // - keyPair property (elliptic.js keypair instance)
+  // - privateKey() method (returns Uint8Array)
+  // - sign() method (signs messages)
+  const hasSecp256k1Properties = (
+    'keyPair' in keypair
+    && typeof keypair.privateKey === 'function'
+    && typeof keypair.sign === 'function'
+  );
+
+  if (hasSecp256k1Properties) {
+    return 'secp256k1';
+  }
+
+  // Unable to determine type
+  throw new Error(
+    `Unknown keypair type: constructor name is "${constructorName}". `
+    + 'Expected Secp256k1Keypair or a BBS keypair class (DockCryptoKeyPair-based).',
+  );
 }
 
 /**
@@ -482,8 +558,8 @@ function decompressG1Signature(compressedSignature) {
   const len = compressedSignature.length;
   if (len !== 48) {
     throw new Error(
-      `BBS signature must be 48 bytes (compressed G1), `
-      + `got ${len} bytes. Use 96 bytes if already uncompressed.`
+      'BBS signature must be 48 bytes (compressed G1), '
+      + `got ${len} bytes. Use 96 bytes if already uncompressed.`,
     );
   }
 
@@ -500,7 +576,7 @@ function decompressG1Signature(compressedSignature) {
   } catch (error) {
     throw new Error(
       `Failed to decompress BLS G1 signature: ${error.message}. `
-      + `Ensure the signature is a valid 48-byte compressed G1 signature.`
+      + 'Ensure the signature is a valid 48-byte compressed G1 signature.',
     );
   }
 }
@@ -553,7 +629,7 @@ export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
     let BBSSignature = bbsKeypair.constructor.Signature;
     let BBSSecretKey = bbsKeypair.constructor.SecretKey;
     let BBSSignatureParams = bbsKeypair.constructor.SignatureParams;
-    const defaultLabelBytes = bbsKeypair.constructor.defaultLabelBytes;
+    const { defaultLabelBytes } = bbsKeypair.constructor;
 
     // Fallback to parent constructor if not found
     if (!BBSSignature || !BBSSecretKey) {

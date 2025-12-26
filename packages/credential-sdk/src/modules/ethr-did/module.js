@@ -28,6 +28,7 @@ import {
   createDualDID,
   signWithBLSKeypair,
 } from './utils';
+import { getUncompressedG2PublicKey } from './bbs-uncompressed';
 
 /**
  * EthrDIDModule extends AbstractDIDModule to provide ethr DID management
@@ -717,24 +718,9 @@ class EthrDIDModule extends AbstractDIDModule {
    * @param {string} newOwnerAddress - Ethereum address of new owner
    * @param {Object} bbsKeypair - BBS keypair to sign the ownership change
    * @param {import('../../keypairs/keypair-secp256k1').default} gasPayerKeypair - Keypair to pay for gas
-   * @param {Object} [options={}] - Additional options
    * @returns {Promise<Object>} Transaction receipt with txHash and blockNumber
    */
-  async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, gasPayerKeypair, options = {}) {
-    // Validate inputs
-    if (!did || typeof did !== 'string') {
-      throw new Error('Valid DID string is required');
-    }
-    if (!newOwnerAddress || typeof newOwnerAddress !== 'string') {
-      throw new Error('Valid new owner address is required');
-    }
-    if (!bbsKeypair || !bbsKeypair.publicKeyBuffer) {
-      throw new Error('Valid BBS keypair with publicKeyBuffer is required');
-    }
-    if (!gasPayerKeypair) {
-      throw new Error('Gas payer keypair is required for transaction signing');
-    }
-
+  async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, gasPayerKeypair) {
     const { network } = parseDID(did);
     const networkName = network || this.defaultNetwork;
 
@@ -755,18 +741,8 @@ class EthrDIDModule extends AbstractDIDModule {
 
       // Get uncompressed G2 public key (192 bytes) for Ethereum contract
       // EthrDIDModule is responsible for decompression if needed
-      const publicKeyBuffer = bbsKeypair.publicKeyBuffer;
-      let uncompressedPubkey;
-
-      if (publicKeyBuffer.length === 96) {
-        // Compressed key - decompress to 192 bytes for contract
-        uncompressedPubkey = getUncompressedG2PublicKey(publicKeyBuffer);
-      } else if (publicKeyBuffer.length === 192) {
-        // Already uncompressed
-        uncompressedPubkey = publicKeyBuffer;
-      } else {
-        throw new Error(`Invalid BBS public key length: ${publicKeyBuffer.length}. Expected 96 or 192 bytes.`);
-      }
+      const { publicKeyBuffer } = bbsKeypair.publicKeyBuffer;
+      const uncompressedPubkey = getUncompressedG2PublicKey(publicKeyBuffer);
 
       // Get the EIP-712 hash for signing
       const hash = await ethrDid.createChangeOwnerWithPubkeyHash(

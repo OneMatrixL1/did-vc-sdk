@@ -26,6 +26,7 @@ import {
   ETHR_BBS_KEY_ID,
   generateDefaultDocument,
   createDualDID,
+  signWithBLSKeypair,
 } from './utils';
 
 /**
@@ -705,6 +706,85 @@ class EthrDIDModule extends AbstractDIDModule {
     const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.changeOwner(checksummedAddress);
     return await waitForTransaction(txHash, provider);
+  }
+
+  /**
+   * Change the owner of a DID using BLS signature verification
+   * This method allows changing ownership using a BBS keypair signature while
+   * a different keypair (gas payer) pays for the transaction.
+   *
+   * @param {string} did - DID to update
+   * @param {string} newOwnerAddress - Ethereum address of new owner
+   * @param {Object} bbsKeypair - BBS keypair to sign the ownership change
+   * @param {import('../../keypairs/keypair-secp256k1').default} gasPayerKeypair - Keypair to pay for gas
+   * @param {Object} [options={}] - Additional options
+   * @returns {Promise<Object>} Transaction receipt with txHash and blockNumber
+   */
+  async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, gasPayerKeypair, options = {}) {
+    // Validate inputs
+    if (!did || typeof did !== 'string') {
+      throw new Error('Valid DID string is required');
+    }
+    if (!newOwnerAddress || typeof newOwnerAddress !== 'string') {
+      throw new Error('Valid new owner address is required');
+    }
+    if (!bbsKeypair || !bbsKeypair.publicKeyBuffer || !bbsKeypair.getPublicKeyBufferUncompressed) {
+      throw new Error('Valid BBS keypair with publicKeyBuffer and getPublicKeyBufferUncompressed() is required');
+    }
+    if (!gasPayerKeypair) {
+      throw new Error('Gas payer keypair is required for transaction signing');
+    }
+
+    const { network } = parseDID(did);
+    const networkName = network || this.defaultNetwork;
+
+    // Validate network exists
+    if (!this.networks.has(networkName)) {
+      throw new Error(`Unknown network: ${networkName}`);
+    }
+
+    // Ensure new owner address is checksummed
+    const checksummedNewOwner = ethers.utils.getAddress(newOwnerAddress);
+
+    try {
+      // Create EthrDID instance using the gas payer keypair for transaction signing
+      const ethrDid = await this.#createEthrDID(gasPayerKeypair, networkName);
+
+      // Update the EthrDID's address to the identity being modified
+      ethrDid.address = ethers.utils.getAddress(did.split(':').pop().split(':')[0]);
+
+      // Get uncompressed G2 public key (192 bytes) for Ethereum contract
+      const uncompressedPubkey = bbsKeypair.getPublicKeyBufferUncompressed();
+
+      // Get the EIP-712 hash for signing
+      const hash = await ethrDid.createChangeOwnerWithPubkeyHash(
+        checksummedNewOwner,
+        uncompressedPubkey,
+      );
+
+      // Sign the hash with BLS keypair
+      const signature = await signWithBLSKeypair(hash, bbsKeypair);
+
+      // Submit the transaction using the ethr-did library
+      const txHash = await ethrDid.changeOwnerWithPubkey(
+        checksummedNewOwner,
+        uncompressedPubkey,
+        signature,
+      );
+
+      // Get the receipt to return transaction details
+      const provider = this.#getProvider(networkName);
+      const receipt = await provider.getTransactionReceipt(txHash);
+
+      return {
+        txHash,
+        blockNumber: receipt?.blockNumber,
+        success: true,
+        ...receipt,
+      };
+    } catch (error) {
+      throw new Error(`Failed to change owner with public key: ${formatEthersError(error)}`);
+    }
   }
 }
 

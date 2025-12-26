@@ -1,9 +1,15 @@
 import b58 from 'bs58';
 import { u8aToU8a } from '../../../utils/types/bytes';
 import { withExtendedStaticProperties } from '../../../utils/inheritance';
+import { getUncompressedG2PublicKey, validatePublicKeyFormat } from '../../../modules/ethr-did/bbs-uncompressed';
 
 /**
  * Defines commons for the `@docknetwork/crypto-wasm-ts` keypairs.
+ *
+ * For BBS keys, note that publicKeyBuffer contains the compressed G2 point (96 bytes)
+ * from the crypto library. For Ethereum smart contract interaction requiring uncompressed
+ * G2 format (192 bytes), use getPublicKeyBufferUncompressed() or the utility in
+ * bbs-uncompressed.js
  */
 export default withExtendedStaticProperties(
   [
@@ -24,6 +30,8 @@ export default withExtendedStaticProperties(
 
       if (keypair) {
         this.privateKeyBuffer = keypair.sk.value;
+        // Store the raw keypair for later use in getting uncompressed keys
+        this._keypair = keypair;
         this.publicKeyBuffer = keypair.pk.value;
       } else {
         this.privateKeyBuffer = options.privateKeyBase58
@@ -174,6 +182,36 @@ export default withExtendedStaticProperties(
      */
     verifier() {
       return this.constructor.verifierFactory(this);
+    }
+
+    /**
+     * Get public key in uncompressed G2 format for Ethereum smart contract interaction
+     *
+     * The publicKeyBuffer property contains the compressed format (96 bytes) from the
+     * crypto library. This method attempts to get the uncompressed format (192 bytes)
+     * required by EthereumDIDRegistry contract BLS verification precompiles.
+     *
+     * @returns {Uint8Array} 192-byte uncompressed G2 public key
+     * @throws {Error} If uncompressed serialization is not supported by crypto library
+     */
+    getPublicKeyBufferUncompressed() {
+      if (!this._keypair) {
+        throw new Error(
+          'Cannot get uncompressed public key: keypair was not created with crypto-wasm-ts library. '
+          + 'This method requires access to the original keypair instance.'
+        );
+      }
+
+      return getUncompressedG2PublicKey(this._keypair.pk);
+    }
+
+    /**
+     * Validate that public key is in contract-compatible format
+     *
+     * @returns {Object} Validation result with format information
+     */
+    validatePublicKeyFormat() {
+      return validatePublicKeyFormat(this.publicKeyBuffer);
     }
   },
 );

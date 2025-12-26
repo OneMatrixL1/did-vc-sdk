@@ -1,4 +1,4 @@
-import networkCache from '../utils/network-cache';
+import networkCache from "../utils/network-cache";
 
 // Mock the global fetch function
 global.fetch = jest.fn();

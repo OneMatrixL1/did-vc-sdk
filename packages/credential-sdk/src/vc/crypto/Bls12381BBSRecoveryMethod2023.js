@@ -43,11 +43,7 @@ export default class Bls12381BBSRecoveryMethod2023 {
     this.controller = controller;
     this.publicKeyBuffer = b58.decode(publicKeyBase58);
 
-    // Accept both compressed (96 bytes) and uncompressed (192 bytes) G2 formats
-    // This maintains backward compatibility with existing credentials that have
-    // 96-byte compressed keys embedded in their proofs
     if (this.publicKeyBuffer.length === 96) {
-      // Decompress to 192 bytes for internal use
       this.publicKeyBuffer = getUncompressedG2PublicKey(this.publicKeyBuffer);
     } else if (this.publicKeyBuffer.length !== 192) {
       throw new Error(

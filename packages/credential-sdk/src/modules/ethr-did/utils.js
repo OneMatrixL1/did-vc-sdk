@@ -5,6 +5,7 @@
 
 import { ethers } from 'ethers';
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
+import { getUncompressedG2PublicKey } from './bbs-uncompressed';
 
 /**
  * Default key ID fragment for BBS keys in ethr DIDs
@@ -123,6 +124,7 @@ export function detectKeypairType(keypair) {
 
 /**
  * Extract Ethereum address from keypair (secp256k1 or BBS)
+ * Handles both 96-byte (compressed) and 192-byte (uncompressed) BBS public keys
  * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
  * @returns {string} Ethereum address (0x prefixed)
  */
@@ -130,7 +132,27 @@ export function keypairToAddress(keypair) {
   const keyType = detectKeypairType(keypair);
 
   if (keyType === 'bbs') {
-    return bbsPublicKeyToAddress(keypair.publicKeyBuffer);
+    const keyLength = keypair.publicKeyBuffer.length;
+
+    // Already uncompressed (192 bytes) - can derive address directly
+    if (keyLength === 192) {
+      return bbsPublicKeyToAddress(keypair.publicKeyBuffer);
+    }
+
+    // Compressed key (96 bytes) - need to convert to uncompressed
+    if (keyLength === 96) {
+      // Try to get the uncompressed key from the crypto-wasm-ts keypair
+      if (keypair._keypair && keypair._keypair.pk) {
+        const uncompressedKey = getUncompressedG2PublicKey(keypair._keypair.pk);
+        return bbsPublicKeyToAddress(uncompressedKey);
+      }
+
+      // Fallback: decompress the 96-byte key directly
+      const uncompressedKey = getUncompressedG2PublicKey(keypair.publicKeyBuffer);
+      return bbsPublicKeyToAddress(uncompressedKey);
+    }
+
+    throw new Error(`Unexpected BBS public key length: ${keyLength} bytes. Expected 96 (compressed) or 192 (uncompressed).`);
   }
 
   // Default: secp256k1

@@ -88,5 +88,20 @@ describe('detectKeypairType', () => {
       // Should still detect as secp256k1 via property checks
       expect(detectKeypairType(keypair)).toBe('secp256k1');
     });
+
+    test('detects BBS keypair for plain object with only publicKeyBuffer (optimistic verification)', () => {
+      const bbsKeypair = Bls12381BBSKeyPairDock2023.generate({
+        id: 'test-key',
+        controller: 'did:example:123',
+      });
+
+      // Create a plain object with only publicKeyBuffer (as used in optimistic verification)
+      const plainObject = {
+        publicKeyBuffer: bbsKeypair.publicKeyBuffer,
+      };
+
+      // Should detect as BBS via duck-typing
+      expect(detectKeypairType(plainObject)).toBe('bbs');
+    });
   });
 });

@@ -71,35 +71,9 @@ export function bbsPublicKeyToAddress(bbsPublicKey) {
 
 /**
  * Detect keypair type for address derivation
- *
- * Uses a two-tier approach for robust type detection:
- * 1. Primary: Constructor name matching (most reliable)
- * 2. Fallback: Distinguishing property checks (for edge cases)
- *
- * Type Identification:
- * - Secp256k1Keypair: Extends DockKeypair, has keyPair property and privateKey() method
- * - BBS Keypairs: All extend DockCryptoKeyPair, have publicKeyBuffer/privateKeyBuffer
- *   and signer()/verifier() methods
- *
- * Supported BBS Keypair Classes:
- * - Bls12381BBSKeyPairDock2023 (BBS signatures, 2023 version)
- * - Bls12381BBSKeyPairDock2022 (BBS+ signatures, 2022 version)
- * - Bls12381G2KeyPairDock2022 (BLS12-381 G2 keys)
- * - Bls12381PSKeyPairDock2023 (PS signatures)
- * - Bls12381BDDT16KeyPairDock2024 (BDDT16 bound signatures)
- * - Bls12381BBDT16KeyPairDock2024 (BBDT16 blind signatures)
- *
  * @param {Object} keypair - Keypair instance (Secp256k1Keypair or BBS-based)
  * @returns {'secp256k1' | 'bbs'} Keypair type
  * @throws {Error} If keypair type cannot be determined
- *
- * @example
- * const secp = new Secp256k1Keypair(seed);
- * detectKeypairType(secp); // 'secp256k1'
- *
- * @example
- * const bbs = Bls12381BBSKeyPairDock2023.generate({ id: 'key1' });
- * detectKeypairType(bbs); // 'bbs'
  */
 export function detectKeypairType(keypair) {
   if (!keypair || typeof keypair !== 'object') {
@@ -128,34 +102,15 @@ export function detectKeypairType(keypair) {
     return 'bbs';
   }
 
-  // Fallback detection: Check for distinguishing properties
-  // This handles edge cases where constructor name might be unavailable or modified
-
-  // DockCryptoKeyPair signature:
-  // - publicKeyBuffer/privateKeyBuffer (Uint8Array properties)
-  // - signer()/verifier() methods (for jsonld-signatures integration)
-  const hasDockCryptoProperties = (
-    'publicKeyBuffer' in keypair
-    && 'privateKeyBuffer' in keypair
-    && typeof keypair.signer === 'function'
-    && typeof keypair.verifier === 'function'
-  );
-
-  if (hasDockCryptoProperties) {
+  // Fallback: Duck-typing for plain objects used in optimistic verification
+  // If object has publicKeyBuffer but no recognized constructor, treat as BBS
+  // This supports off-chain verification where only the public key is available
+  if (keypair.publicKeyBuffer && !keypair.privateKey) {
     return 'bbs';
   }
 
-  // Secp256k1Keypair signature:
-  // - keyPair property (elliptic.js keypair instance)
-  // - privateKey() method (returns Uint8Array)
-  // - sign() method (signs messages)
-  const hasSecp256k1Properties = (
-    'keyPair' in keypair
-    && typeof keypair.privateKey === 'function'
-    && typeof keypair.sign === 'function'
-  );
-
-  if (hasSecp256k1Properties) {
+  // If object has privateKey method, likely secp256k1
+  if (typeof keypair.privateKey === 'function') {
     return 'secp256k1';
   }
 

@@ -12,7 +12,12 @@
  *
  * Used by ethr DIDs with BBS signatures which store:
  * - type: "Bls12381BBSRecoveryMethod2023"
- * - publicKeyBase58: Base58-encoded 192-byte BBS public key (uncompressed G2 point)
+ * - publicKeyBase58: Base58-encoded BBS public key (accepts both formats):
+ *   - 96 bytes: compressed G2 point (automatically decompressed internally)
+ *   - 192 bytes: uncompressed G2 point (used directly)
+ *
+ * This maintains backward compatibility with existing credentials that may have
+ * either compressed or uncompressed keys embedded in their proofs.
  */
 import b58 from 'bs58';
 import {
@@ -22,25 +27,32 @@ import {
   BBS_SIGNATURE_PARAMS_LABEL_BYTES,
 } from '@docknetwork/crypto-wasm-ts';
 import { bbsPublicKeyToAddress, parseDID } from '../../modules/ethr-did/utils';
-import { compressG2PublicKey } from '../../modules/ethr-did/bbs-uncompressed';
+import { compressG2PublicKey, getUncompressedG2PublicKey } from '../../modules/ethr-did/bbs-uncompressed';
 import { u8aToU8a } from '../../utils/types/bytes';
 
 export default class Bls12381BBSRecoveryMethod2023 {
   /**
    * Create a BBS recovery method instance
-   * @param {string} publicKeyBase58 - Base58-encoded BBS public key (192 bytes, uncompressed G2)
+   * @param {string} publicKeyBase58 - Base58-encoded BBS public key (96 or 192 bytes)
    * @param {string} controller - The DID that controls this key
    * @param {string} expectedAddress - The expected Ethereum address from the DID
-   * @throws {Error} If public key is not 192 bytes
+   * @throws {Error} If public key is not 96 or 192 bytes
    */
   constructor(publicKeyBase58, controller, expectedAddress) {
     this.publicKeyBase58 = publicKeyBase58;
     this.controller = controller;
     this.publicKeyBuffer = b58.decode(publicKeyBase58);
 
-    // Validate BBS public key is 192 bytes (uncompressed G2 point)
-    if (this.publicKeyBuffer.length !== 192) {
-      throw new Error(`Invalid BBS public key length: expected 192 bytes (uncompressed G2), got ${this.publicKeyBuffer.length}`);
+    // Accept both compressed (96 bytes) and uncompressed (192 bytes) G2 formats
+    // This maintains backward compatibility with existing credentials that have
+    // 96-byte compressed keys embedded in their proofs
+    if (this.publicKeyBuffer.length === 96) {
+      // Decompress to 192 bytes for internal use
+      this.publicKeyBuffer = getUncompressedG2PublicKey(this.publicKeyBuffer);
+    } else if (this.publicKeyBuffer.length !== 192) {
+      throw new Error(
+        `Invalid BBS public key length: expected 96 bytes (compressed G2) or 192 bytes (uncompressed G2), got ${this.publicKeyBuffer.length}`
+      );
     }
 
     // Expected address from the DID (to compare against derived address)
@@ -62,7 +74,17 @@ export default class Bls12381BBSRecoveryMethod2023 {
     }
 
     // Derive expected address from public key
-    const publicKeyBuffer = b58.decode(publicKeyBase58);
+    let publicKeyBuffer = b58.decode(publicKeyBase58);
+
+    // Ensure we have uncompressed format for address derivation
+    if (publicKeyBuffer.length === 96) {
+      publicKeyBuffer = getUncompressedG2PublicKey(publicKeyBuffer);
+    } else if (publicKeyBuffer.length !== 192) {
+      throw new Error(
+        `Invalid BBS public key length: expected 96 bytes (compressed G2) or 192 bytes (uncompressed G2), got ${publicKeyBuffer.length}`
+      );
+    }
+
     const expectedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
 
     return new this(publicKeyBase58, controller, expectedAddress);

@@ -14,14 +14,14 @@
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
 
 /**
- * Convert BBSPublicKey to 192-byte uncompressed G2 format
+ * Convert BBSPublicKey or compressed G2 buffer to 192-byte uncompressed G2 format
  *
  * The crypto-wasm-ts library's BBSPublicKey class provides `.value` property
  * that returns 96-byte compressed G2 points. This function uses @noble/curves
  * to decompress the point to the 192-byte uncompressed format required by
  * Ethereum smart contracts.
  *
- * @param {Object} bbsPublicKey - BBSPublicKey instance from @docknetwork/crypto-wasm-ts
+ * @param {Object|Uint8Array} bbsPublicKeyOrBuffer - BBSPublicKey instance from @docknetwork/crypto-wasm-ts or 96-byte compressed buffer
  * @returns {Uint8Array} 192-byte uncompressed G2 public key
  * @throws {Error} If decompression fails
  *
@@ -29,8 +29,43 @@ import { bls12_381 as bls } from '@noble/curves/bls12-381';
  * const keypair = BBSKeypair.generate(params);
  * const uncompressedKey = getUncompressedG2PublicKey(keypair.pk);
  * console.log(uncompressedKey.length); // 192
+ *
+ * @example
+ * // Also works with raw 96-byte buffers
+ * const compressedBuffer = new Uint8Array(96);
+ * const uncompressedKey = getUncompressedG2PublicKey(compressedBuffer);
+ * console.log(uncompressedKey.length); // 192
  */
-export function getUncompressedG2PublicKey(bbsPublicKey) {
+export function getUncompressedG2PublicKey(bbsPublicKeyOrBuffer) {
+  // Handle raw buffer input (96 bytes compressed)
+  if (bbsPublicKeyOrBuffer instanceof Uint8Array || ArrayBuffer.isView(bbsPublicKeyOrBuffer)) {
+    if (bbsPublicKeyOrBuffer.length === 96) {
+      try {
+        const keyBytes = bbsPublicKeyOrBuffer instanceof Uint8Array
+          ? bbsPublicKeyOrBuffer
+          : new Uint8Array(bbsPublicKeyOrBuffer);
+
+        // Parse the compressed point and convert to uncompressed format
+        const point = bls.G2.ProjectivePoint.fromHex(keyBytes);
+        const uncompressedKey = point.toRawBytes(false); // false = uncompressed format
+
+        if (uncompressedKey.length !== 192) {
+          throw new Error(`Decompression produced ${uncompressedKey.length} bytes, expected 192`);
+        }
+
+        return new Uint8Array(uncompressedKey);
+      } catch (error) {
+        throw new Error(
+          `Failed to decompress 96-byte G2 public key buffer: ${error.message}`
+        );
+      }
+    }
+    throw new Error(`Expected 96-byte compressed G2 key buffer, got ${bbsPublicKeyOrBuffer.length} bytes`);
+  }
+
+  // Handle BBSPublicKey object input
+  const bbsPublicKey = bbsPublicKeyOrBuffer;
+
   // Check if the library has been updated with native uncompressed support
   if (typeof bbsPublicKey.toUncompressed === 'function') {
     const uncompressed = bbsPublicKey.toUncompressed();

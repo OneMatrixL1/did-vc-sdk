@@ -14,8 +14,24 @@ import { bls12_381 as bls } from '@noble/curves/bls12-381';
 export const ETHR_BBS_KEY_ID = '#keys-bbs';
 
 /**
+ * Decompress BLS G2 public key from compressed (96 bytes) to uncompressed (192 bytes)
+ * @param {Uint8Array} compressedKey - Compressed G2 public key (96 bytes)
+ * @returns {Uint8Array} 192-byte uncompressed G2 public key
+ * @throws {Error} If decompression fails
+ */
+function decompressPublicKey(compressedKey) {
+  try {
+    const pubKeyPoint = bls.G2.ProjectivePoint.fromHex(compressedKey);
+    return new Uint8Array(pubKeyPoint.toRawBytes(false)); // false = uncompressed format
+  } catch (error) {
+    throw new Error(`Failed to decompress public key: ${error.message}`);
+  }
+}
+
+/**
  * Derive Ethereum address from a public key (supports multiple curves)
- * @param {Uint8Array|Array<number>} publicKeyBytes - Public key bytes
+ * Handles both compressed (96 bytes) and uncompressed (192 bytes) BLS12-381 G2 public keys
+ * @param {Uint8Array|Array<number>} publicKeyBytes - Public key bytes (96 bytes compressed or 192 bytes uncompressed)
  * @returns {string} Ethereum address (0x prefixed, checksummed)
  * @throws {Error} If public key length is not supported
  */
@@ -25,15 +41,24 @@ export function publicKeyToAddress(publicKeyBytes) {
     ? publicKeyBytes
     : new Uint8Array(publicKeyBytes);
 
-  // BLS12-381 G2 public key (192 bytes, uncompressed)
-  if (keyBytes.length === 192) {
-    const hash = ethers.utils.keccak256(keyBytes);
-    // hash is 0x-prefixed hex string, take last 40 chars (20 bytes)
-    const address = `0x${hash.slice(-40)}`;
-    return ethers.utils.getAddress(address); // Return checksummed
+  // Decompress if needed
+  const uncompressedKey = keyBytes.length === 96
+    ? decompressPublicKey(keyBytes)
+    : keyBytes;
+
+  // Validate length
+  if (uncompressedKey.length !== 192) {
+    throw new Error(`Unsupported public key length: ${keyBytes.length}. Supported: 96 bytes (compressed) or 192 bytes (uncompressed) BLS12-381 G2`);
   }
 
-  throw new Error(`Unsupported public key length: ${keyBytes.length}. Supported: 192 bytes (BLS12-381 uncompressed G2)`);
+  // Derive address from uncompressed key
+  const hashBytes = ethers.utils.arrayify(
+    ethers.utils.keccak256(uncompressedKey)
+  );
+  const addressBytes = hashBytes.slice(-20);
+  return ethers.utils.getAddress(
+    ethers.utils.hexlify(addressBytes)
+  );
 }
 
 /**
@@ -242,10 +267,13 @@ export function bbsPublicKeyToAddress(bbsPublicKey) {
     throw new Error('BBS public key must be 192 bytes (uncompressed G2 point)');
   }
 
-  const hash = ethers.utils.keccak256(publicKeyBytes);
-  // hash is 0x-prefixed hex string, take last 40 chars (20 bytes)
-  const address = `0x${hash.slice(-40)}`;
-  return ethers.utils.getAddress(address); // Return checksummed
+  const hashBytes = ethers.utils.arrayify(
+    ethers.utils.keccak256(publicKeyBytes)
+  );
+  const addressBytes = hashBytes.slice(-20);
+  return ethers.utils.getAddress(
+    ethers.utils.hexlify(addressBytes)
+  );
 }
 
 /**

@@ -79,14 +79,7 @@ export default withExtendedStaticProperties(
         const pks = verificationMethod !== undefined
           ? [verificationMethod].map((keyDocument) => {
             const pkRaw = b58.decode(keyDocument.publicKeyBase58);
-
-            // crypto-wasm-ts BBSPublicKey expects compressed format (96 bytes)
-            // Convert uncompressed (192 bytes) to compressed if needed
-            const keyBytes = pkRaw.length === 192
-              ? compressG2PublicKey(pkRaw)
-              : pkRaw;
-
-            return new this.constructor.Signature.KeyPair.PublicKey(keyBytes);
+            return new this.constructor.Signature.KeyPair.PublicKey(pkRaw);
           })
           : [];
 

@@ -107,7 +107,10 @@ export function detectKeypairType(keypair) {
   // If object has publicKeyBuffer but no recognized constructor, treat as BBS
   // This supports off-chain verification where only the public key is available
   if (keypair.publicKeyBuffer && !keypair.privateKey) {
-    return 'bbs';
+    const len = keypair.publicKeyBuffer.length;
+    if (len === 96 || len === 192) {
+      return 'bbs';
+    }
   }
 
   // If object has privateKey method, likely secp256k1

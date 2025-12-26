@@ -164,7 +164,6 @@ export default class Bls12381BBSRecoveryMethod2023 {
           );
           const signature = new BBSSignature(u8aToU8a(rawSignature));
 
-          // crypto-wasm-ts BBSPublicKey expects compressed format (96 bytes)
           // Convert uncompressed (192 bytes) to compressed if needed
           const keyBytes = publicKeyBuffer.length === 192
             ? compressG2PublicKey(publicKeyBuffer)

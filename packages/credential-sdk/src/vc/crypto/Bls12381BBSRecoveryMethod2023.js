@@ -74,17 +74,7 @@ export default class Bls12381BBSRecoveryMethod2023 {
     }
 
     // Derive expected address from public key
-    let publicKeyBuffer = b58.decode(publicKeyBase58);
-
-    // Ensure we have uncompressed format for address derivation
-    if (publicKeyBuffer.length === 96) {
-      publicKeyBuffer = getUncompressedG2PublicKey(publicKeyBuffer);
-    } else if (publicKeyBuffer.length !== 192) {
-      throw new Error(
-        `Invalid BBS public key length: expected 96 bytes (compressed G2) or 192 bytes (uncompressed G2), got ${publicKeyBuffer.length}`
-      );
-    }
-
+    const publicKeyBuffer = b58.decode(publicKeyBase58);
     const expectedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
 
     return new this(publicKeyBase58, controller, expectedAddress);
@@ -138,7 +128,7 @@ export default class Bls12381BBSRecoveryMethod2023 {
 
   /**
    * Verifier factory that verifies BBS signature and validates address derivation
-   * @param {Uint8Array} publicKeyBuffer - BBS public key (192 bytes, uncompressed G2 point)
+   * @param {Uint8Array} publicKeyBuffer - BBS public key (192 bytes, uncompressed)
    * @param {string} expectedAddress - Expected Ethereum address from DID
    * @returns {object} Verifier object with verify method
    */
@@ -164,11 +154,7 @@ export default class Bls12381BBSRecoveryMethod2023 {
           );
           const signature = new BBSSignature(u8aToU8a(rawSignature));
 
-          // Convert uncompressed (192 bytes) to compressed if needed
-          const keyBytes = publicKeyBuffer.length === 192
-            ? compressG2PublicKey(publicKeyBuffer)
-            : publicKeyBuffer;
-
+          const keyBytes = compressG2PublicKey(publicKeyBuffer);
           const pk = new BBSPublicKey(u8aToU8a(keyBytes));
 
           const result = signature.verify(data, pk, sigParams, false);

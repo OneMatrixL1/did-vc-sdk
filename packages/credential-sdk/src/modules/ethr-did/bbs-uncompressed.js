@@ -161,51 +161,9 @@ export function getMigrationInfo() {
   };
 }
 
-/**
- * Validate public key format for contract compatibility
- *
- * @param {Uint8Array} publicKeyBytes - Public key to validate
- * @returns {Object} Validation result
- */
-export function validatePublicKeyFormat(publicKeyBytes) {
-  if (!publicKeyBytes) {
-    return {
-      valid: false,
-      error: 'Public key is required',
-      format: null,
-    };
-  }
-
-  if (publicKeyBytes.length === 96) {
-    return {
-      valid: false,
-      error: 'Public key is 96 bytes (compressed G2) - incompatible with smart contract',
-      format: 'compressed',
-      suggestion: 'Use uncompressed G2 format (192 bytes) for contract compatibility',
-    };
-  }
-
-  if (publicKeyBytes.length === 192) {
-    return {
-      valid: true,
-      error: null,
-      format: 'uncompressed',
-      contractCompatible: true,
-    };
-  }
-
-  return {
-    valid: false,
-    error: `Public key has unexpected length: ${publicKeyBytes.length} bytes`,
-    format: 'unknown',
-    supported: [96, 192],
-  };
-}
-
 export default {
   getUncompressedG2PublicKey,
   compressG2PublicKey,
   createContractPublicKeyBuffer,
   getMigrationInfo,
-  validatePublicKeyFormat,
 };

@@ -175,14 +175,5 @@ export default withExtendedStaticProperties(
     verifier() {
       return this.constructor.verifierFactory(this);
     }
-
-    /**
-     * Validate that public key is in contract-compatible format
-     *
-     * @returns {Object} Validation result with format information
-     */
-    validatePublicKeyFormat() {
-      return validatePublicKeyFormat(this.publicKeyBuffer);
-    }
   },
 );

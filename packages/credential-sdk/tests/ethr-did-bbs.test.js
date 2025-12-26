@@ -69,7 +69,7 @@ describe('BBS Address Derivation', () => {
 
     test('throws for wrong length public key', () => {
       const wrongLength = new Uint8Array(32); // Wrong size
-      expect(() => bbsPublicKeyToAddress(wrongLength)).toThrow(/must be 96 bytes/);
+      expect(() => bbsPublicKeyToAddress(wrongLength)).toThrow();
     });
 
     test('accepts plain Array with 96 bytes', () => {

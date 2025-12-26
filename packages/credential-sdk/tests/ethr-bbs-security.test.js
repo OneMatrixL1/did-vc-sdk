@@ -392,10 +392,7 @@ describe('BBS Security Tests - Bad Actor Scenarios', () => {
   describe('Key Rotation Scenarios', () => {
     test('credential signed with old key fails after key rotation', async () => {
       // User generates first keypair and issues credential
-      const oldKeypair = Bls12381BBSKeyPairDock2023.generate({
-        id: 'old-key',
-        controller: 'temp',
-      });
+      const oldKeypair = Bls12381BBSKeyPairDock2023.generate({ id: 'old-key' });
       const oldAddress = keypairToAddress(oldKeypair);
       const oldDID = addressToDID(oldAddress, VIETCHAIN_NETWORK);
 

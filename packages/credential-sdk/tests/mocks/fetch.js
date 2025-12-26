@@ -8,7 +8,7 @@ const mockFetchResponse = (status, data) => {
   const response = new Response(JSON.stringify(data), {
     status,
     headers: {
-      'Content-type': 'application/json',
+      "Content-type": "application/json",
     },
   });
   return Promise.resolve(response);
@@ -21,13 +21,7 @@ export default function mockFetch() {
       return mockFetchResponse(200, networkCache[url]);
     }
 
-    // Remove fragment
-    const baseUrl = url.split('#')[0];
-    if (baseUrl !== url && networkCache[baseUrl]) {
-      return mockFetchResponse(200, networkCache[baseUrl]);
-    }
-
-    console.error(`Test should cache this URL: ${url}, but available are:\n${Object.keys(networkCache).join('\n')}`);
+    console.error(`Test should cache this URL: ${url}`);
     throw new Error(`Test should cache this URL: ${url}`);
   });
 }

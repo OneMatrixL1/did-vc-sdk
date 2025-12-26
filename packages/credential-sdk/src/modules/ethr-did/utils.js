@@ -144,14 +144,13 @@ export function keypairToAddress(keypair) {
 
     // Compressed key (96 bytes) - need to convert to uncompressed
     if (keyLength === 96) {
-      // Try to get the uncompressed key from the crypto-wasm-ts keypair
-      if (keypair._keypair && keypair._keypair.pk) {
-        const uncompressedKey = getUncompressedG2PublicKey(keypair._keypair.pk);
-        return bbsPublicKeyToAddress(uncompressedKey);
-      }
+      // If keypair has _keypair.pk (BBSPublicKey object), use it for decompression
+      // Otherwise decompress the raw 96-byte buffer
+      const sourceKey = (keypair._keypair && keypair._keypair.pk)
+        ? keypair._keypair.pk
+        : keypair.publicKeyBuffer;
 
-      // Fallback: decompress the 96-byte key directly
-      const uncompressedKey = getUncompressedG2PublicKey(keypair.publicKeyBuffer);
+      const uncompressedKey = getUncompressedG2PublicKey(sourceKey);
       return bbsPublicKeyToAddress(uncompressedKey);
     }
 

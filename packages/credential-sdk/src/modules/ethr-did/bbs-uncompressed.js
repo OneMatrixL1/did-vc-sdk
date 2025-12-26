@@ -37,83 +37,18 @@ import { bls12_381 as bls } from '@noble/curves/bls12-381';
  * console.log(uncompressedKey.length); // 192
  */
 export function getUncompressedG2PublicKey(bbsPublicKeyOrBuffer) {
-  // Handle raw buffer input (96 bytes compressed)
-  if (bbsPublicKeyOrBuffer instanceof Uint8Array || ArrayBuffer.isView(bbsPublicKeyOrBuffer)) {
-    if (bbsPublicKeyOrBuffer.length === 96) {
-      try {
-        const keyBytes = bbsPublicKeyOrBuffer instanceof Uint8Array
-          ? bbsPublicKeyOrBuffer
-          : new Uint8Array(bbsPublicKeyOrBuffer);
-
-        // Parse the compressed point and convert to uncompressed format
-        const point = bls.G2.ProjectivePoint.fromHex(keyBytes);
-        const uncompressedKey = point.toRawBytes(false); // false = uncompressed format
-
-        if (uncompressedKey.length !== 192) {
-          throw new Error(`Decompression produced ${uncompressedKey.length} bytes, expected 192`);
-        }
-
-        return new Uint8Array(uncompressedKey);
-      } catch (error) {
-        throw new Error(
-          `Failed to decompress 96-byte G2 public key buffer: ${error.message}`
-        );
-      }
-    }
-    throw new Error(`Expected 96-byte compressed G2 key buffer, got ${bbsPublicKeyOrBuffer.length} bytes`);
-  }
-
-  // Handle BBSPublicKey object input
-  const bbsPublicKey = bbsPublicKeyOrBuffer;
-
-  // Check if the library has been updated with native uncompressed support
-  if (typeof bbsPublicKey.toUncompressed === 'function') {
-    const uncompressed = bbsPublicKey.toUncompressed();
-    if (uncompressed && uncompressed.length === 192) {
-      return new Uint8Array(uncompressed);
-    }
-  }
-
-  // Alternative: check for toBytes with uncompressed flag
-  if (typeof bbsPublicKey.toBytes === 'function') {
-    try {
-      const uncompressed = bbsPublicKey.toBytes(false); // false = uncompressed
-      if (uncompressed && uncompressed.length === 192) {
-        return new Uint8Array(uncompressed);
-      }
-    } catch (e) {
-      // toBytes might not support the uncompressed flag, continue to fallback
-    }
-  }
-
-  // Fallback: Use @noble/curves to decompress the G2 point
-  try {
-    // Get the compressed G2 public key (96 bytes)
-    const compressedKey = bbsPublicKey.value;
-
-    if (!compressedKey || compressedKey.length !== 96) {
-      throw new Error(`Expected 96-byte compressed G2 key, got ${compressedKey?.length || 0} bytes`);
-    }
-
-    // Ensure compressedKey is a Uint8Array
-    const keyBytes = compressedKey instanceof Uint8Array
-      ? compressedKey
-      : new Uint8Array(compressedKey);
+  if (bbsPublicKeyOrBuffer.length === 96) {
+    const keyBytes = bbsPublicKeyOrBuffer instanceof Uint8Array
+      ? bbsPublicKeyOrBuffer
+      : new Uint8Array(bbsPublicKeyOrBuffer);
 
     // Parse the compressed point and convert to uncompressed format
     const point = bls.G2.ProjectivePoint.fromHex(keyBytes);
-    const uncompressedKey = point.toRawBytes(false); // false = uncompressed format
-
-    if (uncompressedKey.length !== 192) {
-      throw new Error(`Decompression produced ${uncompressedKey.length} bytes, expected 192`);
-    }
-
-    return new Uint8Array(uncompressedKey);
-  } catch (error) {
-    throw new Error(
-      `Failed to decompress G2 public key: ${error.message}. `
-      + 'Ensure the BBSPublicKey is valid and from @docknetwork/crypto-wasm-ts library.'
-    );
+    return point.toRawBytes(false); // false = uncompressed format
+  } else if (bbsPublicKeyOrBuffer.length === 192) {
+    return bbsPublicKeyOrBuffer;
+  } else {
+    throw new Error('Invalid BBS+ G2 public key');
   }
 }
 

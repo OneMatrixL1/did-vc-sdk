@@ -5,7 +5,6 @@
 
 import { ethers } from 'ethers';
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
-import { getUncompressedG2PublicKey } from './bbs-uncompressed';
 
 /**
  * Default key ID fragment for BBS keys in ethr DIDs
@@ -14,65 +13,48 @@ import { getUncompressedG2PublicKey } from './bbs-uncompressed';
 export const ETHR_BBS_KEY_ID = '#keys-bbs';
 
 /**
- * Decompress BLS G2 public key from compressed (96 bytes) to uncompressed (192 bytes)
- * @param {Uint8Array} compressedKey - Compressed G2 public key (96 bytes)
- * @returns {Uint8Array} 192-byte uncompressed G2 public key
- * @throws {Error} If decompression fails
- */
-function decompressPublicKey(compressedKey) {
-  try {
-    const pubKeyPoint = bls.G2.ProjectivePoint.fromHex(compressedKey);
-    return new Uint8Array(pubKeyPoint.toRawBytes(false)); // false = uncompressed format
-  } catch (error) {
-    throw new Error(`Failed to decompress public key: ${error.message}`);
-  }
-}
-
-/**
- * Derive Ethereum address from a public key (supports multiple curves)
- * Handles both compressed (96 bytes) and uncompressed (192 bytes) BLS12-381 G2 public keys
- * @param {Uint8Array|Array<number>} publicKeyBytes - Public key bytes (96 bytes compressed or 192 bytes uncompressed)
+ * Derive Ethereum address from BLS G2 public key
+ * Handles both compressed (96 bytes) and uncompressed (192 bytes) formats
+ * @param {Uint8Array|Array<number>} publicKeyBytes - BLS G2 public key
  * @returns {string} Ethereum address (0x prefixed, checksummed)
- * @throws {Error} If public key length is not supported
+ * @throws {Error} If public key length is invalid
  */
 export function publicKeyToAddress(publicKeyBytes) {
-  // Convert to Uint8Array if it's a plain array
+  // Normalize to Uint8Array
   const keyBytes = publicKeyBytes instanceof Uint8Array
     ? publicKeyBytes
     : new Uint8Array(publicKeyBytes);
 
-  // Decompress if needed
-  const uncompressedKey = keyBytes.length === 96
-    ? decompressPublicKey(keyBytes)
-    : keyBytes;
-
-  // Validate length
-  if (uncompressedKey.length !== 192) {
-    throw new Error(`Unsupported public key length: ${keyBytes.length}. Supported: 96 bytes (compressed) or 192 bytes (uncompressed) BLS12-381 G2`);
+  // Ensure uncompressed format (192 bytes)
+  let uncompressed;
+  if (keyBytes.length === 96) {
+    // Decompress: 96 bytes → 192 bytes
+    const point = bls.G2.ProjectivePoint.fromHex(keyBytes);
+    uncompressed = point.toRawBytes(false);
+  } else if (keyBytes.length === 192) {
+    // Already uncompressed
+    uncompressed = keyBytes;
+  } else {
+    throw new Error(`Invalid BLS public key length: ${keyBytes.length} bytes. Expected 96 (compressed) or 192 (uncompressed)`);
   }
 
-  // Derive address from uncompressed key
-  const hashBytes = ethers.utils.arrayify(
-    ethers.utils.keccak256(uncompressedKey),
-  );
-  const addressBytes = hashBytes.slice(-20);
-  return ethers.utils.getAddress(
-    ethers.utils.hexlify(addressBytes),
-  );
+  // Derive address: keccak256(pubkey)[last 20 bytes]
+  const hash = ethers.utils.keccak256(uncompressed);
+  const addressBytes = ethers.utils.arrayify(hash).slice(-20);
+  return ethers.utils.getAddress(ethers.utils.hexlify(addressBytes));
 }
 
 /**
- * Derive Ethereum address from BBS public key
- * @param {Uint8Array|Array<number>} bbsPublicKey - BBS public key (192 bytes, uncompressed G2 point)
- * @returns {string} Ethereum address (0x prefixed, checksummed)
+ * Alias for publicKeyToAddress - kept for backward compatibility
+ * @deprecated Use publicKeyToAddress instead
  */
 export function bbsPublicKeyToAddress(bbsPublicKey) {
   return publicKeyToAddress(bbsPublicKey);
 }
 
 /**
- * Detect keypair type for address derivation
- * @param {Object} keypair - Keypair instance (Secp256k1Keypair or BBS-based)
+ * Detect keypair type using constructor name and duck typing
+ * @param {Object} keypair - Keypair instance
  * @returns {'secp256k1' | 'bbs'} Keypair type
  * @throws {Error} If keypair type cannot be determined
  */
@@ -81,10 +63,14 @@ export function detectKeypairType(keypair) {
     throw new Error('Invalid keypair: must be an object');
   }
 
-  // Primary detection: Check constructor name for explicit type identification
+  // Primary: Check constructor name
   const constructorName = keypair.constructor?.name;
 
-  // BBS keypair classes (all extend DockCryptoKeyPair)
+  if (constructorName === 'Secp256k1Keypair' || keypair.keyPair) {
+    return 'secp256k1';
+  }
+
+  // BBS keypair classes (from @docknetwork/crypto-wasm-ts)
   const bbsKeypairNames = [
     'Bls12381BBSKeyPairDock2023',
     'Bls12381BBSKeyPairDock2022',
@@ -95,70 +81,49 @@ export function detectKeypairType(keypair) {
     'DockCryptoKeyPair',
   ];
 
-  if (constructorName === 'Secp256k1Keypair') {
-    return 'secp256k1';
-  }
-
   if (bbsKeypairNames.includes(constructorName)) {
     return 'bbs';
   }
 
-  // Fallback: Duck-typing for plain objects used in optimistic verification
-  // If object has publicKeyBuffer but no recognized constructor, treat as BBS
-  // This supports off-chain verification where only the public key is available
-  if (keypair.publicKeyBuffer && !keypair.privateKey) {
+  // BBS keypairs always have this property
+  if (keypair.publicKeyBuffer) {
     const len = keypair.publicKeyBuffer.length;
     if (len === 96 || len === 192) {
       return 'bbs';
     }
   }
 
-  // If object has privateKey method, likely secp256k1
-  if (typeof keypair.privateKey === 'function') {
-    return 'secp256k1';
-  }
-
-  // Unable to determine type
-  throw new Error(
-    `Unknown keypair type: constructor name is "${constructorName}". `
-    + 'Expected Secp256k1Keypair or a BBS keypair class (DockCryptoKeyPair-based).',
-  );
+  // Unknown type
+  throw new Error('Unknown keypair type. Expected secp256k1 or BBS keypair');
 }
 
 /**
- * Extract Ethereum address from keypair (secp256k1 or BBS)
- * Handles both 96-byte (compressed) and 192-byte (uncompressed) BBS public keys
- * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
- * @returns {string} Ethereum address (0x prefixed)
+ * Extract Ethereum address from keypair (secp256k1 or BLS)
+ * @param {Object} keypair - Keypair with either privateKey() method or publicKeyBuffer
+ * @returns {string} Ethereum address (0x prefixed, checksummed)
+ * @throws {Error} If keypair format is invalid
  */
 export function keypairToAddress(keypair) {
   const keyType = detectKeypairType(keypair);
 
-  if (keyType === 'bbs') {
-    const keyLength = keypair.publicKeyBuffer.length;
-
-    // Already uncompressed (192 bytes) - can derive address directly
-    if (keyLength === 192) {
-      return bbsPublicKeyToAddress(keypair.publicKeyBuffer);
+  if (keyType === 'secp256k1') {
+    // Standard Secp256k1Keypair with privateKey() method
+    if (typeof keypair.privateKey === 'function') {
+      return ethers.utils.computeAddress(keypair.privateKey());
     }
 
-    // Compressed key (96 bytes) - need to convert to uncompressed
-    if (keyLength === 96) {
-      // If keypair has _keypair.pk (BBSPublicKey object), use it for decompression
-      // Otherwise decompress the raw 96-byte buffer
-      const sourceKey = (keypair._keypair && keypair._keypair.pk)
-        ? keypair._keypair.pk
-        : keypair.publicKeyBuffer;
-
-      const uncompressedKey = getUncompressedG2PublicKey(sourceKey);
-      return bbsPublicKeyToAddress(uncompressedKey);
+    // Elliptic library KeyPair object (has ec and priv)
+    if (keypair.ec && keypair.priv) {
+      // Convert BN private key to hex string
+      const privKeyHex = `0x${keypair.priv.toString('hex', 64)}`;
+      return ethers.utils.computeAddress(privKeyHex);
     }
 
-    throw new Error(`Unexpected BBS public key length: ${keyLength} bytes. Expected 96 (compressed) or 192 (uncompressed).`);
+    throw new Error('Cannot extract private key from secp256k1 keypair');
   }
 
-  // Default: secp256k1
-  return ethers.utils.computeAddress(keypair.privateKey());
+  // BLS
+  return publicKeyToAddress(keypair.publicKeyBuffer);
 }
 
 /**
@@ -225,8 +190,8 @@ export function addressToDualDID(secp256k1Address, bbsAddress, network = null) {
 
 /**
  * Create dual-address DID from both keypairs
- * @param {Object} secp256k1Keypair - Secp256k1 keypair for Ethereum transactions
- * @param {Object} bbsKeypair - BBS keypair for privacy-preserving signatures
+ * @param {Object} secp256k1Keypair - Secp256k1 keypair
+ * @param {Object} bbsKeypair - BBS keypair
  * @param {string} [network] - Network name (if not mainnet)
  * @returns {string} Dual-address DID string
  */
@@ -244,7 +209,7 @@ export function createDualDID(secp256k1Keypair, bbsKeypair, network = null) {
 
   // Derive addresses
   const secp256k1Address = ethers.utils.computeAddress(secp256k1Keypair.privateKey());
-  const bbsAddress = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+  const bbsAddress = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
 
   return addressToDualDID(secp256k1Address, bbsAddress, network);
 }
@@ -338,7 +303,7 @@ export function createProvider(networkConfig, providerOptions = {}) {
 
 /**
  * Create ethers signer from keypair and provider
- * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
+ * @param {Object} keypair - Keypair instance
  * @param {ethers.providers.Provider} provider - Ethers provider
  * @returns {ethers.Wallet} Ethers wallet (signer)
  * @throws {Error} If BBS keypair is used (not yet supported)
@@ -347,7 +312,6 @@ export function createSigner(keypair, provider) {
   const keyType = detectKeypairType(keypair);
 
   if (keyType === 'bbs') {
-    // TODO: Implement BBS signer when contract supports it
     throw new Error('BBS transaction signing not yet supported. Contract update required.');
   }
 

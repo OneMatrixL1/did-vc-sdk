@@ -522,45 +522,6 @@ export function generateDefaultDocument(did, options = {}) {
 }
 
 /**
- * Convert compressed BLS G1 signature to 96-byte uncompressed format
- * Required for smart contract compatibility (BBS scheme uses G1 signatures with G2 public keys)
- * Supports 48-byte compressed G1 format
- * @param {Uint8Array} compressedSignature - Compressed G1 signature (48 bytes)
- * @returns {Uint8Array} 96-byte uncompressed G1 signature
- * @throws {Error} If decompression fails
- */
-function decompressG1Signature(compressedSignature) {
-  if (!compressedSignature) {
-    throw new Error('Signature is required');
-  }
-
-  const len = compressedSignature.length;
-  if (len !== 48) {
-    throw new Error(
-      'BBS signature must be 48 bytes (compressed G1), '
-      + `got ${len} bytes. Use 96 bytes if already uncompressed.`,
-    );
-  }
-
-  try {
-    // For 48-byte compressed G1 signatures
-    const sigPoint = bls.G1.ProjectivePoint.fromHex(compressedSignature);
-    const uncompressed = sigPoint.toRawBytes(false); // false = uncompressed format
-
-    if (uncompressed.length !== 96) {
-      throw new Error(`Decompression produced ${uncompressed.length} bytes, expected 96`);
-    }
-
-    return new Uint8Array(uncompressed);
-  } catch (error) {
-    throw new Error(
-      `Failed to decompress BLS G1 signature: ${error.message}. `
-      + 'Ensure the signature is a valid 48-byte compressed G1 signature.',
-    );
-  }
-}
-
-/**
  * Sign a hash with BBS keypair for owner change
  * Returns 96-byte uncompressed G1 signature for contract compatibility
  * Uses the DockCryptoKeyPair signer pattern for consistency

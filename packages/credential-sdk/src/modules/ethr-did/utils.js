@@ -565,7 +565,7 @@ function decompressG1Signature(compressedSignature) {
  * Returns 96-byte uncompressed G1 signature for contract compatibility
  * Uses the DockCryptoKeyPair signer pattern for consistency
  * BBS scheme: G2 public keys with G1 signatures
- * @param {Uint8Array|string} hashToSign - The EIP-712 hash (0x-prefixed hex string or bytes)
+ * @param {string} hashToSign - The EIP-712 hash (0x-prefixed hex string or bytes)
  * @param {Object} bbsKeypair - BBS keypair instance with signer() method
  * @returns {Promise<Uint8Array>} The BLS signature bytes (96 bytes uncompressed G1)
  * @throws {Error} If signing fails
@@ -576,80 +576,19 @@ export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
   }
 
   // Convert hash string to bytes if needed
-  let hashBytes;
-  if (typeof hashToSign === 'string') {
-    // Remove '0x' prefix if present
-    const hexString = hashToSign.startsWith('0x') ? hashToSign.slice(2) : hashToSign;
-    hashBytes = new Uint8Array(Buffer.from(hexString, 'hex'));
-  } else {
-    hashBytes = new Uint8Array(hashToSign);
-  }
+  const hexString = hashToSign.startsWith('0x') ? hashToSign.slice(2) : hashToSign;
+  const hashBytes = new Uint8Array(Buffer.from(hexString, 'hex'));
 
-  try {
-    // Use the keypair's signer() method if available
-    if (bbsKeypair.signer && typeof bbsKeypair.signer === 'function') {
-      const signer = bbsKeypair.signer();
-      if (signer && signer.sign && typeof signer.sign === 'function') {
-        const compressedSig = await signer.sign({ data: [hashBytes] });
-        // Convert to uncompressed G1 format for contract compatibility (96 bytes)
-        const sig = new Uint8Array(compressedSig);
-        if (sig.length === 48) {
-          return decompressG1Signature(sig);
-        }
-        return sig;
-      }
-    }
+  // Create G1 signature (BBS scheme uses G1 for signatures, G2 for public keys)
+  // 1. Convert private key to scalar
+  const privateKeyScalar = bls.G2.normPrivateKeyToScalar(bbsKeypair.privateKeyBuffer);
 
-    // Fallback: direct access to constructor classes
-    if (!bbsKeypair.constructor || !bbsKeypair.constructor.Signature) {
-      throw new Error('BBS keypair must have Signature class available');
-    }
+  // 2. Hash message to G1 point using contract's DST
+  const messagePoint = bls.G1.hashToCurve(hashBytes, { DST: 'BLS_DST' });
 
-    let BBSSignature = bbsKeypair.constructor.Signature;
-    let BBSSecretKey = bbsKeypair.constructor.SecretKey;
-    let BBSSignatureParams = bbsKeypair.constructor.SignatureParams;
-    const { defaultLabelBytes } = bbsKeypair.constructor;
+  // 3. Multiply by private key to get signature
+  const signaturePoint = messagePoint.multiply(privateKeyScalar);
 
-    // Fallback to parent constructor if not found
-    if (!BBSSignature || !BBSSecretKey) {
-      const Parent = Object.getPrototypeOf(bbsKeypair.constructor);
-      if (Parent && Parent !== Object) {
-        BBSSignature = BBSSignature || Parent.Signature;
-        BBSSecretKey = BBSSecretKey || Parent.SecretKey;
-        BBSSignatureParams = BBSSignatureParams || Parent.SignatureParams;
-      }
-    }
-
-    if (!BBSSignature || !BBSSecretKey || !BBSSignatureParams) {
-      throw new Error('BBS keypair constructor missing required cryptographic classes');
-    }
-
-    // Create secret key from buffer
-    const sk = new BBSSecretKey(new Uint8Array(bbsKeypair.privateKeyBuffer));
-
-    // Get signature params for 1 message
-    const sigParams = BBSSignatureParams.getSigParamsOfRequiredSize(1, defaultLabelBytes);
-
-    // Sign the hash as a single message
-    const signature = BBSSignature.generate([hashBytes], sk, sigParams, false);
-
-    // Get compressed signature bytes (typically 48 bytes for G1)
-    const compressedSig = new Uint8Array(signature.value);
-
-    // Convert to uncompressed G1 format for contract compatibility (96 bytes)
-    if (compressedSig.length === 48) {
-      return decompressG1Signature(compressedSig);
-    }
-
-    // If already uncompressed (96 bytes), return as-is
-    if (compressedSig.length === 96) {
-      return compressedSig;
-    }
-
-    // Unknown format
-    throw new Error(`Unexpected signature length: ${compressedSig.length} bytes. Expected 48 (compressed G1) or 96 (uncompressed G1).`);
-  } catch (e) {
-    const message = e && e.message ? e.message : String(e);
-    throw new Error(`Failed to sign with BBS keypair: ${message}`);
-  }
+  // 4. Return uncompressed G1 signature (96 bytes)
+  return signaturePoint.toRawBytes(false);
 }

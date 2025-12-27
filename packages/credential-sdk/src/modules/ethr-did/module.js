@@ -733,15 +733,11 @@ class EthrDIDModule extends AbstractDIDModule {
     const checksummedNewOwner = ethers.utils.getAddress(newOwnerAddress);
 
     try {
-      // Create EthrDID instance using the gas payer keypair for transaction signing
-      const ethrDid = await this.#createEthrDID(gasPayerKeypair, networkName);
-
-      // Update the EthrDID's address to the identity being modified
-      ethrDid.address = ethers.utils.getAddress(did.split(':').pop().split(':')[0]);
+      const ethrDid = await this.#createEthrDID(bbsKeypair, networkName);
 
       // Get uncompressed G2 public key (192 bytes) for Ethereum contract
       // EthrDIDModule is responsible for decompression if needed
-      const { publicKeyBuffer } = bbsKeypair.publicKeyBuffer;
+      const { publicKeyBuffer } = bbsKeypair;
       const uncompressedPubkey = getUncompressedG2PublicKey(publicKeyBuffer);
 
       // Get the EIP-712 hash for signing
@@ -754,22 +750,17 @@ class EthrDIDModule extends AbstractDIDModule {
       const signature = await signWithBLSKeypair(hash, bbsKeypair);
 
       // Submit the transaction using the ethr-did library
+      // Pass the gas payer address as 'from' in txOptions so attachContract uses the right signer
+      const gasPayerAddress = keypairToAddress(gasPayerKeypair);
       const txHash = await ethrDid.changeOwnerWithPubkey(
         checksummedNewOwner,
         uncompressedPubkey,
         signature,
+        { from: gasPayerAddress },
       );
 
-      // Get the receipt to return transaction details
-      const provider = this.#getProvider(networkName);
-      const receipt = await provider.getTransactionReceipt(txHash);
-
-      return {
-        txHash,
-        blockNumber: receipt?.blockNumber,
-        success: true,
-        ...receipt,
-      };
+      // Return transaction hash - wait for confirmation handled by caller if needed
+      return { txHash };
     } catch (error) {
       throw new Error(`Failed to change owner with public key: ${formatEthersError(error)}`);
     }

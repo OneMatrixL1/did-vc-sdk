@@ -26,7 +26,9 @@ import {
   ETHR_BBS_KEY_ID,
   generateDefaultDocument,
   createDualDID,
+  signWithBLSKeypair,
 } from './utils';
+import { getUncompressedG2PublicKey } from './bbs-uncompressed';
 
 /**
  * EthrDIDModule extends AbstractDIDModule to provide ethr DID management
@@ -705,6 +707,63 @@ class EthrDIDModule extends AbstractDIDModule {
     const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.changeOwner(checksummedAddress);
     return await waitForTransaction(txHash, provider);
+  }
+
+  /**
+   * Change the owner of a DID using BLS signature verification
+   * This method allows changing ownership using a BBS keypair signature while
+   * a different keypair (gas payer) pays for the transaction.
+   *
+   * @param {string} did - DID to update
+   * @param {string} newOwnerAddress - Ethereum address of new owner
+   * @param {Object} bbsKeypair - BBS keypair to sign the ownership change
+   * @param {import('../../keypairs/keypair-secp256k1').default} gasPayerKeypair - Keypair to pay for gas
+   * @returns {Promise<Object>} Transaction receipt with txHash and blockNumber
+   */
+  async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, gasPayerKeypair) {
+    const { network } = parseDID(did);
+    const networkName = network || this.defaultNetwork;
+
+    // Validate network exists
+    if (!this.networks.has(networkName)) {
+      throw new Error(`Unknown network: ${networkName}`);
+    }
+
+    // Ensure new owner address is checksummed
+    const checksummedNewOwner = ethers.utils.getAddress(newOwnerAddress);
+
+    try {
+      const ethrDid = await this.#createEthrDID(bbsKeypair, networkName);
+
+      // Get uncompressed G2 public key (192 bytes) for Ethereum contract
+      // EthrDIDModule is responsible for decompression if needed
+      const { publicKeyBuffer } = bbsKeypair;
+      const uncompressedPubkey = getUncompressedG2PublicKey(publicKeyBuffer);
+
+      // Get the EIP-712 hash for signing
+      const hash = await ethrDid.createChangeOwnerWithPubkeyHash(
+        checksummedNewOwner,
+        uncompressedPubkey,
+      );
+
+      // Sign the hash with BLS keypair
+      const signature = await signWithBLSKeypair(hash, bbsKeypair);
+
+      // Submit the transaction using the ethr-did library
+      // Pass the gas payer address as 'from' in txOptions so attachContract uses the right signer
+      const gasPayerAddress = keypairToAddress(gasPayerKeypair);
+      const txHash = await ethrDid.changeOwnerWithPubkey(
+        checksummedNewOwner,
+        uncompressedPubkey,
+        signature,
+        { from: gasPayerAddress },
+      );
+
+      // Return transaction hash - wait for confirmation handled by caller if needed
+      return { txHash };
+    } catch (error) {
+      throw new Error(`Failed to change owner with public key: ${formatEthersError(error)}`);
+    }
   }
 }
 

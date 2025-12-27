@@ -4,6 +4,7 @@
  */
 
 import { ethers } from 'ethers';
+import { bls12_381 as bls } from '@noble/curves/bls12-381';
 
 /**
  * Default key ID fragment for BBS keys in ethr DIDs
@@ -12,57 +13,117 @@ import { ethers } from 'ethers';
 export const ETHR_BBS_KEY_ID = '#keys-bbs';
 
 /**
- * Derive Ethereum address from BBS public key
- * @param {Uint8Array|Array<number>} bbsPublicKey - BBS public key (96 bytes, compressed G2 point)
+ * Derive Ethereum address from BLS G2 public key
+ * Handles both compressed (96 bytes) and uncompressed (192 bytes) formats
+ * @param {Uint8Array|Array<number>} publicKeyBytes - BLS G2 public key
  * @returns {string} Ethereum address (0x prefixed, checksummed)
+ * @throws {Error} If public key length is invalid
+ */
+export function publicKeyToAddress(publicKeyBytes) {
+  // Normalize to Uint8Array
+  const keyBytes = publicKeyBytes instanceof Uint8Array
+    ? publicKeyBytes
+    : new Uint8Array(publicKeyBytes);
+
+  // Ensure uncompressed format (192 bytes)
+  let uncompressed;
+  if (keyBytes.length === 96) {
+    // Decompress: 96 bytes → 192 bytes
+    const point = bls.G2.ProjectivePoint.fromHex(keyBytes);
+    uncompressed = point.toRawBytes(false);
+  } else if (keyBytes.length === 192) {
+    // Already uncompressed
+    uncompressed = keyBytes;
+  } else {
+    throw new Error(`Invalid BLS public key length: ${keyBytes.length} bytes. Expected 96 (compressed) or 192 (uncompressed)`);
+  }
+
+  // Derive address: keccak256(pubkey)[last 20 bytes]
+  const hash = ethers.utils.keccak256(uncompressed);
+  const addressBytes = ethers.utils.arrayify(hash).slice(-20);
+  return ethers.utils.getAddress(ethers.utils.hexlify(addressBytes));
+}
+
+/**
+ * Alias for publicKeyToAddress - kept for backward compatibility
+ * @deprecated Use publicKeyToAddress instead
  */
 export function bbsPublicKeyToAddress(bbsPublicKey) {
-  // Convert to Uint8Array if it's a plain array
-  const publicKeyBytes = bbsPublicKey instanceof Uint8Array
-    ? bbsPublicKey
-    : new Uint8Array(bbsPublicKey);
-
-  if (publicKeyBytes.length !== 96) {
-    throw new Error('BBS public key must be 96 bytes');
-  }
-
-  const hash = ethers.utils.keccak256(publicKeyBytes);
-  // hash is 0x-prefixed hex string, take last 40 chars (20 bytes)
-  const address = `0x${hash.slice(-40)}`;
-  return ethers.utils.getAddress(address); // Return checksummed
+  return publicKeyToAddress(bbsPublicKey);
 }
 
 /**
- * Detect keypair type for address derivation
- * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
+ * Detect keypair type using constructor name and duck typing
+ * @param {Object} keypair - Keypair instance
  * @returns {'secp256k1' | 'bbs'} Keypair type
+ * @throws {Error} If keypair type cannot be determined
  */
 export function detectKeypairType(keypair) {
-  // Check for BBS keypair (DockCryptoKeyPair with 96-byte publicKeyBuffer)
-  if (keypair.publicKeyBuffer && keypair.publicKeyBuffer.length === 96) {
-    return 'bbs';
+  if (!keypair || typeof keypair !== 'object') {
+    throw new Error('Invalid keypair: must be an object');
   }
-  // Check for Secp256k1Keypair (has privateKey method)
-  if (typeof keypair.privateKey === 'function') {
+
+  // Primary: Check constructor name
+  const constructorName = keypair.constructor?.name;
+
+  if (constructorName === 'Secp256k1Keypair' || keypair.keyPair) {
     return 'secp256k1';
   }
-  throw new Error('Unknown keypair type: must be Secp256k1Keypair or BBS keypair');
+
+  // BBS keypair classes (from @docknetwork/crypto-wasm-ts)
+  const bbsKeypairNames = [
+    'Bls12381BBSKeyPairDock2023',
+    'Bls12381BBSKeyPairDock2022',
+    'Bls12381G2KeyPairDock2022',
+    'Bls12381PSKeyPairDock2023',
+    'Bls12381BDDT16KeyPairDock2024',
+    'Bls12381BBDT16KeyPairDock2024',
+    'DockCryptoKeyPair',
+  ];
+
+  if (bbsKeypairNames.includes(constructorName)) {
+    return 'bbs';
+  }
+
+  // BBS keypairs always have this property
+  if (keypair.publicKeyBuffer) {
+    const len = keypair.publicKeyBuffer.length;
+    if (len === 96 || len === 192) {
+      return 'bbs';
+    }
+  }
+
+  // Unknown type
+  throw new Error('Unknown keypair type. Expected secp256k1 or BBS keypair');
 }
 
 /**
- * Extract Ethereum address from keypair (secp256k1 or BBS)
- * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
- * @returns {string} Ethereum address (0x prefixed)
+ * Extract Ethereum address from keypair (secp256k1 or BLS)
+ * @param {Object} keypair - Keypair with either privateKey() method or publicKeyBuffer
+ * @returns {string} Ethereum address (0x prefixed, checksummed)
+ * @throws {Error} If keypair format is invalid
  */
 export function keypairToAddress(keypair) {
   const keyType = detectKeypairType(keypair);
 
-  if (keyType === 'bbs') {
-    return bbsPublicKeyToAddress(keypair.publicKeyBuffer);
+  if (keyType === 'secp256k1') {
+    // Standard Secp256k1Keypair with privateKey() method
+    if (typeof keypair.privateKey === 'function') {
+      return ethers.utils.computeAddress(keypair.privateKey());
+    }
+
+    // Elliptic library KeyPair object (has ec and priv)
+    if (keypair.ec && keypair.priv) {
+      // Convert BN private key to hex string
+      const privKeyHex = `0x${keypair.priv.toString('hex', 64)}`;
+      return ethers.utils.computeAddress(privKeyHex);
+    }
+
+    throw new Error('Cannot extract private key from secp256k1 keypair');
   }
 
-  // Default: secp256k1
-  return ethers.utils.computeAddress(keypair.privateKey());
+  // BLS
+  return publicKeyToAddress(keypair.publicKeyBuffer);
 }
 
 /**
@@ -129,8 +190,8 @@ export function addressToDualDID(secp256k1Address, bbsAddress, network = null) {
 
 /**
  * Create dual-address DID from both keypairs
- * @param {Object} secp256k1Keypair - Secp256k1 keypair for Ethereum transactions
- * @param {Object} bbsKeypair - BBS keypair for privacy-preserving signatures
+ * @param {Object} secp256k1Keypair - Secp256k1 keypair
+ * @param {Object} bbsKeypair - BBS keypair
  * @param {string} [network] - Network name (if not mainnet)
  * @returns {string} Dual-address DID string
  */
@@ -148,7 +209,7 @@ export function createDualDID(secp256k1Keypair, bbsKeypair, network = null) {
 
   // Derive addresses
   const secp256k1Address = ethers.utils.computeAddress(secp256k1Keypair.privateKey());
-  const bbsAddress = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+  const bbsAddress = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
 
   return addressToDualDID(secp256k1Address, bbsAddress, network);
 }
@@ -242,7 +303,7 @@ export function createProvider(networkConfig, providerOptions = {}) {
 
 /**
  * Create ethers signer from keypair and provider
- * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
+ * @param {Object} keypair - Keypair instance
  * @param {ethers.providers.Provider} provider - Ethers provider
  * @returns {ethers.Wallet} Ethers wallet (signer)
  * @throws {Error} If BBS keypair is used (not yet supported)
@@ -251,7 +312,6 @@ export function createSigner(keypair, provider) {
   const keyType = detectKeypairType(keypair);
 
   if (keyType === 'bbs') {
-    // TODO: Implement BBS signer when contract supports it
     throw new Error('BBS transaction signing not yet supported. Contract update required.');
   }
 
@@ -423,4 +483,37 @@ export function generateDefaultDocument(did, options = {}) {
     authentication: [`${did}#controller`],
     assertionMethod: [`${did}#controller`, `${did}${ETHR_BBS_KEY_ID}`],
   };
+}
+
+/**
+ * Sign a hash with BBS keypair for owner change
+ * Returns 96-byte uncompressed G1 signature for contract compatibility
+ * Uses the DockCryptoKeyPair signer pattern for consistency
+ * BBS scheme: G2 public keys with G1 signatures
+ * @param {string} hashToSign - The EIP-712 hash (0x-prefixed hex string or bytes)
+ * @param {Object} bbsKeypair - BBS keypair instance with signer() method
+ * @returns {Promise<Uint8Array>} The BLS signature bytes (96 bytes uncompressed G1)
+ * @throws {Error} If signing fails
+ */
+export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
+  if (!bbsKeypair.privateKeyBuffer) {
+    throw new Error('BBS keypair requires private key for signing');
+  }
+
+  // Convert hash string to bytes if needed
+  const hexString = hashToSign.startsWith('0x') ? hashToSign.slice(2) : hashToSign;
+  const hashBytes = new Uint8Array(Buffer.from(hexString, 'hex'));
+
+  // Create G1 signature (BBS scheme uses G1 for signatures, G2 for public keys)
+  // 1. Convert private key to scalar
+  const privateKeyScalar = bls.G2.normPrivateKeyToScalar(bbsKeypair.privateKeyBuffer);
+
+  // 2. Hash message to G1 point using contract's DST
+  const messagePoint = bls.G1.hashToCurve(hashBytes, { DST: 'BLS_DST' });
+
+  // 3. Multiply by private key to get signature
+  const signaturePoint = messagePoint.multiply(privateKeyScalar);
+
+  // 4. Return uncompressed G1 signature (96 bytes)
+  return signaturePoint.toRawBytes(false);
 }

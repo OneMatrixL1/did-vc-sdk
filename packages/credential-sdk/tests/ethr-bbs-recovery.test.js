@@ -90,11 +90,11 @@ describe('BBS Address-Based Recovery Verification', () => {
     });
 
     test('throws if publicKeyBase58 has invalid length', () => {
-      // 64 bytes instead of 96
+      // 64 bytes instead of 96 or 192
       const invalidKey = b58.encode(new Uint8Array(64).fill(1));
       expect(() => {
         Bls12381BBSRecoveryMethod2023.fromProof({ publicKeyBase58: invalidKey }, ethrDID);
-      }).toThrow('Invalid BBS public key length: expected 96 bytes, got 64');
+      }).toThrow('Invalid BBS public key length: expected 96 bytes (compressed G2) or 192 bytes (uncompressed G2), got 64');
     });
 
     test('verifier factory rejects mismatched address', async () => {

@@ -218,7 +218,7 @@ class EthrDIDModule extends AbstractDIDModule {
   /**
    * Get provider for a specific network
    * @param {string} [networkName] - Network name (uses default if not specified)
-   * @returns {ethers.providers.JsonRpcProvider} Provider instance
+   * @returns {ethers.JsonRpcProvider} Provider instance
    */
   #getProvider(networkName = null) {
     const name = networkName || this.defaultNetwork;
@@ -244,10 +244,12 @@ class EthrDIDModule extends AbstractDIDModule {
    * Create EthrDID instance for operations
    * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
    * @param {string} [networkName] - Network name
+   * @param {Object} [options] - Additional options
+   * @param {Object} [options.txSigner] - Custom signer for gas payment (required for BBS keypairs)
    * @returns {Promise<EthrDID>} EthrDID instance
-   * @throws {Error} If BBS keypair is used (transaction signing not yet supported)
+   * @throws {Error} If BBS keypair is used without custom signer
    */
-  async #createEthrDID(keypair, networkName = null) {
+  async #createEthrDID(keypair, networkName = null, options = {}) {
     const name = networkName || this.defaultNetwork;
     const networkConfig = this.networks.get(name);
     const provider = this.#getProvider(name);
@@ -257,7 +259,9 @@ class EthrDIDModule extends AbstractDIDModule {
     }
 
     const address = keypairToAddress(keypair);
-    const signer = createSigner(keypair, provider);
+
+    // Use custom signer if provided, otherwise create from keypair
+    const signer = options.txSigner || createSigner(keypair, provider);
 
     const ethrDidConfig = {
       identifier: address,
@@ -621,7 +625,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const provider = this.#getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
-    const checksummedAddress = ethers.utils.getAddress(delegateAddress);
+    const checksummedAddress = ethers.getAddress(delegateAddress);
 
     const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.addDelegate(checksummedAddress, { delegateType, expiresIn });
@@ -643,7 +647,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const provider = this.#getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
-    const checksummedAddress = ethers.utils.getAddress(delegateAddress);
+    const checksummedAddress = ethers.getAddress(delegateAddress);
 
     const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.revokeDelegate(checksummedAddress, delegateType);
@@ -702,7 +706,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const provider = this.#getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
-    const checksummedAddress = ethers.utils.getAddress(newOwnerAddress);
+    const checksummedAddress = ethers.getAddress(newOwnerAddress);
 
     const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.changeOwner(checksummedAddress);
@@ -723,46 +727,43 @@ class EthrDIDModule extends AbstractDIDModule {
   async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, gasPayerKeypair) {
     const { network } = parseDID(did);
     const networkName = network || this.defaultNetwork;
+    const provider = this.#getProvider(networkName);
 
-    // Validate network exists
-    if (!this.networks.has(networkName)) {
-      throw new Error(`Unknown network: ${networkName}`);
-    }
+    // Create signer from gas payer keypair
+    const txSigner = createSigner(gasPayerKeypair, provider);
 
-    // Ensure new owner address is checksummed
-    const checksummedNewOwner = ethers.utils.getAddress(newOwnerAddress);
+    // Create EthrDID with BBS keypair identity but gas payer signer
+    const ethrDid = await this.#createEthrDID(bbsKeypair, networkName, { txSigner });
 
+    // Get uncompressed G2 public key (192 bytes) for Ethereum contract
+    // EthrDIDModule is responsible for decompression if needed
+    const { publicKeyBuffer } = bbsKeypair;
+    const uncompressedPubkey = getUncompressedG2PublicKey(publicKeyBuffer);
+
+    const checksummedNewOwner = ethers.getAddress(newOwnerAddress);
+
+    // Get the EIP-712 hash for signing
+    const hash = await ethrDid.createChangeOwnerWithPubkeyHash(
+      checksummedNewOwner,
+      uncompressedPubkey,
+    );
+
+    // Sign the hash with BLS keypair
+    const signature = await signWithBLSKeypair(hash, bbsKeypair);
+
+    // Submit the transaction using the gas payer's signer
     try {
-      const ethrDid = await this.#createEthrDID(bbsKeypair, networkName);
-
-      // Get uncompressed G2 public key (192 bytes) for Ethereum contract
-      // EthrDIDModule is responsible for decompression if needed
-      const { publicKeyBuffer } = bbsKeypair;
-      const uncompressedPubkey = getUncompressedG2PublicKey(publicKeyBuffer);
-
-      // Get the EIP-712 hash for signing
-      const hash = await ethrDid.createChangeOwnerWithPubkeyHash(
-        checksummedNewOwner,
-        uncompressedPubkey,
-      );
-
-      // Sign the hash with BLS keypair
-      const signature = await signWithBLSKeypair(hash, bbsKeypair);
-
-      // Submit the transaction using the ethr-did library
-      // Pass the gas payer address as 'from' in txOptions so attachContract uses the right signer
-      const gasPayerAddress = keypairToAddress(gasPayerKeypair);
-      const txHash = await ethrDid.changeOwnerWithPubkey(
+      return await ethrDid.changeOwnerWithPubkey(
         checksummedNewOwner,
         uncompressedPubkey,
         signature,
-        { from: gasPayerAddress },
       );
-
-      // Return transaction hash - wait for confirmation handled by caller if needed
-      return { txHash };
     } catch (error) {
-      throw new Error(`Failed to change owner with public key: ${formatEthersError(error)}`);
+      // Re-throw with clean error to avoid BigInt serialization issues in Jest
+      const cleanError = new Error(error.message);
+      cleanError.code = error.code;
+      cleanError.txHash = error.receipt?.hash || error.receipt?.transactionHash;
+      throw cleanError;
     }
   }
 }

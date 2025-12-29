@@ -26,7 +26,7 @@ import {
   BBSSignatureParams,
   BBS_SIGNATURE_PARAMS_LABEL_BYTES,
 } from '@docknetwork/crypto-wasm-ts';
-import { bbsPublicKeyToAddress, parseDID } from '../../modules/ethr-did/utils';
+import { publicKeyToAddress, parseDID } from '../../modules/ethr-did/utils';
 import { compressG2PublicKey, getUncompressedG2PublicKey } from '../../modules/ethr-did/bbs-uncompressed';
 import { u8aToU8a } from '../../utils/types/bytes';
 
@@ -55,7 +55,7 @@ export default class Bls12381BBSRecoveryMethod2023 {
     this.expectedAddress = expectedAddress;
 
     // Derive address from public key for validation
-    this.derivedAddress = bbsPublicKeyToAddress(this.publicKeyBuffer);
+    this.derivedAddress = publicKeyToAddress(this.publicKeyBuffer);
   }
 
   /**
@@ -71,7 +71,7 @@ export default class Bls12381BBSRecoveryMethod2023 {
 
     // Derive expected address from public key
     const publicKeyBuffer = b58.decode(publicKeyBase58);
-    const expectedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
+    const expectedAddress = publicKeyToAddress(publicKeyBuffer);
 
     return new this(publicKeyBase58, controller, expectedAddress);
   }
@@ -136,7 +136,7 @@ export default class Bls12381BBSRecoveryMethod2023 {
       async verify({ data, signature: rawSignature }) {
         try {
           // 1. First verify the address derivation matches the DID
-          const derivedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
+          const derivedAddress = publicKeyToAddress(publicKeyBuffer);
           if (derivedAddress.toLowerCase() !== normalizedExpectedAddress) {
             // Public key doesn't match the DID's address
             return false;

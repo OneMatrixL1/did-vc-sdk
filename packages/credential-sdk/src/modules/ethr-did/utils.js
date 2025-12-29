@@ -45,14 +45,6 @@ export function publicKeyToAddress(publicKeyBytes) {
 }
 
 /**
- * Alias for publicKeyToAddress - kept for backward compatibility
- * @deprecated Use publicKeyToAddress instead
- */
-export function bbsPublicKeyToAddress(bbsPublicKey) {
-  return publicKeyToAddress(bbsPublicKey);
-}
-
-/**
  * Detect keypair type using constructor name and duck typing
  * @param {Object} keypair - Keypair instance
  * @returns {'secp256k1' | 'bbs'} Keypair type

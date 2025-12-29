@@ -16,7 +16,7 @@ import { Bls12381BBS23DockVerKeyName } from '../src/vc/crypto/constants';
 import {
   keypairToAddress,
   addressToDID,
-  bbsPublicKeyToAddress,
+  publicKeyToAddress,
 } from '../src/modules/ethr-did/utils';
 import mockFetch from './mocks/fetch';
 import networkCache from './utils/network-cache';
@@ -247,7 +247,7 @@ describe('BBS Address-Based Recovery Verification', () => {
   describe('Address Derivation Validation', () => {
     test('derived address from public key matches DID address', () => {
       const publicKeyBuffer = new Uint8Array(bbsKeypair.publicKeyBuffer);
-      const derivedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
+      const derivedAddress = publicKeyToAddress(publicKeyBuffer);
 
       // Extract address from DID
       const didAddress = ethrDID.split(':').pop();
@@ -265,8 +265,8 @@ describe('BBS Address-Based Recovery Verification', () => {
         controller: 'temp',
       });
 
-      const address1 = bbsPublicKeyToAddress(new Uint8Array(keypair1.publicKeyBuffer));
-      const address2 = bbsPublicKeyToAddress(new Uint8Array(keypair2.publicKeyBuffer));
+      const address1 = publicKeyToAddress(new Uint8Array(keypair1.publicKeyBuffer));
+      const address2 = publicKeyToAddress(new Uint8Array(keypair2.publicKeyBuffer));
 
       expect(address1).not.toBe(address2);
     });

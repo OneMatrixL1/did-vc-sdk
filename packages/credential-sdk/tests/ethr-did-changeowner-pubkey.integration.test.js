@@ -70,7 +70,7 @@ describe('EthrDID changeOwnerWithPubkey Integration Tests', () => {
 
     const tx = await gasPayerWallet.sendTransaction({
       to: recipientAddress,
-      value: ethers.utils.parseEther(amountInEther),
+      value: ethers.parseEther(amountInEther),
     });
 
     await tx.wait();
@@ -88,7 +88,7 @@ describe('EthrDID changeOwnerWithPubkey Integration Tests', () => {
     });
 
     // Create provider
-    provider = new ethers.providers.JsonRpcProvider(networkConfig.rpcUrl);
+    provider = new ethers.JsonRpcProvider(networkConfig.rpcUrl);
 
     // Require funded private key for gas
     if (!process.env.ETHR_PRIVATE_KEY) {
@@ -158,8 +158,8 @@ describe('EthrDID changeOwnerWithPubkey Integration Tests', () => {
 
       // Step 4: Create new owner address
       console.log('\n4. Creating new owner address...');
-      const newOwnerKeypair = Secp256k1Keypair.random();
-      const newOwnerAddress = keypairToAddress(newOwnerKeypair);
+      const newOwnerWallet = ethers.Wallet.createRandom();
+      const newOwnerAddress = newOwnerWallet.address;
       console.log(`   ✓ New owner address: ${newOwnerAddress}`);
 
       // Step 5: Sign and submit ownership change using BLS signature
@@ -186,22 +186,18 @@ describe('EthrDID changeOwnerWithPubkey Integration Tests', () => {
 
       const duration = Date.now() - startTime;
 
-      console.log(`   ✓ Transaction submitted in ${duration}ms`);
+      console.log(`   ✓ Transaction completed in ${duration}ms`);
       console.log(`   - Transaction hash: ${receipt.txHash}`);
-
-      // Wait for transaction to be mined
-      console.log('\n   Waiting for transaction confirmation...');
-      const txReceipt = await provider.waitForTransaction(receipt.txHash, 1, 30000);
-      console.log(`   - Block number: ${txReceipt.blockNumber}`);
-      console.log(`   - Gas used: ${txReceipt.gasUsed?.toString() || 'N/A'}`);
-      console.log(`   - Status: ${txReceipt.status === 1 ? 'SUCCESS' : 'FAILED'}`);
+      console.log(`   - Block number: ${receipt.blockNumber}`);
+      console.log(`   - Gas used: ${receipt.gasUsed?.toString() || 'N/A'}`);
+      console.log(`   - Status: ${receipt.status === 1 ? 'SUCCESS' : 'FAILED'}`);
 
       // Step 7: Verify ownership change on-chain
       console.log('\n7. Verifying ownership change on-chain...');
       const finalOwner = await registryContract.identityOwner(bbsAddress);
       console.log(`   ✓ Final owner: ${finalOwner}`);
 
-      expect(txReceipt.status).toBe(1);
+      expect(receipt.status).toBe(1);
       expect(finalOwner.toLowerCase()).toBe(newOwnerAddress.toLowerCase());
       expect(receipt.txHash).toBeDefined();
 
@@ -237,8 +233,8 @@ describe('EthrDID changeOwnerWithPubkey Integration Tests', () => {
       console.log(`   - Derived address: ${derivedAddress}`);
 
       // Manually compute address from uncompressed key to verify
-      const manualHash = ethers.utils.keccak256(uncompressed);
-      const manualAddress = ethers.utils.getAddress(
+      const manualHash = ethers.keccak256(uncompressed);
+      const manualAddress = ethers.getAddress(
         '0x' + manualHash.slice(-40),
       );
       console.log(`   - Manual address (from uncompressed): ${manualAddress}`);
@@ -271,15 +267,9 @@ describe('EthrDID changeOwnerWithPubkey Integration Tests', () => {
 
       console.log('\n2. Gas usage:');
       console.log(`   - Gas used: ${receipt.gasUsed?.toString() || 'N/A'}`);
-      if (receipt.effectiveGasPrice) {
-        const gasCost = receipt.gasUsed.mul(receipt.effectiveGasPrice);
-        const gasCostEth = ethers.utils.formatEther(gasCost);
-        console.log(`   - Gas price: ${ethers.utils.formatUnits(receipt.effectiveGasPrice, 'gwei')} gwei`);
-        console.log(`   - Total cost: ${gasCostEth} ETH`);
-      }
 
       expect(receipt.gasUsed).toBeDefined();
-      expect(receipt.gasUsed.gt(0)).toBe(true);
+      expect(receipt.gasUsed > 0n).toBe(true);
 
       console.log('\n✅ Gas estimation completed!');
     }, 60000);
@@ -298,9 +288,13 @@ describe('EthrDID changeOwnerWithPubkey Integration Tests', () => {
       });
 
       const did1 = await module.createNewDID(bbsKeypair1);
+      const did2Address = keypairToAddress(bbsKeypair2);
       const newOwner = keypairToAddress(Secp256k1Keypair.random());
 
       console.log('\n1. Attempting ownership change with wrong keypair signature...');
+      console.log('   DID1:', did1);
+      console.log('   bbsKeypair2 address:', did2Address);
+      console.log('   newOwner:', newOwner);
 
       // Try to change owner of DID1 using signature from keypair2
       // This should fail because the signature won't match the public key

@@ -275,6 +275,39 @@ class EthrDIDModule extends AbstractDIDModule {
   }
 
   /**
+   * Create an EthrDID instance from an address
+   * Used when the identity address is known but we need a custom signer
+   * @param {string} address - Ethereum address
+   * @param {string} [networkName] - Network name
+   * @param {Object} [options] - Additional options
+   * @param {Object} [options.txSigner] - Custom signer for transactions
+   * @returns {Promise<EthrDID>} EthrDID instance
+   */
+  async #createEthrDIDFromAddress(address, networkName = null, options = {}) {
+    const name = networkName || this.defaultNetwork;
+    const networkConfig = this.networks.get(name);
+    const provider = this.#getProvider(name);
+
+    if (!networkConfig) {
+      throw new Error(`Network not found: ${name}`);
+    }
+
+    if (!options.txSigner) {
+      throw new Error('txSigner is required when creating EthrDID from address');
+    }
+
+    const ethrDidConfig = {
+      identifier: ethers.getAddress(address),
+      provider,
+      registry: networkConfig.registry,
+      chainNameOrId: networkConfig.chainId || name,
+      txSigner: options.txSigner,
+    };
+
+    return new EthrDID(ethrDidConfig);
+  }
+
+  /**
    * Set attributes on-chain sequentially to avoid nonce conflicts
    * @param {EthrDID} ethrDid - EthrDID instance
    * @param {Array} attributes - Array of {key, value} objects
@@ -725,18 +758,26 @@ class EthrDIDModule extends AbstractDIDModule {
    * @returns {Promise<Object>} Transaction receipt with txHash and blockNumber
    */
   async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, gasPayerKeypair) {
-    const { network } = parseDID(did);
+    const { network, address: identityAddress } = parseDID(did);
     const networkName = network || this.defaultNetwork;
     const provider = this.#getProvider(networkName);
+
+    // Verify the BBS keypair matches the DID's identity
+    const bbsAddress = keypairToAddress(bbsKeypair);
+    if (bbsAddress.toLowerCase() !== identityAddress.toLowerCase()) {
+      throw new Error(
+        `BBS keypair address ${bbsAddress} does not match DID identity ${identityAddress}`,
+      );
+    }
 
     // Create signer from gas payer keypair
     const txSigner = createSigner(gasPayerKeypair, provider);
 
-    // Create EthrDID with BBS keypair identity but gas payer signer
-    const ethrDid = await this.#createEthrDID(bbsKeypair, networkName, { txSigner });
+    // Create EthrDID with the DID's identity address and gas payer signer
+    const ethrDid = await this.#createEthrDIDFromAddress(identityAddress, networkName, { txSigner });
 
-    // Get uncompressed G2 public key (192 bytes) for Ethereum contract
-    // EthrDIDModule is responsible for decompression if needed
+    // Use BBS public key directly - the contract uses Dock's g2 generator
+    // so BBS public key and signature will be compatible
     const { publicKeyBuffer } = bbsKeypair;
     const uncompressedPubkey = getUncompressedG2PublicKey(publicKeyBuffer);
 
@@ -748,16 +789,27 @@ class EthrDIDModule extends AbstractDIDModule {
       uncompressedPubkey,
     );
 
-    // Sign the hash with BLS keypair
+    // Sign the hash with BLS keypair (uses same scalar as BBS public key)
     const signature = await signWithBLSKeypair(hash, bbsKeypair);
 
     // Submit the transaction using the gas payer's signer
+    // Note: EthrDID.changeOwnerWithPubkey returns just the tx hash string
     try {
-      return await ethrDid.changeOwnerWithPubkey(
+      const txHash = await ethrDid.changeOwnerWithPubkey(
         checksummedNewOwner,
         uncompressedPubkey,
         signature,
       );
+
+      // Wait for the transaction to be mined and get full receipt
+      const receipt = await provider.waitForTransaction(txHash, 1, 60000);
+
+      return {
+        txHash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed,
+        status: receipt.status,
+      };
     } catch (error) {
       // Re-throw with clean error to avoid BigInt serialization issues in Jest
       const cleanError = new Error(error.message);

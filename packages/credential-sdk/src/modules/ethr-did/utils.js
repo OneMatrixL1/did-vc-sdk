@@ -485,35 +485,85 @@ export function generateDefaultDocument(did, options = {}) {
 }
 
 /**
+ * Extract private key bytes from BBS keypair
+ * Handles wrapped private key formats from @docknetwork/crypto-wasm-ts
+ * @param {Object} bbsKeypair - BBS keypair with privateKeyBuffer
+ * @returns {Uint8Array} Raw private key bytes
+ * @throws {Error} If keypair has no private key
+ */
+function extractBBSPrivateKeyBytes(bbsKeypair) {
+  if (!bbsKeypair.privateKeyBuffer) {
+    throw new Error('BBS keypair requires private key');
+  }
+
+  let privateKeyBytes = bbsKeypair.privateKeyBuffer;
+  if (privateKeyBytes && privateKeyBytes.value) {
+    privateKeyBytes = new Uint8Array(privateKeyBytes.value);
+  } else if (!(privateKeyBytes instanceof Uint8Array)) {
+    privateKeyBytes = new Uint8Array(privateKeyBytes);
+  }
+  return privateKeyBytes;
+}
+
+/**
+ * Convert BBS private key bytes to scalar for signing
+ * BBS uses little-endian interpretation, so we reverse bytes for Noble
+ *
+ * @param {Uint8Array} privateKeyBytes - Raw private key bytes from BBS keypair
+ * @returns {bigint} Scalar value for use with Noble curves
+ */
+function bbsPrivateKeyToScalar(privateKeyBytes) {
+  // BBS stores private key as little-endian, reverse for big-endian interpretation
+  const reversed = new Uint8Array(privateKeyBytes).reverse();
+  const hex = Buffer.from(reversed).toString('hex');
+  return bls.fields.Fr.create(BigInt('0x' + hex));
+}
+
+/**
  * Sign a hash with BBS keypair for owner change
  * Returns 96-byte uncompressed G1 signature for contract compatibility
- * Uses the DockCryptoKeyPair signer pattern for consistency
- * BBS scheme: G2 public keys with G1 signatures
+ *
+ * Uses Dock's BBS keypair format:
+ * - Private key is stored as little-endian bytes
+ * - Public key = sk * Dock_g2 (where Dock_g2 is derived from 'DockBBSSignature2023')
+ * - Signature = sk * H(message) in G1
+ *
+ * The contract must use Dock's g2 generator for verification to work.
+ *
  * @param {string} hashToSign - The EIP-712 hash (0x-prefixed hex string or bytes)
- * @param {Object} bbsKeypair - BBS keypair instance with signer() method
+ * @param {Object} bbsKeypair - BBS keypair instance with privateKeyBuffer
  * @returns {Promise<Uint8Array>} The BLS signature bytes (96 bytes uncompressed G1)
  * @throws {Error} If signing fails
  */
 export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
-  if (!bbsKeypair.privateKeyBuffer) {
-    throw new Error('BBS keypair requires private key for signing');
-  }
+  const privateKeyBytes = extractBBSPrivateKeyBytes(bbsKeypair);
 
   // Convert hash string to bytes if needed
-  const hexString = hashToSign.startsWith('0x') ? hashToSign.slice(2) : hashToSign;
-  const hashBytes = new Uint8Array(Buffer.from(hexString, 'hex'));
+  let hashBytes;
+  if (typeof hashToSign === 'string') {
+    const hexString = hashToSign.startsWith('0x') ? hashToSign.slice(2) : hashToSign;
+    hashBytes = new Uint8Array(Buffer.from(hexString, 'hex'));
+  } else {
+    hashBytes = new Uint8Array(hashToSign);
+  }
 
-  // Create G1 signature manually with custom DST
-  // 1. Hash message to G1 point using contract's DST
-  const messagePoint = bls.G1.hashToCurve(hashBytes, { DST: 'BLS_DST' });
+  try {
+    const { bls12_381 } = await import('@noble/curves/bls12-381');
 
-  // 2. Ensure private key is proper Uint8Array and normalize to scalar
-  const privateKeyBytes = new Uint8Array(bbsKeypair.privateKeyBuffer);
-  const privateKeyScalar = bls.Point.Fn.fromBytes(privateKeyBytes);
+    // Convert BBS private key (little-endian) to scalar
+    const privateKeyScalar = bbsPrivateKeyToScalar(privateKeyBytes);
 
-  // 3. Multiply message point by private key scalar to get signature
-  const signaturePoint = messagePoint.multiply(privateKeyScalar);
+    // Hash message to G1 point using contract's DST
+    const DST = 'BLS_DST';
+    const messagePoint = bls12_381.G1.hashToCurve(hashBytes, { DST });
 
-  // 4. Return uncompressed G1 signature (96 bytes)
-  return signaturePoint.toRawBytes(false);
+    // Multiply by private key scalar to get signature
+    const signaturePoint = messagePoint.multiply(privateKeyScalar);
+
+    // Return uncompressed G1 signature (96 bytes)
+    return signaturePoint.toRawBytes(false);
+  } catch (e) {
+    const message = e && e.message ? e.message : String(e);
+    throw new Error(`Failed to sign with BBS keypair: ${message}`);
+  }
 }

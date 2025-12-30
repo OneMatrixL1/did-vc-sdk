@@ -21,7 +21,7 @@ import {
   isDualAddressEthrDID,
   addressToDualDID,
   createDualDID,
-  bbsPublicKeyToAddress,
+  publicKeyToAddress,
   generateDefaultDocument,
   ETHR_BBS_KEY_ID,
 } from '../src/modules/ethr-did/utils';
@@ -55,7 +55,7 @@ describe('Dual-Address ethr DIDs', () => {
 
     // Derive addresses
     secp256k1Address = ethers.utils.computeAddress(secp256k1Keypair.privateKey());
-    bbsAddress = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+    bbsAddress = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
   });
 
   describe('parseDID()', () => {
@@ -249,7 +249,7 @@ describe('Dual-Address ethr DIDs', () => {
       const verifier = method.verifier();
 
       // The address derivation should pass (signature verification needs actual data)
-      const derivedAddress = bbsPublicKeyToAddress(method.publicKeyBuffer);
+      const derivedAddress = publicKeyToAddress(method.publicKeyBuffer);
       expect(derivedAddress.toLowerCase()).toBe(bbsAddress.toLowerCase());
     });
 

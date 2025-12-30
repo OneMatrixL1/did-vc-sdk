@@ -9,7 +9,7 @@ import { Bls12381BBS23SigDockSigName } from './constants';
 import Bls12381BBSKeyPairDock2023 from './Bls12381BBSKeyPairDock2023';
 import DockCryptoSignature from './common/DockCryptoSignature';
 import Bls12381BBSRecoveryMethod2023 from './Bls12381BBSRecoveryMethod2023';
-import { isEthrDID, bbsPublicKeyToAddress, parseDID } from '../../modules/ethr-did/utils';
+import { isEthrDID, publicKeyToAddress, parseDID } from '../../modules/ethr-did/utils';
 import { u8aToU8a } from '../../utils/types/bytes';
 import CustomLinkedDataSignature from './common/CustomLinkedDataSignature';
 
@@ -113,7 +113,7 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
 
       if (isEthrDID(didPart)) {
         const publicKeyBuffer = b58.decode(proof.publicKeyBase58);
-        const derivedAddress = bbsPublicKeyToAddress(publicKeyBuffer);
+        const derivedAddress = publicKeyToAddress(publicKeyBuffer);
         const didParts = parseDID(didPart);
 
         // For dual-address DIDs, check against bbsAddress; for single-address, use address

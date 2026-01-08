@@ -29,7 +29,7 @@
  * Note: Tests will create on-chain transactions and consume gas fees.
  */
 
-import { ethers } from 'ethers';
+import { parseEther, Wallet, JsonRpcProvider } from 'ethers';
 import b58 from 'bs58';
 import { EthrDIDModule, createVietChainConfig } from '../src/modules/ethr-did';
 import { Secp256k1Keypair } from '../src/keypairs';
@@ -65,11 +65,11 @@ describe('EthrDID Integration Tests', () => {
     const founderPrivateKeyHex = `0x${Array.from(founderPrivateKey)
       .map((byte) => byte.toString(16).padStart(2, '0'))
       .join('')}`;
-    const founderWallet = new ethers.Wallet(founderPrivateKeyHex, provider);
+    const founderWallet = new Wallet(founderPrivateKeyHex, provider);
 
     const tx = await founderWallet.sendTransaction({
       to: recipientAddress,
-      value: ethers.utils.parseEther(amountInEther),
+      value: parseEther(amountInEther),
     });
 
     await tx.wait();
@@ -83,7 +83,7 @@ describe('EthrDID Integration Tests', () => {
     });
 
     // Create provider
-    provider = new ethers.providers.JsonRpcProvider(networkConfig.rpcUrl);
+    provider = new JsonRpcProvider(networkConfig.rpcUrl);
 
     // Require funded private key for integration tests
     if (!process.env.ETHR_PRIVATE_KEY) {

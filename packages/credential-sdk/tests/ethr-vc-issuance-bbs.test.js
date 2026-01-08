@@ -97,7 +97,6 @@ describe('Ethr DID VC Issuance with BBS', () => {
   let issuerKeyDoc;
   let holderKeypair;
   let holderDID;
-  let holderKeyDoc;
 
   beforeAll(async () => {
     // Initialize WASM for BBS operations
@@ -121,9 +120,6 @@ describe('Ethr DID VC Issuance with BBS', () => {
     });
     const holderAddress = keypairToAddress(holderKeypair);
     holderDID = addressToDID(holderAddress, VIETCHAIN_NETWORK);
-
-    // Create key document with minimal DID document (no BBS key in doc)
-    holderKeyDoc = createBBSKeyDocWithMinimalDIDDocument(holderKeypair, holderDID);
   });
 
   describe('Credential Issuance', () => {
@@ -757,5 +753,236 @@ describe('Ethr DID VC Issuance with BBS', () => {
       // BBS public key is 96 bytes
       expect(bbsKeypair.publicKeyBuffer.length).toBe(96);
     });
+  });
+
+  describe('VC Verification After Ownership Change (BBS Flow)', () => {
+    /**
+     * These tests simulate the scenario where DID ownership has been changed
+     * via changeOwnerWithPubkey to a different BBS keypair.
+     *
+     * We simulate the FINAL STATE of the DID document after ownership change
+     * (without calling changeOwnerWithPubkey) and test VC verification behavior.
+     *
+     * Key scenarios:
+     * 1. VC issued by original keypair → ownership changed → verify VC
+     * 2. VC issued by new owner keypair → verify VC
+     */
+
+    let originalKeypair;
+    let originalAddress;
+    let originalDID;
+    let newOwnerKeypair;
+    let newOwnerAddress;
+
+    beforeAll(async () => {
+      // Original BBS keypair (issuer before ownership change)
+      originalKeypair = Bls12381BBSKeyPairDock2023.generate({
+        id: 'original-owner',
+        controller: 'temp',
+      });
+      originalAddress = keypairToAddress(originalKeypair);
+      originalDID = addressToDID(originalAddress, VIETCHAIN_NETWORK);
+
+      // New owner BBS keypair (after ownership change)
+      newOwnerKeypair = Bls12381BBSKeyPairDock2023.generate({
+        id: 'new-owner',
+        controller: 'temp',
+      });
+      newOwnerAddress = keypairToAddress(newOwnerKeypair);
+    });
+
+    afterAll(() => {
+      cleanupDIDFromCache(originalDID);
+    });
+
+    test('VC issued before ownership change still verifies via optimistic verification', async () => {
+      /**
+       * This test demonstrates that VCs issued BEFORE ownership change continue
+       * to verify even AFTER ownership changes. This is because:
+       *
+       * 1. The proof contains publicKeyBase58 (original keypair's public key)
+       * 2. Optimistic verification derives address from publicKeyBase58
+       * 3. The derived address matches the DID's address (from the DID STRING itself)
+       * 4. The DID string (did:ethr:vietchain:0xOriginal...) never changes
+       * 5. Therefore, VCs signed by the original keypair remain valid
+       *
+       * This is a KEY INSIGHT: The DID identifier IS the address, and the original
+       * keypair's address IS that identifier. Changing ownership (who controls the DID)
+       * doesn't invalidate previously issued VCs because:
+       * - The VC is bound to the DID string (address), not to "current ownership"
+       * - Optimistic verification checks address derivation, not DID doc ownership
+       */
+
+      // Step 1: Set up DID document with ORIGINAL owner
+      const originalKeyId = `${originalDID}#keys-bbs`;
+      networkCache[originalDID] = {
+        '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
+        id: originalDID,
+        verificationMethod: [
+          {
+            id: `${originalDID}#controller`,
+            type: 'EcdsaSecp256k1RecoveryMethod2020',
+            controller: originalDID,
+            blockchainAccountId: `eip155:1:${originalAddress}`,
+          },
+        ],
+        assertionMethod: [`${originalDID}#controller`, originalKeyId],
+        authentication: [`${originalDID}#controller`],
+      };
+
+      // Step 2: Issue VC with original keypair
+      const originalKeyDoc = {
+        id: originalKeyId,
+        controller: originalDID,
+        type: Bls12381BBS23DockVerKeyName,
+        keypair: originalKeypair,
+      };
+
+      const credential = await issueCredential(originalKeyDoc, {
+        '@context': [CREDENTIALS_V1_CONTEXT, CREDENTIALS_EXAMPLES_CONTEXT, BBS_V1_CONTEXT],
+        type: ['VerifiableCredential'],
+        issuer: originalDID,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: 'did:example:holder',
+          claim: 'issued-before-ownership-change',
+        },
+      });
+
+      // Verify VC was issued correctly with publicKeyBase58 embedded
+      expect(credential.proof.publicKeyBase58).toBeDefined();
+
+      // Verify VC passes BEFORE ownership change
+      const resultBeforeChange = await verifyCredential(credential);
+      expect(resultBeforeChange.verified).toBe(true);
+
+      // Step 3: Simulate ownership change - update DID document to show NEW owner
+      networkCache[originalDID] = {
+        '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
+        id: originalDID,
+        verificationMethod: [
+          {
+            // Owner is now the NEW keypair's address
+            id: `${originalDID}#controller`,
+            type: 'EcdsaSecp256k1RecoveryMethod2020',
+            controller: originalDID,
+            blockchainAccountId: `eip155:1:${newOwnerAddress}`,
+          },
+        ],
+        // Note: Original key is no longer in assertionMethod
+        assertionMethod: [`${originalDID}#controller`],
+        authentication: [`${originalDID}#controller`],
+      };
+
+      // Step 4: Verify the VC issued by original keypair AFTER ownership change
+      const resultAfterChange = await verifyCredential(credential);
+      expect(resultAfterChange.verified).toBe(true);
+    }, 30000);
+
+    test('VC issued by non-owner keypair should fail verification when DID doc is checked', async () => {
+      // Set up DID document with NEW owner (simulating post-ownership-change state)
+      const wrongKeyId = `${originalDID}#keys-wrong`;
+      networkCache[originalDID] = {
+        '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
+        id: originalDID,
+        verificationMethod: [
+          {
+            id: `${originalDID}#controller`,
+            type: 'EcdsaSecp256k1RecoveryMethod2020',
+            controller: originalDID,
+            blockchainAccountId: `eip155:1:${newOwnerAddress}`,
+          },
+        ],
+        assertionMethod: [`${originalDID}#controller`],
+        authentication: [`${originalDID}#controller`],
+      };
+
+      // Issue VC with a DIFFERENT keypair (not the owner - neither original nor new)
+      const attackerKeypair = Bls12381BBSKeyPairDock2023.generate({
+        id: 'attacker',
+        controller: 'temp',
+      });
+
+      const attackerKeyDoc = {
+        id: wrongKeyId,
+        controller: originalDID,
+        type: Bls12381BBS23DockVerKeyName,
+        keypair: attackerKeypair,
+      };
+
+      const credential = await issueCredential(attackerKeyDoc, {
+        '@context': [CREDENTIALS_V1_CONTEXT, CREDENTIALS_EXAMPLES_CONTEXT, BBS_V1_CONTEXT],
+        type: ['VerifiableCredential'],
+        issuer: originalDID,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: 'did:example:holder',
+          claim: 'issued-by-attacker',
+        },
+      });
+
+      const result = await verifyCredential(credential);
+
+      // Should fail because attacker's derived address doesn't match originalDID's address
+      expect(result.verified).toBe(false);
+    }, 30000);
+
+    test('VC issued by new owner should verify after ownership change', async () => {
+      // The new owner creates their own DID based on their BBS keypair address
+      // This is how it works in practice - new owner uses their own DID
+      const newOwnerDID = addressToDID(newOwnerAddress, VIETCHAIN_NETWORK);
+      const newOwnerKeyId = `${newOwnerDID}#keys-bbs`;
+
+      // Issue VC with new owner's keypair using their own DID
+      const newOwnerKeyDoc = {
+        id: newOwnerKeyId,
+        controller: newOwnerDID,
+        type: Bls12381BBS23DockVerKeyName,
+        keypair: newOwnerKeypair,
+      };
+
+      const credential = await issueCredential(newOwnerKeyDoc, {
+        '@context': [CREDENTIALS_V1_CONTEXT, CREDENTIALS_EXAMPLES_CONTEXT, BBS_V1_CONTEXT],
+        type: ['VerifiableCredential'],
+        issuer: newOwnerDID,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: 'did:example:holder',
+          claim: 'issued-by-new-owner',
+        },
+      });
+
+      // Register DID doc for new owner's DID
+      networkCache[newOwnerDID] = {
+        '@context': [DID_V1_CONTEXT, SECURITY_V2_CONTEXT],
+        id: newOwnerDID,
+        verificationMethod: [
+          {
+            id: `${newOwnerDID}#controller`,
+            type: 'EcdsaSecp256k1RecoveryMethod2020',
+            controller: newOwnerDID,
+            blockchainAccountId: `eip155:1:${newOwnerAddress}`,
+          },
+        ],
+        assertionMethod: [`${newOwnerDID}#controller`, newOwnerKeyId],
+        authentication: [`${newOwnerDID}#controller`],
+      };
+
+      // Cache the verification method key ID (needed for document loader)
+      networkCache[newOwnerKeyId] = {
+        '@context': BBS_V1_CONTEXT,
+        id: newOwnerKeyId,
+        type: 'Bls12381BBSVerificationKeyDock2023',
+        controller: newOwnerDID,
+        publicKeyBase58: credential.proof.publicKeyBase58,
+      };
+
+      const result = await verifyCredential(credential);
+
+      // Should verify - new owner's address matches their DID
+      expect(result.verified).toBe(true);
+
+      cleanupDIDFromCache(newOwnerDID);
+    }, 30000);
   });
 });

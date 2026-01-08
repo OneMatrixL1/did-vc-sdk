@@ -8,7 +8,7 @@
  */
 
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import { ethers } from 'ethers';
+import { computeAddress, hexlify } from 'ethers';
 import b58 from 'bs58';
 import { issueCredential, verifyCredential } from '../src/vc';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
@@ -54,7 +54,7 @@ describe('Dual-Address ethr DIDs', () => {
     });
 
     // Derive addresses
-    secp256k1Address = ethers.utils.computeAddress(secp256k1Keypair.privateKey());
+    secp256k1Address = computeAddress(hexlify(secp256k1Keypair.privateKey()));
     bbsAddress = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
   });
 

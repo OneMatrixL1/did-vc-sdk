@@ -29,7 +29,8 @@
  * Note: Tests will create on-chain transactions and consume gas fees.
  */
 
-import { ethers } from 'ethers';
+import 'dotenv/config';
+import { parseEther, Wallet, JsonRpcProvider } from 'ethers';
 import b58 from 'bs58';
 import { EthrDIDModule, createVietChainConfig } from '../src/modules/ethr-did';
 import { Secp256k1Keypair } from '../src/keypairs';
@@ -40,7 +41,7 @@ import { issueCredential, verifyCredential } from '../src/vc';
 if (!process.env.ETHR_NETWORK_RPC_URL) {
   throw new Error(
     'ETHR_NETWORK_RPC_URL environment variable is required for integration tests. '
-      + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
+    + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
   );
 }
 
@@ -65,11 +66,11 @@ describe('EthrDID Integration Tests', () => {
     const founderPrivateKeyHex = `0x${Array.from(founderPrivateKey)
       .map((byte) => byte.toString(16).padStart(2, '0'))
       .join('')}`;
-    const founderWallet = new ethers.Wallet(founderPrivateKeyHex, provider);
+    const founderWallet = new Wallet(founderPrivateKeyHex, provider);
 
     const tx = await founderWallet.sendTransaction({
       to: recipientAddress,
-      value: ethers.utils.parseEther(amountInEther),
+      value: parseEther(amountInEther),
     });
 
     await tx.wait();
@@ -83,14 +84,14 @@ describe('EthrDID Integration Tests', () => {
     });
 
     // Create provider
-    provider = new ethers.providers.JsonRpcProvider(networkConfig.rpcUrl);
+    provider = new JsonRpcProvider(networkConfig.rpcUrl);
 
     // Require funded private key for integration tests
     if (!process.env.ETHR_PRIVATE_KEY) {
       throw new Error(
         'ETHR_PRIVATE_KEY environment variable is required for integration tests. '
-          + 'Tests require a funded account to pay gas fees. '
-          + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
+        + 'Tests require a funded account to pay gas fees. '
+        + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
       );
     }
 

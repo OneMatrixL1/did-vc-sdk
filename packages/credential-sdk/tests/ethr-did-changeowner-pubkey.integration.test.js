@@ -30,7 +30,7 @@
  * ETHR_REGISTRY_ADDRESS=0x8697547b3b82327B70A90C6248662EC083ad5A62 \
  * yarn test:integration --testMatch ethr-did-changeowner-pubkey.integration.test.js
  */
-
+import 'dotenv/config';
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import { EthrDIDModule } from '../src/modules/ethr-did';
 import { Secp256k1Keypair } from '../src/keypairs';
@@ -41,14 +41,14 @@ import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2
 if (!process.env.ETHR_NETWORK_RPC_URL) {
   throw new Error(
     'ETHR_NETWORK_RPC_URL environment variable is required for integration tests. '
-      + 'Use scripts/test-integration-vietchain.sh or set ETHR_NETWORK_RPC_URL manually.',
+    + 'Use scripts/test-integration-vietchain.sh or set ETHR_NETWORK_RPC_URL manually.',
   );
 }
 
 if (!process.env.ETHR_PRIVATE_KEY) {
   throw new Error(
     'ETHR_PRIVATE_KEY environment variable is required for integration tests. '
-      + 'Tests require a funded account to pay gas fees.',
+    + 'Tests require a funded account to pay gas fees.',
   );
 }
 
@@ -77,8 +77,12 @@ describe('EthrDID changeOwnerWithPubkey Integration Tests', () => {
       defaultNetwork: networkConfig.name,
     });
 
-    // Create provider
-    gasPayerKeypair = new Secp256k1Keypair(process.env.ETHR_PRIVATE_KEY, 'private');
+    // Load gas payer keypair from environment
+    const privateKeyBytes = Buffer.from(
+      process.env.ETHR_PRIVATE_KEY.replace('0x', ''),
+      'hex',
+    );
+    gasPayerKeypair = new Secp256k1Keypair(privateKeyBytes, 'private');
   });
 
   describe('BLS Signature-based Ownership Change', () => {

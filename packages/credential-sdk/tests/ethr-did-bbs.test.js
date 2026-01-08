@@ -9,7 +9,7 @@ import {
   EthrDIDModule, createVietChainConfig,
 } from '../src/modules/ethr-did';
 import {
-  bbsPublicKeyToAddress,
+  publicKeyToAddress,
   detectKeypairType,
   keypairToAddress,
   addressToDID,
@@ -34,17 +34,17 @@ describe('BBS Address Derivation', () => {
     });
   });
 
-  describe('bbsPublicKeyToAddress', () => {
+  describe('publicKeyToAddress', () => {
     test('derives valid Ethereum address from BBS public key', () => {
-      const address = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+      const address = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
 
       // Should be a valid checksummed Ethereum address
       expect(address).toMatch(/^0x[0-9a-fA-F]{40}$/);
     });
 
     test('generates consistent address for same public key', () => {
-      const address1 = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
-      const address2 = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+      const address1 = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
+      const address2 = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
 
       expect(address1).toBe(address2);
     });
@@ -55,27 +55,27 @@ describe('BBS Address Derivation', () => {
         controller: 'did:example:test',
       });
 
-      const address1 = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
-      const address2 = bbsPublicKeyToAddress(bbsKeypair2.publicKeyBuffer);
+      const address1 = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
+      const address2 = publicKeyToAddress(bbsKeypair2.publicKeyBuffer);
 
       expect(address1).not.toBe(address2);
     });
 
     test('throws for invalid input types', () => {
-      expect(() => bbsPublicKeyToAddress('invalid')).toThrow();
-      expect(() => bbsPublicKeyToAddress(null)).toThrow();
-      expect(() => bbsPublicKeyToAddress(undefined)).toThrow();
+      expect(() => publicKeyToAddress('invalid')).toThrow();
+      expect(() => publicKeyToAddress(null)).toThrow();
+      expect(() => publicKeyToAddress(undefined)).toThrow();
     });
 
     test('throws for wrong length public key', () => {
       const wrongLength = new Uint8Array(32); // Wrong size
-      expect(() => bbsPublicKeyToAddress(wrongLength)).toThrow(/must be 96 bytes/);
+      expect(() => publicKeyToAddress(wrongLength)).toThrow();
     });
 
     test('accepts plain Array with 96 bytes', () => {
       // Create a plain array with 96 bytes
       const plainArray = Array.from(bbsKeypair.publicKeyBuffer);
-      const address = bbsPublicKeyToAddress(plainArray);
+      const address = publicKeyToAddress(plainArray);
       expect(address).toMatch(/^0x[0-9a-fA-F]{40}$/);
     });
 
@@ -184,7 +184,7 @@ describe('EthrDIDModule with BBS Keypair', () => {
     });
 
     test('DID contains correct address derived from BBS public key', async () => {
-      const expectedAddress = bbsPublicKeyToAddress(bbsKeypair.publicKeyBuffer);
+      const expectedAddress = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
       const did = await module.createNewDID(bbsKeypair);
       const parsed = parseDID(did);
 

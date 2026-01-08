@@ -3,7 +3,7 @@
  * @module ethr-did/utils
  */
 
-import { ethers } from 'ethers';
+import { keccak256, getBytes, getAddress, hexlify, isAddress, computeAddress, JsonRpcProvider, Wallet } from 'ethers';
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
 
 /**
@@ -21,7 +21,7 @@ function toPrivateKeyHex(privateKey) {
   if (typeof privateKey === 'string') {
     return privateKey;
   }
-  return ethers.hexlify(privateKey);
+  return hexlify(privateKey);
 }
 
 /**
@@ -41,8 +41,8 @@ export function publicKeyToAddress(publicKeyBytes) {
   let uncompressed;
   if (keyBytes.length === 96) {
     // Decompress: 96 bytes → 192 bytes
-    const point = bls.G2.Point.fromHex(keyBytes);
-    uncompressed = point.toBytes(false);
+    const point = bls.G2.ProjectivePoint.fromHex(keyBytes);
+    uncompressed = point.toRawBytes(false);
   } else if (keyBytes.length === 192) {
     // Already uncompressed
     uncompressed = keyBytes;
@@ -51,9 +51,9 @@ export function publicKeyToAddress(publicKeyBytes) {
   }
 
   // Derive address: keccak256(pubkey)[last 20 bytes]
-  const hash = ethers.keccak256(uncompressed);
-  const addressBytes = ethers.getBytes(hash).slice(-20);
-  return ethers.getAddress(ethers.hexlify(addressBytes));
+  const hash = keccak256(uncompressed);
+  const addressBytes = getBytes(hash).slice(-20);
+  return getAddress(hexlify(addressBytes));
 }
 
 /**
@@ -113,14 +113,14 @@ export function keypairToAddress(keypair) {
   if (keyType === 'secp256k1') {
     // Standard Secp256k1Keypair with privateKey() method
     if (typeof keypair.privateKey === 'function') {
-      return ethers.computeAddress(toPrivateKeyHex(keypair.privateKey()));
+      return computeAddress(toPrivateKeyHex(keypair.privateKey()));
     }
 
     // Elliptic library KeyPair object (has ec and priv)
     if (keypair.ec && keypair.priv) {
       // Convert BN private key to hex string
       const privKeyHex = `0x${keypair.priv.toString('hex', 64)}`;
-      return ethers.computeAddress(privKeyHex);
+      return computeAddress(privKeyHex);
     }
 
     throw new Error('Cannot extract private key from secp256k1 keypair');
@@ -142,12 +142,12 @@ export function addressToDID(address, network = null) {
   }
 
   // Validate address format
-  if (!ethers.isAddress(address)) {
+  if (!isAddress(address)) {
     throw new Error(`Invalid Ethereum address: ${address}`);
   }
 
   // Normalize address to checksum format
-  const checksumAddress = ethers.getAddress(address);
+  const checksumAddress = getAddress(address);
 
   // Include network in DID if specified and not mainnet
   if (network && network !== 'mainnet') {
@@ -173,16 +173,16 @@ export function addressToDualDID(secp256k1Address, bbsAddress, network = null) {
   }
 
   // Validate address formats
-  if (!ethers.isAddress(secp256k1Address)) {
+  if (!isAddress(secp256k1Address)) {
     throw new Error(`Invalid secp256k1 address: ${secp256k1Address}`);
   }
-  if (!ethers.isAddress(bbsAddress)) {
+  if (!isAddress(bbsAddress)) {
     throw new Error(`Invalid BBS address: ${bbsAddress}`);
   }
 
   // Normalize addresses to checksum format
-  const checksumSecp = ethers.getAddress(secp256k1Address);
-  const checksumBBS = ethers.getAddress(bbsAddress);
+  const checksumSecp = getAddress(secp256k1Address);
+  const checksumBBS = getAddress(bbsAddress);
 
   // Include network in DID if specified and not mainnet
   if (network && network !== 'mainnet') {
@@ -212,7 +212,7 @@ export function createDualDID(secp256k1Keypair, bbsKeypair, network = null) {
   }
 
   // Derive addresses
-  const secp256k1Address = ethers.computeAddress(toPrivateKeyHex(secp256k1Keypair.privateKey()));
+  const secp256k1Address = computeAddress(toPrivateKeyHex(secp256k1Keypair.privateKey()));
   const bbsAddress = publicKeyToAddress(bbsKeypair.publicKeyBuffer);
 
   return addressToDualDID(secp256k1Address, bbsAddress, network);
@@ -244,19 +244,19 @@ export function parseDID(did) {
     const bbsAddress = dualMatch[3];
 
     // Validate both addresses
-    if (!ethers.isAddress(secp256k1Address)) {
+    if (!isAddress(secp256k1Address)) {
       throw new Error(`Invalid secp256k1 address in DID: ${secp256k1Address}`);
     }
-    if (!ethers.isAddress(bbsAddress)) {
+    if (!isAddress(bbsAddress)) {
       throw new Error(`Invalid BBS address in DID: ${bbsAddress}`);
     }
 
     return {
       network,
-      secp256k1Address: ethers.getAddress(secp256k1Address),
-      bbsAddress: ethers.getAddress(bbsAddress),
+      secp256k1Address: getAddress(secp256k1Address),
+      bbsAddress: getAddress(bbsAddress),
       // Backward compatibility: primary address is secp256k1
-      address: ethers.getAddress(secp256k1Address),
+      address: getAddress(secp256k1Address),
       isDualAddress: true,
     };
   }
@@ -272,13 +272,13 @@ export function parseDID(did) {
   const address = singleMatch[2];
 
   // Validate address
-  if (!ethers.isAddress(address)) {
+  if (!isAddress(address)) {
     throw new Error(`Invalid Ethereum address in DID: ${address}`);
   }
 
   return {
     network,
-    address: ethers.getAddress(address), // Return checksum address
+    address: getAddress(address), // Return checksum address
     isDualAddress: false,
   };
 }
@@ -287,7 +287,7 @@ export function parseDID(did) {
  * Create ethers provider from network configuration
  * @param {import('./config').NetworkConfig} networkConfig - Network configuration
  * @param {Object} [providerOptions] - Additional provider options
- * @returns {ethers.JsonRpcProvider} Ethers provider
+ * @returns {JsonRpcProvider} Ethers provider
  */
 export function createProvider(networkConfig, providerOptions = {}) {
   const network = networkConfig.chainId
@@ -297,14 +297,14 @@ export function createProvider(networkConfig, providerOptions = {}) {
     }
     : undefined;
 
-  return new ethers.JsonRpcProvider(networkConfig.rpcUrl, network, providerOptions);
+  return new JsonRpcProvider(networkConfig.rpcUrl, network, providerOptions);
 }
 
 /**
  * Create ethers signer from keypair and provider
  * @param {Object} keypair - Keypair instance
  * @param {ethers.Provider} provider - Ethers provider
- * @returns {ethers.Wallet} Ethers wallet (signer)
+ * @returns {Wallet} Ethers wallet (signer)
  * @throws {Error} If BBS keypair is used (not yet supported)
  */
 export function createSigner(keypair, provider) {
@@ -314,7 +314,7 @@ export function createSigner(keypair, provider) {
     throw new Error('BBS transaction signing not yet supported. Contract update required.');
   }
 
-  return new ethers.Wallet(toPrivateKeyHex(keypair.privateKey()), provider);
+  return new Wallet(toPrivateKeyHex(keypair.privateKey()), provider);
 }
 
 /**

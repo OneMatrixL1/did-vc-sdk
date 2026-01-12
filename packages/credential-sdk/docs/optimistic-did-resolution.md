@@ -28,7 +28,7 @@ Helper function that tries optimistic resolution first, then falls back to block
 import {
   EthrDIDModule,
   verifyCredentialOptimistic,
-} from '@truvera/credential-sdk/modules/ethr-did';
+} from '@docknetwork/credential-sdk/modules/ethr-did';
 
 const module = new EthrDIDModule({ networks: [networkConfig] });
 
@@ -43,7 +43,7 @@ Helper function for verifying verifiable presentations with optimistic-first res
 import {
   EthrDIDModule,
   verifyPresentationOptimistic,
-} from '@truvera/credential-sdk/modules/ethr-did';
+} from '@docknetwork/credential-sdk/modules/ethr-did';
 
 const module = new EthrDIDModule({ networks: [networkConfig] });
 
@@ -83,7 +83,7 @@ await module.getDocument(did);
 Generate a default DID document without blockchain fetch:
 
 ```javascript
-import { generateDefaultDocument } from '@truvera/credential-sdk/modules/ethr-did';
+import { generateDefaultDocument } from '@docknetwork/credential-sdk/modules/ethr-did';
 
 const doc = generateDefaultDocument('did:ethr:vietchain:0x123...', {
   chainId: 84005,
@@ -99,7 +99,7 @@ const doc = generateDefaultDocument('did:ethr:vietchain:0x123...', {
 Always tries optimistic first, falls back to blockchain on failure:
 
 ```javascript
-import { EthrDIDModule, verifyCredentialOptimistic } from '@truvera/credential-sdk/modules/ethr-did';
+import { EthrDIDModule, verifyCredentialOptimistic } from '@docknetwork/credential-sdk/modules/ethr-did';
 
 const module = new EthrDIDModule({ networks: [networkConfig] });
 const result = await verifyCredentialOptimistic(credential, { module });
@@ -113,7 +113,7 @@ Verify presentations with multiple credentials from different issuers:
 import {
   EthrDIDModule,
   verifyPresentationOptimistic,
-} from '@truvera/credential-sdk/modules/ethr-did';
+} from '@docknetwork/credential-sdk/modules/ethr-did';
 
 const module = new EthrDIDModule({ networks: [networkConfig] });
 
@@ -135,8 +135,8 @@ if (result.verified) {
 Backend has full control over caching strategy:
 
 ```javascript
-import { EthrDIDModule } from '@truvera/credential-sdk/modules/ethr-did';
-import { verifyCredential } from '@truvera/credential-sdk/vc';
+import { EthrDIDModule } from '@docknetwork/credential-sdk/modules/ethr-did';
+import { verifyCredential } from '@docknetwork/credential-sdk/vc';
 
 const module = new EthrDIDModule({ networks: [networkConfig] });
 
@@ -156,7 +156,12 @@ async function verify(credential) {
 
   return result;
 }
-```
+
+### Fallback: Fallback to blockchain
+
+If verification fails with the default document, the SDK can attempt verification using the `didOwnerProof` (if present) or fall back to a full blockchain resolution.
+
+For more details on how history can be verified off-chain, see [DID Owner Proof](./did-owner-proof.md).
 
 ---
 

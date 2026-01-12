@@ -19,9 +19,9 @@ First, issue a credential with BBS signatures containing all attributes:
 
 ```javascript
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import Bls12381BBSKeyPairDock2023 from '@truvera/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
-import { issueCredential } from '@truvera/credential-sdk/vc';
-import { keypairToAddress, addressToDID } from '@truvera/credential-sdk/modules/ethr-did/utils';
+import Bls12381BBSKeyPairDock2023 from '@docknetwork/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
+import { issueCredential } from '@docknetwork/credential-sdk/vc';
+import { keypairToAddress, addressToDID } from '@docknetwork/credential-sdk/modules/ethr-did/utils';
 
 // Initialize WASM for BBS operations
 await initializeWasm();
@@ -74,7 +74,7 @@ const credential = await issueCredential(issuerKeyDoc, {
 Use the `Presentation` class to reveal only specific attributes:
 
 ```javascript
-import Presentation from '@truvera/credential-sdk/vc/presentation';
+import Presentation from '@docknetwork/credential-sdk/vc/presentation';
 
 // Create presentation
 const presentation = new Presentation();
@@ -112,7 +112,7 @@ console.log(derivedCred.credentialSubject);
 The verifier can verify the derived credential normally:
 
 ```javascript
-import { verifyCredential } from '@truvera/credential-sdk/vc';
+import { verifyCredential } from '@docknetwork/credential-sdk/vc';
 
 const result = await verifyCredential(derivedCred);
 console.log(result.verified); // true
@@ -223,10 +223,10 @@ This prevents:
 
 ```javascript
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import Bls12381BBSKeyPairDock2023 from '@truvera/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
-import Presentation from '@truvera/credential-sdk/vc/presentation';
-import { issueCredential, verifyCredential } from '@truvera/credential-sdk/vc';
-import { keypairToAddress, addressToDID } from '@truvera/credential-sdk/modules/ethr-did/utils';
+import Bls12381BBSKeyPairDock2023 from '@docknetwork/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
+import Presentation from '@docknetwork/credential-sdk/vc/presentation';
+import { issueCredential, verifyCredential } from '@docknetwork/credential-sdk/vc';
+import { keypairToAddress, addressToDID } from '@docknetwork/credential-sdk/modules/ethr-did/utils';
 
 await initializeWasm();
 

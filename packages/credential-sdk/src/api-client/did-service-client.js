@@ -1,4 +1,8 @@
+import { keccak256, toUtf8Bytes, concat } from 'ethers';
+import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import AbstractApiClient from './abstract';
+import Bls12381BBSKeyPairDock2023 from '../vc/crypto/Bls12381BBSKeyPairDock2023';
+import { signWithBLSKeypair, keypairToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, DEFAULT_REGISTRY_ADDRESS } from '../modules/ethr-did/utils';
 
 // Default base URL for the API service
 const DEFAULT_BASE_URL = 'https://api.example.com';
@@ -30,6 +34,7 @@ class DIDServiceClient extends AbstractApiClient {
      * Example: [
      *   { 
      *     signature: '0x123...', 
+     *     publicKey: '0x456...',
      *     message: { 
      *       identity: '0x742d...', 
      *       oldOwner: '0x0000...',
@@ -71,75 +76,54 @@ class DIDServiceClient extends AbstractApiClient {
             return [];
         }
 
-        // TODO: Replace with real API call when available
-        // Mock data for testing
-        // Message structure: { identity: address (DID), oldOwner: address, newOwner: address }
-        const mockHistory = [
-            {
-                signature: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef12',
-                message: {
-                    identity,
-                    oldOwner: '0x0000000000000000000000000000000000000000',
-                    newOwner: '0xA1B2C3D4E5F6789012345678901234567890ABCD'
-                }
-            },
-            {
-                signature: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
-                message: {
-                    identity,
-                    oldOwner: '0xA1B2C3D4E5F6789012345678901234567890ABCD',
-                    newOwner: '0xBCDEF1234567890abcdef1234567890abcdef12'
-                }
-            },
-            {
-                signature: '0x567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef123456',
-                message: {
-                    identity,
-                    oldOwner: '0xBCDEF1234567890abcdef1234567890abcdef12',
-                    newOwner: '0x567890abcdef1234567890abcdef1234567890ab'
-                }
-            }
+        // Initialize WASM for BBS operations
+        await initializeWasm();
+
+        // Generate a chain of owners and sign the transitions
+        // We use consistent IDs for deterministic mock data per DID
+        const keypair0 = Bls12381BBSKeyPairDock2023.generate({ id: `${identity}-owner-0` });
+        const keypair1 = Bls12381BBSKeyPairDock2023.generate({ id: `${identity}-owner-1` });
+        const keypair2 = Bls12381BBSKeyPairDock2023.generate({ id: `${identity}-owner-2` });
+        const keypair3 = Bls12381BBSKeyPairDock2023.generate({ id: `${identity}-owner-3` });
+
+        const addr0 = keypairToAddress(keypair0);
+        const addr1 = keypairToAddress(keypair1);
+        const addr2 = keypairToAddress(keypair2);
+        const addr3 = keypairToAddress(keypair3);
+
+        const transitions = [
+            { from: addr0, to: addr1, signer: keypair0 },
+            { from: addr1, to: addr2, signer: keypair1 },
+            { from: addr2, to: addr3, signer: keypair2 }
         ];
 
-        return mockHistory;
+        const history = [];
+        for (const transition of transitions) {
+            const hash = createChangeOwnerWithPubkeyHash(
+                identity,
+                transition.from,
+                transition.to,
+                DEFAULT_CHAIN_ID,
+                DEFAULT_REGISTRY_ADDRESS
+            );
 
-        /* Real API implementation (commented out for now):
-        try {
-            const response = await this.get(`/did/${did}/owner-history`);
+            // Sign the hash with BLS keypair
+            const signature = await signWithBLSKeypair(hash, transition.signer);
 
-            // Validate response is an array
-            if (!Array.isArray(response)) {
-                throw new Error('Invalid response: expected array of history records');
-            }
-
-            // Validate each item has signature and message
-            const validatedHistory = response.map((item, index) => {
-                if (!item.signature || !item.message) {
-                    throw new Error(`Invalid history item at index ${index}: missing signature or message`);
+            history.push({
+                signature: `0x${Buffer.from(signature).toString('hex')}`,
+                publicKey: `0x${Buffer.from(transition.signer.publicKeyBuffer).toString('hex')}`,
+                message: {
+                    identity,
+                    oldOwner: transition.from,
+                    newOwner: transition.to
                 }
-
-                // Validate message structure
-                const { identity, oldOwner, newOwner } = item.message;
-                if (!identity || !oldOwner || !newOwner) {
-                    throw new Error(`Invalid history item at index ${index}: message must contain identity, oldOwner, and newOwner`);
-                }
-
-                return {
-                    signature: item.signature,
-                    message: {
-                        identity,
-                        oldOwner,
-                        newOwner
-                    }
-                };
             });
-
-            return validatedHistory;
-        } catch (error) {
-            throw new Error(`Failed to get DID owner history: ${error.message}`);
         }
-        */
+
+        return history;
     }
+
 }
 
 export default DIDServiceClient;

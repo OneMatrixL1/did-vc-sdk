@@ -14,7 +14,7 @@ import { isCredVerGte060 } from './crypto/common/DockCryptoSignature';
 import { DIDServiceClient } from '../api-client';
 
 import defaultDocumentLoader from './document-loader';
-import { getSuiteFromKeyDoc } from './helpers';
+import { getSuiteFromKeyDoc, verifyDIDOwnerProof } from './helpers';
 import {
   Bls12381BBSSigDockSigName,
   Bls12381PSSigDockSigName,
@@ -201,6 +201,18 @@ export async function verifyPresentation(presentation, options = {}) {
       purpose,
       ...verificationOptions,
     });
+
+    // Verify didOwnerProof if present
+    if (presentationResult.verified && presentation.didOwnerProof) {
+      try {
+        await verifyDIDOwnerProof(presentation.didOwnerProof, presentation.holder);
+      } catch (error) {
+        return {
+          verified: false,
+          error: new Error(`didOwnerProof verification failed: ${error.message}`),
+        };
+      }
+    }
 
     // Return results
     return {

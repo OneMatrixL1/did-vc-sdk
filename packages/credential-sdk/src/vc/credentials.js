@@ -35,6 +35,7 @@ import {
   expandJSONLD,
   getKeyFromDIDDocument,
   processIfKvac,
+  verifyDIDOwnerProof,
 } from './helpers';
 import { ensureValidDatetime } from '../utils';
 import { DIDServiceClient } from '../api-client';
@@ -408,6 +409,19 @@ export async function verifyCredential(
     documentLoader: docLoader,
     compactProof,
   });
+
+  // Verify didOwnerProof if present
+  if (result.verified && credential.didOwnerProof) {
+    const subjectDID = getId(credential.credentialSubject.id || credential.credentialSubject[0]?.id);
+    try {
+      await verifyDIDOwnerProof(credential.didOwnerProof, subjectDID);
+    } catch (error) {
+      return {
+        verified: false,
+        error: new Error(`didOwnerProof verification failed: ${error.message}`),
+      };
+    }
+  }
 
   // Check for revocation only if the credential is verified and revocation check is needed.
   if (result.verified && !skipRevocationCheck) {

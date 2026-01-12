@@ -67,6 +67,11 @@ describe('verifyCredentialOptimistic()', () => {
       networks: [networkConfig],
     });
 
+    const holderBbsKeypair = Bls12381BBSKeyPairDock2023.generate({
+      id: 'holder-verify-optimistic-test-key',
+      controller: 'temp',
+    });
+
     // Issue credential
     const unsignedCredential = {
       '@context': [
@@ -78,7 +83,7 @@ describe('verifyCredentialOptimistic()', () => {
       issuer: ethrDID,
       issuanceDate: new Date().toISOString(),
       credentialSubject: {
-        id: 'did:example:holder',
+        id: addressToDID(keypairToAddress(holderBbsKeypair), VIETCHAIN_NETWORK),
         alumniOf: 'Optimistic Verification University',
       },
     };

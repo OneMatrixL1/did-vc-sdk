@@ -820,6 +820,25 @@ class EthrDIDModule extends AbstractDIDModule {
       throw cleanError;
     }
   }
+
+  /**
+   * Create the EIP-712 hash for changing owner with public key
+   * @param {string} did - DID string
+   * @param {string} newOwnerAddress - New owner address
+   * @returns {Promise<string>} EIP-712 hash
+   */
+  async createChangeOwnerWithPubkeyHash(did, newOwnerAddress) {
+    const { network, address: identityAddress } = parseDID(did);
+    const networkName = network || this.defaultNetwork;
+    const provider = this.#getProvider(networkName);
+
+    // Create EthrDID with the DID's identity address
+    const ethrDid = await this.#createEthrDIDFromAddress(identityAddress, networkName, { txSigner: provider });
+
+    return ethrDid.createChangeOwnerWithPubkeyHash(
+      ethers.getAddress(newOwnerAddress),
+    );
+  }
 }
 
 export default EthrDIDModule;

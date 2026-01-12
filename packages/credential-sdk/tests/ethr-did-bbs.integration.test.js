@@ -25,6 +25,7 @@
  * ETHR_REGISTRY_ADDRESS  - DID Registry contract address
  */
 
+import 'dotenv/config';
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import { EthrDIDModule, createVietChainConfig } from '../src/modules/ethr-did';
 import { keypairToAddress, parseDID, isEthrDID } from '../src/modules/ethr-did/utils';
@@ -38,7 +39,7 @@ import networkCache from './utils/network-cache';
 if (!process.env.ETHR_NETWORK_RPC_URL) {
   throw new Error(
     'ETHR_NETWORK_RPC_URL environment variable is required for integration tests. '
-      + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
+    + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
   );
 }
 

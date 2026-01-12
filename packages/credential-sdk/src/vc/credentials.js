@@ -27,6 +27,7 @@ import {
   PrivateStatusList2021EntryType,
   StatusList2021EntryType,
   PrivateStatusList2021Qualifier,
+  didOwnerProofContext,
 } from './constants';
 
 import {
@@ -34,8 +35,10 @@ import {
   expandJSONLD,
   getKeyFromDIDDocument,
   processIfKvac,
+  verifyDIDOwnerProof,
 } from './helpers';
 import { ensureValidDatetime } from '../utils';
+import { DIDServiceClient } from '../api-client';
 
 import {
   EcdsaSecp256k1Signature2019,
@@ -407,6 +410,19 @@ export async function verifyCredential(
     compactProof,
   });
 
+  // Verify didOwnerProof if present
+  if (result.verified && credential.didOwnerProof) {
+    const subjectDID = getId(credential.credentialSubject.id || credential.credentialSubject[0]?.id);
+    try {
+      await verifyDIDOwnerProof(credential.didOwnerProof, subjectDID);
+    } catch (error) {
+      return {
+        verified: false,
+        error: new Error(`didOwnerProof verification failed: ${error.message}`),
+      };
+    }
+  }
+
   // Check for revocation only if the credential is verified and revocation check is needed.
   if (result.verified && !skipRevocationCheck) {
     const status = getCredentialStatus(expandedCredential);
@@ -552,8 +568,38 @@ export async function issueCredential(
     }
   }
 
-  // Sign and return the credential with jsonld-signatures otherwise
-  return jsigs.sign(cred, {
+  // Fetch DID owner history if cred.didOwnerProof is not present
+  if (!cred.didOwnerProof) {
+    // Add custom context for didOwnerProof to make it valid in JSON-LD
+    // Initialize @context if not present
+    if (!cred['@context']) {
+      cred['@context'] = [];
+    }
+    // Ensure @context is an array
+    if (!Array.isArray(cred['@context'])) {
+      cred['@context'] = [cred['@context']];
+    }
+    // Add the context if not already present
+    if (!cred['@context'].some(ctx => typeof ctx === 'object' && ctx['@context']?.didOwnerProof)) {
+      cred['@context'].push(didOwnerProofContext);
+    }
+    // Fetch DID owner history
+    try {
+      const didClient = new DIDServiceClient();
+      const did = cred.credentialSubject?.id || cred.credentialSubject?.[0]?.id;
+      if (did) {
+        const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
+        if (didOwnerHistory && didOwnerHistory.length > 0) {
+          cred.didOwnerProof = didOwnerHistory;
+        }
+      }
+    } catch (error) {
+      throw new Error('Failed to fetch DID owner history:', error.message);
+    }
+  }
+
+  // Sign the credential with jsonld-signatures
+  const signedCredential = await jsigs.sign(cred, {
     purpose: purpose || new CredentialIssuancePurpose(),
     documentLoader: docLoader,
     suite,
@@ -561,6 +607,8 @@ export async function issueCredential(
     expansionMap,
     addSuiteContext,
   });
+
+  return signedCredential;
 }
 
 /**

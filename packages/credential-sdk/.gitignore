@@ -2,3 +2,4 @@
 performance-results/
 *.performance.json
 dashboard.html
+.env

@@ -3,14 +3,21 @@
  * @module ethr-did/utils
  */
 
-import { keccak256, getBytes, getAddress, hexlify, isAddress, computeAddress, JsonRpcProvider, Wallet } from 'ethers';
+import { keccak256, getBytes, getAddress, hexlify, isAddress, computeAddress, JsonRpcProvider, Wallet, AbiCoder, toUtf8Bytes, concat } from 'ethers';
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
+import { getUncompressedG2PublicKey } from './bbs-uncompressed';
 
 /**
  * Default key ID fragment for BBS keys in ethr DIDs
  * Used when creating key documents and authorizing BBS keys
  */
 export const ETHR_BBS_KEY_ID = '#keys-bbs';
+
+/**
+ * Default chain ID and registry address for DID operations
+ */
+export const DEFAULT_CHAIN_ID = 1337;
+export const DEFAULT_REGISTRY_ADDRESS = '0x8697547b3b82327B70A90C6248662EC083ad5A62';
 
 /**
  * Convert private key to hex string
@@ -556,4 +563,83 @@ export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
     const message = e && e.message ? e.message : String(e);
     throw new Error(`Failed to sign with BBS keypair: ${message}`);
   }
+}
+
+/**
+ * Negated G2 generator for BLS verification, matching BLSDockBBS.sol contract
+ * Derived from hash_to_curve('DockBBSSignature2023') and negated.
+ * Used for pairing check: e(sig, N_G2) * e(msg, PK) == 1
+ */
+const N_G2_HEX = '151113a09ccd914117226445cd4d5aa6d82218d8d3f5b517d7b43020c94ee0121642129e969b3e14c41b737823f65dcf02445bd9067ed201f4b93771091e40c8920deb706ce68690b02eb80ebddc6c7b5001e5087170d04b70e2fb85b8f5fd510dd7275196d32fba62ba5d15c45aaa87494aa7bab4fa7e5c9f903739c83c410a19d8b22e12a777fedc6f4552c75a0ddc0c71cc5492173d4d92a5ee851c15cdc171269f0ac4cd0a371205341e5ccc4367f69d1609fa0dc1ffaca9cbbee6580f95';
+
+/**
+ * Verify a BLS signature against a hash and public key
+ * Matches the verification logic in EthereumDIDRegistry.sol
+ *
+ * @param {Uint8Array|string} signature - 96-byte uncompressed G1 signature
+ * @param {Uint8Array|string} hashToVerify - 32-byte hash (e.g. EIP-712 hash)
+ * @param {Uint8Array|string} publicKey - 192-byte uncompressed G2 public key
+ * @returns {boolean} True if signature is valid
+ */
+export function verifyBLSSignature(signature, hashToVerify, publicKey) {
+  try {
+    const uncompressedPubkey = getUncompressedG2PublicKey(publicKey);
+
+    // Normalize inputs to Uint8Array
+    const sigBytes = getBytes(signature);
+    const hashBytes = getBytes(hashToVerify);
+    const pkBytes = getBytes(uncompressedPubkey);
+
+    const DST = 'BLS_DST';
+    const sigPoint = bls.G1.ProjectivePoint.fromHex(sigBytes);
+    const pkPoint = bls.G2.ProjectivePoint.fromHex(pkBytes);
+    const msgPoint = bls.G1.hashToCurve(hashBytes, { DST });
+
+    // pairing(G1, G2, withFinalExponent = true)
+    // Check: e(sig, N_G2) * e(msg, pk) == 1
+    const nG2Point = bls.G2.ProjectivePoint.fromHex(N_G2_HEX);
+    const p1 = bls.pairing(sigPoint, nG2Point, false);
+    const p2 = bls.pairing(msgPoint, pkPoint, false);
+    const total = bls.fields.Fp12.mul(p1, p2);
+
+    return bls.fields.Fp12.eql(bls.fields.Fp12.finalExponentiate(total), bls.fields.Fp12.ONE);
+  } catch (e) {
+    return false;
+  }
+}
+/**
+ * Create EIP-712 hash for changing owner with public key
+ * Matches the logic in EthereumDIDRegistry and DIDServiceClient
+ *
+ * @param {string} identity - DID identity address
+ * @param {string} oldOwner - Current owner address
+ * @param {string} newOwner - New owner address
+ * @param {number} [chainId=DEFAULT_CHAIN_ID] - Chain ID
+ * @param {string} [registryAddress=DEFAULT_REGISTRY_ADDRESS] - Registry contract address
+ * @returns {string} EIP-712 hash
+ */
+export function createChangeOwnerWithPubkeyHash(identity, oldOwner, newOwner, chainId = DEFAULT_CHAIN_ID, registryAddress = DEFAULT_REGISTRY_ADDRESS) {
+  const coder = AbiCoder.defaultAbiCoder();
+  const typeHash = keccak256(toUtf8Bytes('ChangeOwnerWithPubkey(address identity,address oldOwner,address newOwner)'));
+  const structHash = keccak256(
+    coder.encode(
+      ['bytes32', 'address', 'address', 'address'],
+      [typeHash, identity, oldOwner, newOwner],
+    ),
+  );
+
+  const domainSeparator = keccak256(
+    coder.encode(
+      ['bytes32', 'bytes32', 'bytes32', 'uint256', 'address'],
+      [
+        keccak256(toUtf8Bytes('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')),
+        keccak256(toUtf8Bytes('EthereumDIDRegistry')),
+        keccak256(toUtf8Bytes('1')),
+        chainId,
+        registryAddress,
+      ],
+    ),
+  );
+
+  return keccak256(concat(['0x1901', domainSeparator, structHash]));
 }

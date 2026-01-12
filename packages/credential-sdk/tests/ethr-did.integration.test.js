@@ -29,6 +29,7 @@
  * Note: Tests will create on-chain transactions and consume gas fees.
  */
 
+import 'dotenv/config';
 import { parseEther, Wallet, JsonRpcProvider } from 'ethers';
 import b58 from 'bs58';
 import { EthrDIDModule, createVietChainConfig } from '../src/modules/ethr-did';
@@ -40,7 +41,7 @@ import { issueCredential, verifyCredential } from '../src/vc';
 if (!process.env.ETHR_NETWORK_RPC_URL) {
   throw new Error(
     'ETHR_NETWORK_RPC_URL environment variable is required for integration tests. '
-      + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
+    + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
   );
 }
 
@@ -89,8 +90,8 @@ describe('EthrDID Integration Tests', () => {
     if (!process.env.ETHR_PRIVATE_KEY) {
       throw new Error(
         'ETHR_PRIVATE_KEY environment variable is required for integration tests. '
-          + 'Tests require a funded account to pay gas fees. '
-          + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
+        + 'Tests require a funded account to pay gas fees. '
+        + 'Use scripts/test-integration-vietchain.sh or scripts/test-integration-sepolia.sh',
       );
     }
 

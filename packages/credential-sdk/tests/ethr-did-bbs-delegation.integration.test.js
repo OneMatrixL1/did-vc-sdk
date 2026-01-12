@@ -29,7 +29,7 @@
  *   ETHR_REGISTRY_ADDRESS=0xF0889fb2473F91c068178870ae2e1A0408059A03 \
  *   yarn jest packages/credential-sdk/tests/ethr-did-bbs-delegation.integration.test.js
  */
-
+import 'dotenv/config';
 import { parseEther, Wallet, JsonRpcProvider } from 'ethers';
 import b58 from 'bs58';
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
@@ -48,14 +48,14 @@ const BBS_ATTRIBUTE_NAME = 'did/pub/Bls12381G2Key2020/veriKey/base58';
 if (!process.env.ETHR_NETWORK_RPC_URL) {
   throw new Error(
     'ETHR_NETWORK_RPC_URL environment variable is required for integration tests. '
-      + 'Use scripts/test-integration-vietchain.sh or set ETHR_NETWORK_RPC_URL manually.',
+    + 'Use scripts/test-integration-vietchain.sh or set ETHR_NETWORK_RPC_URL manually.',
   );
 }
 
 if (!process.env.ETHR_PRIVATE_KEY) {
   throw new Error(
     'ETHR_PRIVATE_KEY environment variable is required for integration tests. '
-      + 'Tests require a funded account to pay gas fees.',
+    + 'Tests require a funded account to pay gas fees.',
   );
 }
 
@@ -128,7 +128,7 @@ describe('BBS Delegation Lifecycle Integration Test', () => {
       console.error('Looking for BBS key (base58):', targetPublicKeyBase58);
       throw new Error(
         `No verification method found for BBS public key. `
-          + 'Ensure the BBS key was registered via setAttribute.',
+        + 'Ensure the BBS key was registered via setAttribute.',
       );
     }
 

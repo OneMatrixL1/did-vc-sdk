@@ -34,8 +34,10 @@ import {
   expandJSONLD,
   getKeyFromDIDDocument,
   processIfKvac,
+  verifyDIDOwnerProof,
 } from './helpers';
 import { ensureValidDatetime } from '../utils';
+import { attachDIDOwnerProof } from './did-owner-proof-utils';
 
 import {
   EcdsaSecp256k1Signature2019,
@@ -407,6 +409,19 @@ export async function verifyCredential(
     compactProof,
   });
 
+  // Verify didOwnerProof if present
+  if (result.verified && credential.didOwnerProof) {
+    const subjectDID = getId(credential.credentialSubject.id || credential.credentialSubject[0]?.id);
+    try {
+      await verifyDIDOwnerProof(credential.didOwnerProof, subjectDID);
+    } catch (error) {
+      return {
+        verified: false,
+        error: new Error(`didOwnerProof verification failed: ${error.message}`),
+      };
+    }
+  }
+
   // Check for revocation only if the credential is verified and revocation check is needed.
   if (result.verified && !skipRevocationCheck) {
     const status = getCredentialStatus(expandedCredential);
@@ -552,8 +567,11 @@ export async function issueCredential(
     }
   }
 
-  // Sign and return the credential with jsonld-signatures otherwise
-  return jsigs.sign(cred, {
+  // Fetch DID owner history if not present
+  await attachDIDOwnerProof(cred, cred.credentialSubject?.id || cred.credentialSubject?.[0]?.id);
+
+  // Sign the credential with jsonld-signatures
+  const signedCredential = await jsigs.sign(cred, {
     purpose: purpose || new CredentialIssuancePurpose(),
     documentLoader: docLoader,
     suite,
@@ -561,6 +579,8 @@ export async function issueCredential(
     expansionMap,
     addSuiteContext,
   });
+
+  return signedCredential;
 }
 
 /**

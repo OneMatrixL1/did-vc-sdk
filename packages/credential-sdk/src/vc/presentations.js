@@ -11,9 +11,10 @@ import b58 from 'bs58';
 import { getPrivateStatus, verifyCredential } from './credentials';
 /// import DIDResolver from "../resolver/did/did-resolver"; // eslint-disable-line
 import { isCredVerGte060 } from './crypto/common/DockCryptoSignature';
+import { attachDIDOwnerProof } from './did-owner-proof-utils';
 
 import defaultDocumentLoader from './document-loader';
-import { getSuiteFromKeyDoc } from './helpers';
+import { getSuiteFromKeyDoc, verifyDIDOwnerProof } from './helpers';
 import {
   Bls12381BBSSigDockSigName,
   Bls12381PSSigDockSigName,
@@ -201,6 +202,18 @@ export async function verifyPresentation(presentation, options = {}) {
       ...verificationOptions,
     });
 
+    // Verify didOwnerProof if present
+    if (presentationResult.verified && presentation.didOwnerProof) {
+      try {
+        await verifyDIDOwnerProof(presentation.didOwnerProof, presentation.holder);
+      } catch (error) {
+        return {
+          verified: false,
+          error: new Error(`didOwnerProof verification failed: ${error.message}`),
+        };
+      }
+    }
+
     // Return results
     return {
       presentationResult,
@@ -227,6 +240,8 @@ export async function verifyPresentation(presentation, options = {}) {
  * @param {DIDResolver} [resolver] - Resolver for DIDs.
  * @param {Boolean} [compactProof] - Whether to compact the JSON-LD or not.
  * @param {object} [presentationPurpose] - Optional presentation purpose to override default AuthenticationProofPurpose
+ * @param {Boolean} [addSuiteContext] - Whether to add suite context or not.
+ * @param {object} [expansionMap] - An expansion map for custom properties.
  * @return {Promise<VerifiablePresentation>} A VerifiablePresentation with a proof.
  */
 export async function signPresentation(
@@ -247,6 +262,10 @@ export async function signPresentation(
     });
 
   const documentLoader = defaultDocumentLoader(resolver);
+
+  // Fetch and attach DID owner history if not already present
+  await attachDIDOwnerProof(presentation, presentation.holder);
+
   const signed = await jsigs.sign(presentation, {
     purpose,
     documentLoader,
@@ -265,6 +284,7 @@ export async function signPresentation(
       signed.proof = validProofs.pop();
     }
   }
+
   return signed;
 }
 

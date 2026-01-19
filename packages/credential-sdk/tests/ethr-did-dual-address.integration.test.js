@@ -17,6 +17,7 @@
  * ETHR_REGISTRY_ADDRESS  - DID Registry contract address
  */
 
+import 'dotenv/config';
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import { EthrDIDModule } from '../src/modules/ethr-did';
 import {
@@ -43,8 +44,8 @@ const networkConfig = SKIP_INTEGRATION
     name: process.env.ETHR_NETWORK || 'vietchain',
     rpcUrl: process.env.ETHR_NETWORK_RPC_URL,
     registry:
-        process.env.ETHR_REGISTRY_ADDRESS
-        || '0xF0889fb2473F91c068178870ae2e1A0408059A03',
+      process.env.ETHR_REGISTRY_ADDRESS
+      || '0xF0889fb2473F91c068178870ae2e1A0408059A03',
   };
 
 // Context URLs

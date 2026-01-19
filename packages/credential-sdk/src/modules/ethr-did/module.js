@@ -5,7 +5,7 @@
 
 import { ethers } from 'ethers';
 import { EthrDID } from 'ethr-did';
-import { getResolver } from 'ethr-did-resolver';
+import { getResolver, EthereumDIDRegistry } from 'ethr-did-resolver';
 import { Resolver as DIDResolver } from 'did-resolver';
 import b58 from 'bs58';
 import AbstractDIDModule from '../abstract/did/module';
@@ -766,19 +766,20 @@ class EthrDIDModule extends AbstractDIDModule {
     const networkName = network || this.defaultNetwork;
     const provider = this.#getProvider(networkName);
 
-    // Verify the BBS keypair matches the DID's identity
-    const bbsAddress = keypairToAddress(bbsKeypair);
-    if (bbsAddress.toLowerCase() !== identityAddress.toLowerCase()) {
-      throw new Error(
-        `BBS keypair address ${bbsAddress} does not match DID identity ${identityAddress}`,
-      );
-    }
-
     // Create signer from gas payer keypair
     const txSigner = createSigner(gasPayerKeypair, provider);
 
     // Create EthrDID with the DID's identity address and gas payer signer
     const ethrDid = await this.#createEthrDIDFromAddress(identityAddress, networkName, { txSigner });
+
+    // Verify the BBS keypair matches the DID's current owner
+    const bbsAddress = keypairToAddress(bbsKeypair);
+    const currentOwner = await ethrDid.lookupOwner();
+    if (bbsAddress.toLowerCase() !== currentOwner.toLowerCase()) {
+      throw new Error(
+        `BBS keypair address ${bbsAddress} does not match current owner ${currentOwner} for DID ${did}`,
+      );
+    }
 
     // Use BBS public key directly - the contract uses Dock's g2 generator
     // so BBS public key and signature will be compatible
@@ -819,6 +820,100 @@ class EthrDIDModule extends AbstractDIDModule {
       cleanError.txHash = error.receipt?.hash || error.receipt?.transactionHash;
       throw cleanError;
     }
+  }
+
+  /**
+   * Create the EIP-712 hash for changing owner with public key
+   * @param {string} did - DID string
+   * @param {string} newOwnerAddress - New owner address
+   * @returns {Promise<string>} EIP-712 hash
+   */
+  async createChangeOwnerWithPubkeyHash(did, newOwnerAddress) {
+    const { network, address: identityAddress } = parseDID(did);
+    const networkName = network || this.defaultNetwork;
+    const provider = this.#getProvider(networkName);
+
+    // Create EthrDID with the DID's identity address
+    const ethrDid = await this.#createEthrDIDFromAddress(identityAddress, networkName, { txSigner: provider });
+
+    return ethrDid.createChangeOwnerWithPubkeyHash(
+      ethers.getAddress(newOwnerAddress),
+    );
+  }
+
+
+  /**
+   * Fetch owner history for an ethr DID from the blockchain.
+   * Scans for DIDOwnerChanged events and decodes changeOwnerWithPubkey calls.
+   *
+   * @param {string} did - The ethr DID to fetch history for
+   * @returns {Promise<Array<{signature: string, publicKey: string, message: object}>>} Array of owner transitions
+   */
+  async getOwnerHistory(did) {
+    const didString = String(did);
+    if (!isEthrDID(didString)) {
+      throw new Error(`Not an ethr DID: ${didString}`);
+    }
+
+    const { network, address: identity } = parseDID(didString);
+    const networkName = network || this.defaultNetwork;
+    const networkConfig = this.networks.get(networkName);
+    const provider = this.#getProvider(networkName);
+    const registryAddress = networkConfig.registry;
+
+    const registry = new ethers.Contract(registryAddress, EthereumDIDRegistry.abi, provider);
+    const iface = new ethers.Interface(EthereumDIDRegistry.abi);
+
+    const history = [];
+    let previousChange = await registry.changed(identity);
+
+    while (previousChange > 0n) {
+      const blockNumber = Number(previousChange);
+      const topics = iface.encodeFilterTopics('DIDOwnerChanged', [identity]);
+
+      // eslint-disable-next-line no-await-in-loop
+      const logs = await provider.getLogs({
+        address: registryAddress,
+        topics,
+        fromBlock: blockNumber,
+        toBlock: blockNumber,
+      });
+
+      const log = logs[0];
+      if (!log) break;
+
+      const event = iface.parseLog(log);
+      const { previousChange: nextPreviousChange } = event.args;
+
+      // Extract public key and signature if it was a changeOwnerWithPubkey call
+      // eslint-disable-next-line no-await-in-loop
+      const tx = await provider.getTransaction(log.transactionHash);
+      try {
+        const decodedTx = iface.parseTransaction({ data: tx.data });
+        if (decodedTx?.name === 'changeOwnerWithPubkey') {
+          const {
+            identity: identityArg, oldOwner, newOwner, publicKey, signature,
+          } = decodedTx.args;
+
+          history.unshift({
+            signature,
+            publicKey,
+            message: {
+              identity: identityArg,
+              oldOwner,
+              newOwner,
+            },
+          });
+        }
+      } catch (e) {
+        // Skip non-pubkey transitions
+        console.warn('Skip non-pubkey transitions', e);
+      }
+
+      previousChange = nextPreviousChange;
+    }
+
+    return history;
   }
 }
 

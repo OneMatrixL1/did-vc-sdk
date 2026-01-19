@@ -1,4 +1,5 @@
 import { signPresentation, verifyPresentation } from './presentations';
+import { attachDIDOwnerProof } from './did-owner-proof-utils';
 
 import {
   ensureObjectWithId,
@@ -184,6 +185,9 @@ class VerifiablePresentation {
    * @returns {Promise<VerifiablePresentation>}
    */
   async sign(keyDoc, challenge, domain, resolver = null, compactProof = true) {
+    // Fetch and attach DID owner history if not already present
+    await attachDIDOwnerProof(this, this.holder);
+
     const signedVP = await signPresentation(
       this.toJSON(),
       keyDoc,

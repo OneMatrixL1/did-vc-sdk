@@ -1,6 +1,7 @@
 import { expandJSONLD } from './helpers';
 import { issueCredential, verifyCredential } from './credentials';
 import { DEFAULT_CONTEXT, DEFAULT_TYPE } from './constants';
+import { attachDIDOwnerProof } from './did-owner-proof-utils';
 
 import { validateCredentialSchema } from './schema';
 
@@ -253,6 +254,9 @@ class VerifiableCredential {
     documentLoader = null,
     type = null,
   ) {
+    // Fetch and attach DID owner history if not already present
+    await attachDIDOwnerProof(this, this.credentialSubject.id || this.credentialSubject[0]?.id);
+
     const signedVC = await issueCredential(
       keyDoc,
       this.toJSON(),

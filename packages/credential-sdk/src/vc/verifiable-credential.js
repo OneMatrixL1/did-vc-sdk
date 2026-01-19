@@ -1,9 +1,9 @@
 import { expandJSONLD } from './helpers';
 import { issueCredential, verifyCredential } from './credentials';
-import { DEFAULT_CONTEXT, DEFAULT_TYPE, didOwnerProofContext } from './constants';
+import { DEFAULT_CONTEXT, DEFAULT_TYPE } from './constants';
+import { attachDIDOwnerProof } from './did-owner-proof-utils';
 
 import { validateCredentialSchema } from './schema';
-import { DIDServiceClient } from '../api-client';
 
 import {
   ensureObjectWithId,
@@ -254,25 +254,8 @@ class VerifiableCredential {
     documentLoader = null,
     type = null,
   ) {
-    // Add custom context for didOwnerProof to make it valid in JSON-LD
-    // Add the context if not already present
-    if (!this.context.some(ctx => typeof ctx === 'object' && ctx['@context']?.didOwnerProof)) {
-      this.addContext(didOwnerProofContext);
-    }
-
-    // Fetch DID owner history and attach before signing
-    try {
-      const didClient = new DIDServiceClient();
-      const did = this.credentialSubject.id || this.credentialSubject[0]?.id;
-      if (did) {
-        const didOwnerHistory = await didClient.getDIDOwnerHistory(did);
-        if (didOwnerHistory && didOwnerHistory.length > 0) {
-          this.didOwnerProof = didOwnerHistory;
-        }
-      }
-    } catch (error) {
-      throw new Error('Failed to fetch DID owner history:', error.message);
-    }
+    // Fetch and attach DID owner history if not already present
+    await attachDIDOwnerProof(this, this.credentialSubject.id || this.credentialSubject[0]?.id);
 
     const signedVC = await issueCredential(
       keyDoc,

@@ -1,9 +1,8 @@
-import { keccak256, toUtf8Bytes, concat, Interface, Contract } from 'ethers';
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import { EthereumDIDRegistry } from 'ethr-did-resolver';
 import AbstractApiClient from './abstract';
 import Bls12381BBSKeyPairDock2023 from '../vc/crypto/Bls12381BBSKeyPairDock2023';
-import { signWithBLSKeypair, keypairToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, DEFAULT_REGISTRY_ADDRESS } from '../modules/ethr-did/utils';
+import { keypairToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, DEFAULT_REGISTRY_ADDRESS, signWithBLSKeypair, parseDID } from '../modules/ethr-did/utils';
+import EthrDIDModule from '../modules/ethr-did/module';
 
 // Default base URL for the API service
 const DEFAULT_BASE_URL = 'https://api.example.com';
@@ -91,72 +90,28 @@ class DIDServiceClient extends AbstractApiClient {
             console.warn(`Failed to fetch DID owner history from API: ${error.message}. Falling back to on-chain.`);
         }
 
-        // 2. Fallback to on-chain if provider is available
         if (this.provider) {
-            return this._fetchOwnerHistoryOnChain(identity);
+            const { network } = parseDID(did);
+            const networkName = network || 'vietchain';
+
+            const networkConfig = {
+                name: networkName,
+                rpcUrl: 'http://localhost', // Satisfy validation, provider is injected below
+                registry: this.registryAddress,
+            };
+
+            const module = new EthrDIDModule({
+                networks: [networkConfig],
+                defaultNetwork: networkName,
+            });
+
+            // Inject existing provider into the module
+            module.providers.set(networkName, this.provider);
+            return module.getOwnerHistory(did);
         }
 
         // 3. Last fallback: Mock data (original behavior for backward compatibility/demo)
         return this._getMockDIDOwnerHistory(identity);
-    }
-
-    /**
-     * Fetch owner history directly from EthereumDIDRegistry contract
-     * @param {string} identity - Ethereum address of the DID
-     * @returns {Promise<Array>} Owner history
-     * @private
-     */
-    async _fetchOwnerHistoryOnChain(identity) {
-        const registry = new Contract(this.registryAddress, EthereumDIDRegistry.abi, this.provider);
-        const iface = new Interface(EthereumDIDRegistry.abi);
-
-        const history = [];
-        let previousChange = await registry.changed(identity);
-
-        while (previousChange > 0n) {
-            const blockNumber = Number(previousChange);
-            const topics = iface.encodeFilterTopics('DIDOwnerChanged', [identity]);
-
-            const logs = await this.provider.getLogs({
-                address: this.registryAddress,
-                topics,
-                fromBlock: blockNumber,
-                toBlock: blockNumber,
-            });
-
-            const log = logs[0];
-            if (!log) break;
-
-            const event = iface.parseLog(log);
-            const { previousChange: nextPreviousChange } = event.args;
-
-            // Extract public key and signature if it was a changeOwnerWithPubkey call
-            const tx = await this.provider.getTransaction(log.transactionHash);
-            try {
-                const decodedTx = iface.parseTransaction({ data: tx.data });
-                if (decodedTx?.name === 'changeOwnerWithPubkey') {
-                    const { identity: identityArg, oldOwner, newOwner, publicKey, signature } = decodedTx.args;
-
-                    history.unshift({
-                        signature: signature,
-                        publicKey: publicKey,
-                        message: {
-                            identity: identityArg,
-                            oldOwner: oldOwner,
-                            newOwner: newOwner,
-                        },
-                        // blockNumber: blockNumber,
-                        // transactionHash: log.transactionHash
-                    });
-                }
-            } catch (e) {
-                console.debug(`Skipping non-pubkey transition at block ${blockNumber}`);
-            }
-
-            previousChange = nextPreviousChange;
-        }
-
-        return history;
     }
 
     /**

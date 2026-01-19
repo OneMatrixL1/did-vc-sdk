@@ -1,5 +1,6 @@
-import { keccak256, toUtf8Bytes, concat } from 'ethers';
+import { keccak256, toUtf8Bytes, concat, Interface, Contract } from 'ethers';
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
+import { EthereumDIDRegistry } from 'ethr-did-resolver';
 import AbstractApiClient from './abstract';
 import Bls12381BBSKeyPairDock2023 from '../vc/crypto/Bls12381BBSKeyPairDock2023';
 import { signWithBLSKeypair, keypairToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, DEFAULT_REGISTRY_ADDRESS } from '../modules/ethr-did/utils';
@@ -16,9 +17,13 @@ class DIDServiceClient extends AbstractApiClient {
     /**
      * @param {string} [baseUrl] - Base URL of the API service (optional, uses default if not provided)
      * @param {object} [options] - Additional options
+     * @param {import('ethers').Provider} [options.provider] - Ethers provider for on-chain fallback
+     * @param {string} [options.registry] - DID Registry contract address (optional, uses default if not provided)
      */
     constructor(baseUrl = DEFAULT_BASE_URL, options = {}) {
         super(baseUrl, options);
+        this.provider = options.provider || null;
+        this.registryAddress = options.registry || DEFAULT_REGISTRY_ADDRESS;
     }
 
     /**
@@ -76,6 +81,91 @@ class DIDServiceClient extends AbstractApiClient {
             return [];
         }
 
+        try {
+            // 1. Try to fetch from API
+            const history = await this.get(`/did/${did}/owner-history`);
+            if (history && Array.isArray(history) && history.length > 0) {
+                return history;
+            }
+        } catch (error) {
+            console.warn(`Failed to fetch DID owner history from API: ${error.message}. Falling back to on-chain.`);
+        }
+
+        // 2. Fallback to on-chain if provider is available
+        if (this.provider) {
+            return this._fetchOwnerHistoryOnChain(identity);
+        }
+
+        // 3. Last fallback: Mock data (original behavior for backward compatibility/demo)
+        return this._getMockDIDOwnerHistory(identity);
+    }
+
+    /**
+     * Fetch owner history directly from EthereumDIDRegistry contract
+     * @param {string} identity - Ethereum address of the DID
+     * @returns {Promise<Array>} Owner history
+     * @private
+     */
+    async _fetchOwnerHistoryOnChain(identity) {
+        const registry = new Contract(this.registryAddress, EthereumDIDRegistry.abi, this.provider);
+        const iface = new Interface(EthereumDIDRegistry.abi);
+
+        const history = [];
+        let previousChange = await registry.changed(identity);
+
+        while (previousChange > 0n) {
+            const blockNumber = Number(previousChange);
+            const topics = iface.encodeFilterTopics('DIDOwnerChanged', [identity]);
+
+            const logs = await this.provider.getLogs({
+                address: this.registryAddress,
+                topics,
+                fromBlock: blockNumber,
+                toBlock: blockNumber,
+            });
+
+            const log = logs[0];
+            if (!log) break;
+
+            const event = iface.parseLog(log);
+            const { previousChange: nextPreviousChange } = event.args;
+
+            // Extract public key and signature if it was a changeOwnerWithPubkey call
+            const tx = await this.provider.getTransaction(log.transactionHash);
+            try {
+                const decodedTx = iface.parseTransaction({ data: tx.data });
+                if (decodedTx?.name === 'changeOwnerWithPubkey') {
+                    const { identity: identityArg, oldOwner, newOwner, publicKey, signature } = decodedTx.args;
+
+                    history.unshift({
+                        signature: signature,
+                        publicKey: publicKey,
+                        message: {
+                            identity: identityArg,
+                            oldOwner: oldOwner,
+                            newOwner: newOwner,
+                        },
+                        // blockNumber: blockNumber,
+                        // transactionHash: log.transactionHash
+                    });
+                }
+            } catch (e) {
+                console.debug(`Skipping non-pubkey transition at block ${blockNumber}`);
+            }
+
+            previousChange = nextPreviousChange;
+        }
+
+        return history;
+    }
+
+    /**
+     * Original mock implementation moved to separate method
+     * @param {string} identity - Identity address
+     * @returns {Promise<Array>} Mock history
+     * @private
+     */
+    async _getMockDIDOwnerHistory(identity) {
         // Initialize WASM for BBS operations
         await initializeWasm();
 
@@ -104,7 +194,7 @@ class DIDServiceClient extends AbstractApiClient {
                 transition.from,
                 transition.to,
                 DEFAULT_CHAIN_ID,
-                DEFAULT_REGISTRY_ADDRESS
+                this.registryAddress
             );
 
             // Sign the hash with BLS keypair

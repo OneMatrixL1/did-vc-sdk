@@ -48,8 +48,8 @@ export function publicKeyToAddress(publicKeyBytes) {
   let uncompressed;
   if (keyBytes.length === 96) {
     // Decompress: 96 bytes → 192 bytes
-    const point = bls.G2.ProjectivePoint.fromHex(keyBytes);
-    uncompressed = point.toRawBytes(false);
+    const point = bls.G2.Point.fromHex(keyBytes);
+    uncompressed = point.toBytes(false);
   } else if (keyBytes.length === 192) {
     // Already uncompressed
     uncompressed = keyBytes;
@@ -558,7 +558,7 @@ export async function signWithBLSKeypair(hashToSign, bbsKeypair) {
     const signaturePoint = messagePoint.multiply(privateKeyScalar);
 
     // Return uncompressed G1 signature (96 bytes)
-    return signaturePoint.toRawBytes(false);
+    return signaturePoint.toBytes(false);
   } catch (e) {
     const message = e && e.message ? e.message : String(e);
     throw new Error(`Failed to sign with BBS keypair: ${message}`);
@@ -591,13 +591,13 @@ export function verifyBLSSignature(signature, hashToVerify, publicKey) {
     const pkBytes = getBytes(uncompressedPubkey);
 
     const DST = 'BLS_DST';
-    const sigPoint = bls.G1.ProjectivePoint.fromHex(sigBytes);
-    const pkPoint = bls.G2.ProjectivePoint.fromHex(pkBytes);
+    const sigPoint = bls.G1.Point.fromHex(sigBytes);
+    const pkPoint = bls.G2.Point.fromHex(pkBytes);
     const msgPoint = bls.G1.hashToCurve(hashBytes, { DST });
 
     // pairing(G1, G2, withFinalExponent = true)
     // Check: e(sig, N_G2) * e(msg, pk) == 1
-    const nG2Point = bls.G2.ProjectivePoint.fromHex(N_G2_HEX);
+    const nG2Point = bls.G2.Point.fromHex(N_G2_HEX);
     const p1 = bls.pairing(sigPoint, nG2Point, false);
     const p2 = bls.pairing(msgPoint, pkPoint, false);
     const total = bls.fields.Fp12.mul(p1, p2);

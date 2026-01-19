@@ -766,19 +766,20 @@ class EthrDIDModule extends AbstractDIDModule {
     const networkName = network || this.defaultNetwork;
     const provider = this.#getProvider(networkName);
 
-    // Verify the BBS keypair matches the DID's identity
-    const bbsAddress = keypairToAddress(bbsKeypair);
-    if (bbsAddress.toLowerCase() !== identityAddress.toLowerCase()) {
-      throw new Error(
-        `BBS keypair address ${bbsAddress} does not match DID identity ${identityAddress}`,
-      );
-    }
-
     // Create signer from gas payer keypair
     const txSigner = createSigner(gasPayerKeypair, provider);
 
     // Create EthrDID with the DID's identity address and gas payer signer
     const ethrDid = await this.#createEthrDIDFromAddress(identityAddress, networkName, { txSigner });
+
+    // Verify the BBS keypair matches the DID's current owner
+    const bbsAddress = keypairToAddress(bbsKeypair);
+    const currentOwner = await ethrDid.lookupOwner();
+    if (bbsAddress.toLowerCase() !== currentOwner.toLowerCase()) {
+      throw new Error(
+        `BBS keypair address ${bbsAddress} does not match current owner ${currentOwner} for DID ${did}`,
+      );
+    }
 
     // Use BBS public key directly - the contract uses Dock's g2 generator
     // so BBS public key and signature will be compatible

@@ -35,7 +35,6 @@ import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import { EthrDIDModule } from '../src/modules/ethr-did';
 import { Secp256k1Keypair } from '../src/keypairs';
 import { keypairToAddress, verifyBLSSignature, signWithBLSKeypair } from '../src/modules/ethr-did/utils';
-import { keccak256, toUtf8Bytes } from 'ethers';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
 
 // Configuration from environment (required for integration tests)

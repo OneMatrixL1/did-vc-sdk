@@ -452,6 +452,8 @@ describe('Dual-Address ethr DIDs Integration', () => {
       expect(signedPresentation.proof).toBeDefined();
       expect(signedPresentation.proof.verificationMethod).toBe(holderKeyDoc.id);
 
+      console.log('Signed Presentation:', JSON.stringify(signedPresentation, null, 2));
+
       // 4. Verify VP
       const result = await verifyPresentationOptimistic(signedPresentation, {
         module,

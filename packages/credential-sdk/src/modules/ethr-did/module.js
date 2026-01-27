@@ -790,7 +790,7 @@ class EthrDIDModule extends AbstractDIDModule {
     // Get the EIP-712 hash for signing
     const hash = await ethrDid.createChangeOwnerWithPubkeyHash(
       checksummedNewOwner,
-      uncompressedPubkey,
+      currentOwner,
     );
 
     // Sign the hash with BLS keypair
@@ -861,9 +861,12 @@ class EthrDIDModule extends AbstractDIDModule {
 
     const pId = await registry.getPIdDualDID(identity40Bytes);
     const didFromPId = addressToDID(pId, networkName);
+
+    // Support Dual DID: Pass currentOwner (secp256) as oldOwner for hash consistency
     const hash = await this.createChangeOwnerWithPubkeyHash(
       didFromPId,
       checksummedNewOwner,
+      currentOwner,
     );
 
     const signature = await signWithBLSKeypair(hash, bbsKeypair);
@@ -871,7 +874,7 @@ class EthrDIDModule extends AbstractDIDModule {
     try {
       const tx = await txRegistry.changeOwnerWithPubkeyDualDID(
         identity40Bytes,
-        bbsAddress,
+        currentOwner,
         checksummedNewOwner,
         uncompressedPubkey,
         signature,
@@ -896,9 +899,10 @@ class EthrDIDModule extends AbstractDIDModule {
    * Create the EIP-712 hash for changing owner with public key
    * @param {string} did - DID string
    * @param {string} newOwnerAddress - New owner address
+   * @param {string} [oldOwner] - Original owner address for hashing (required for Dual DID consistency)
    * @returns {Promise<string>} EIP-712 hash
    */
-  async createChangeOwnerWithPubkeyHash(did, newOwnerAddress) {
+  async createChangeOwnerWithPubkeyHash(did, newOwnerAddress, oldOwner) {
     const { network, address: identityAddress } = parseDID(did);
     const networkName = network || this.defaultNetwork;
     const provider = this.#getProvider(networkName);
@@ -908,6 +912,7 @@ class EthrDIDModule extends AbstractDIDModule {
 
     return ethrDid.createChangeOwnerWithPubkeyHash(
       ethers.getAddress(newOwnerAddress),
+      oldOwner,
     );
   }
 
@@ -931,11 +936,13 @@ class EthrDIDModule extends AbstractDIDModule {
     const registry = new ethers.Contract(networkConfig.registry, EthereumDIDRegistry.abi, provider);
     const identity40Bytes = ethers.concat([parsed.secp256k1Address, parsed.bbsAddress]);
     const pId = await registry.getPIdDualDID(identity40Bytes);
+    const currentOwner = await registry.getOwnerDualDID(identity40Bytes);
 
     const didFromPId = `did:ethr:${networkName}:${pId}`;
     return this.createChangeOwnerWithPubkeyHash(
       didFromPId,
       ethers.getAddress(newOwnerAddress),
+      currentOwner,
     );
   }
 
@@ -1005,14 +1012,23 @@ class EthrDIDModule extends AbstractDIDModule {
             identity: identityArg, oldOwner, newOwner, publicKey, signature,
           } = decodedTx.args;
 
+          // Build message object
+          const message = {
+            identity: identityArg,
+            oldOwner,
+            newOwner,
+          };
+
+          // If identityArg is 40-byte raw identity (Dual DID), add pId for context
+          if (identityArg && identityArg.length === 82) {
+            const hash = ethers.keccak256(identityArg);
+            message.pId = ethers.getAddress(`0x${hash.slice(-40)}`);
+          }
+
           history.unshift({
             signature,
             publicKey,
-            message: {
-              identity: identityArg,
-              oldOwner,
-              newOwner,
-            },
+            message,
           });
         }
       } catch (e) {

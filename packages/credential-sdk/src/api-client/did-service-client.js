@@ -52,20 +52,16 @@ class DIDServiceClient extends AbstractApiClient {
     async getDIDOwnerHistory(did) {
         this._validateParams({ did }, ['did']);
 
-        // Parse DID to extract address
-        // Parse DID to extract identity address (pId for Dual DID)
-        const parseDIDComponents = (didString) => {
-            const parsed = parseDID(didString);
-            if (parsed.isDualAddress) {
-                const identity40Bytes = concat([parsed.secp256k1Address, parsed.bbsAddress]);
-                // Contract uses address(uint160(uint256(keccak256(identity))))
-                const hash = keccak256(identity40Bytes);
-                return getAddress('0x' + hash.slice(-40));
-            }
-            return parsed.address;
-        };
+        // Parse DID to extract identity components
+        const parsed = parseDID(did);
+        let identity = parsed.address;
+        let pId = null;
 
-        const identity = parseDIDComponents(did);
+        if (parsed.isDualAddress) {
+            identity = concat([parsed.secp256k1Address, parsed.bbsAddress]);
+            const hash = keccak256(identity);
+            pId = getAddress('0x' + hash.slice(-40));
+        }
 
         // If DID format is invalid, return empty array (no owner history available)
         if (!identity) {
@@ -108,13 +104,20 @@ class DIDServiceClient extends AbstractApiClient {
 
     /**
      * Original mock implementation moved to separate method
-     * @param {string} identity - Identity address
+     * @param {string} identity - Identity address or raw 40-byte identity
      * @returns {Promise<Array>} Mock history
      * @private
      */
     async _getMockDIDOwnerHistory(identity) {
         // Initialize WASM for BBS operations
         await initializeWasm();
+
+        // Detect if identity is a Dual DID (40 bytes hex string)
+        let pId = null;
+        if (identity && identity.length === 82) {
+            const hash = keccak256(identity);
+            pId = getAddress('0x' + hash.slice(-40));
+        }
 
         // Generate a chain of owners and sign the transitions
         // We use consistent IDs for deterministic mock data per DID
@@ -147,14 +150,20 @@ class DIDServiceClient extends AbstractApiClient {
             // Sign the hash with BLS keypair
             const signature = await signWithBLSKeypair(hash, transition.signer);
 
+            const message = {
+                identity,
+                oldOwner: transition.from,
+                newOwner: transition.to,
+            };
+
+            if (pId) {
+                message.pId = pId;
+            }
+
             history.push({
                 signature: `0x${Buffer.from(signature).toString('hex')}`,
                 publicKey: `0x${Buffer.from(transition.signer.publicKeyBuffer).toString('hex')}`,
-                message: {
-                    identity,
-                    oldOwner: transition.from,
-                    newOwner: transition.to
-                }
+                message,
             });
         }
 

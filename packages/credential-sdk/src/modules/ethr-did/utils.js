@@ -619,12 +619,18 @@ export function verifyBLSSignature(signature, hashToVerify, publicKey) {
  * @returns {string} EIP-712 hash
  */
 export function createChangeOwnerWithPubkeyHash(identity, oldOwner, newOwner, chainId = DEFAULT_CHAIN_ID, registryAddress = DEFAULT_REGISTRY_ADDRESS) {
+  let normalizedIdentity = identity;
+  if (identity && identity.length === 82) {
+    const hash = keccak256(identity);
+    normalizedIdentity = getAddress(`0x${hash.slice(-40)}`);
+  }
+
   const coder = AbiCoder.defaultAbiCoder();
   const typeHash = keccak256(toUtf8Bytes('ChangeOwnerWithPubkey(address identity,address oldOwner,address newOwner)'));
   const structHash = keccak256(
     coder.encode(
       ['bytes32', 'address', 'address', 'address'],
-      [typeHash, identity, oldOwner, newOwner],
+      [typeHash, normalizedIdentity, oldOwner, newOwner],
     ),
   );
 

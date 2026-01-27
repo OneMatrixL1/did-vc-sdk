@@ -4,7 +4,7 @@ import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import { DIDServiceClient } from '../src/api-client';
 import { EthrDIDModule } from '../src/modules/ethr-did';
 import { Secp256k1Keypair } from '../src/keypairs';
-import { verifyBLSSignature, publicKeyToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, DEFAULT_REGISTRY_ADDRESS, keypairToAddress } from '../src/modules/ethr-did/utils';
+import { verifyBLSSignature, publicKeyToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, DEFAULT_REGISTRY_ADDRESS, keypairToAddress, parseDID } from '../src/modules/ethr-did/utils';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
 import { getUncompressedG2PublicKey } from '../src/modules/ethr-did/bbs-uncompressed';
 
@@ -14,7 +14,7 @@ const networkConfig = {
     rpcUrl: process.env.ETHR_NETWORK_RPC_URL,
     registry:
         process.env.ETHR_REGISTRY_ADDRESS
-        || '0x715ec007e19210272e0fBBaa73964227A4454dee', // registry default
+        || '0x4eb3B58d215059e3CEEe90bb100E8d9e8cc5Cb81', // registry default
 };
 
 /**
@@ -22,7 +22,7 @@ const networkConfig = {
  * ------
  * ETHR_PRIVATE_KEY=0x... \
  * ETHR_NETWORK_RPC_URL=https://rpc.vietcha.in \
- * ETHR_REGISTRY_ADDRESS=0x715ec007e19210272e0fBBaa73964227A4454dee \
+ * ETHR_REGISTRY_ADDRESS=0x4eb3B58d215059e3CEEe90bb100E8d9e8cc5Cb81 \
  * yarn jest tests/did-owner-history.test.js
  */
 
@@ -116,11 +116,14 @@ describe('DIDServiceClient Owner History Verification', () => {
                 expect(record.message.oldOwner).toBe(prevRecord.message.newOwner);
             }
 
-            // Identity in mock history for Dual DID should be pId
-            expect(record.message.identity.toLowerCase()).toBe(pId.toLowerCase());
+            // Identity in mock history for Dual DID should be 40 bytes
+            const parsed = parseDID(dualDID);
+            const identity40Bytes = concat([parsed.secp256k1Address, parsed.bbsAddress]);
+            expect(record.message.identity.toLowerCase()).toBe(identity40Bytes.toLowerCase());
+            expect(record.message.pId.toLowerCase()).toBe(pId.toLowerCase());
 
             const hash = createChangeOwnerWithPubkeyHash(
-                record.message.identity,
+                record.message.pId || record.message.identity,
                 record.message.oldOwner,
                 record.message.newOwner,
                 DEFAULT_CHAIN_ID,
@@ -138,7 +141,7 @@ describe('DIDServiceClient Owner History Verification', () => {
         }
     });
 
-    test.skip('initializes with provider and verifies 3 on-chain transitions', async () => {
+    test('initializes with provider and verifies 3 on-chain transitions', async () => {
         if (!networkConfig.rpcUrl || !process.env.ETHR_PRIVATE_KEY) {
             console.warn('Skipping on-chain test: ETHR_NETWORK_RPC_URL or ETHR_PRIVATE_KEY not set');
             return;
@@ -237,10 +240,11 @@ describe('DIDServiceClient Owner History Verification', () => {
         console.log(`Created Dual DID for integration test: ${dualDID}`);
 
         const expectedHistory = [];
+        let currentOwnerKeypair = gasPayerKeypair;
         let currentBBSKeypair = secondaryBBSKeypair;
 
-        // Perform 2 transitions for Dual DID
-        for (let i = 1; i <= 2; i++) {
+        // Perform 3 transitions for Dual DID
+        for (let i = 1; i <= 3; i++) {
             const nextBBSKeypair = Bls12381BBSKeyPairDock2023.generate({ id: `dual-owner-${i}` });
             const nextOwnerAddress = keypairToAddress(nextBBSKeypair);
 
@@ -249,7 +253,7 @@ describe('DIDServiceClient Owner History Verification', () => {
             const receipt = await module.changeOwnerWithPubkeyDualDID(
                 dualDID,
                 nextOwnerAddress,
-                gasPayerKeypair,
+                currentOwnerKeypair,
                 currentBBSKeypair,
                 gasPayerKeypair, // Pass gasPayerKeypair as initial secpKeypair
             );
@@ -257,11 +261,12 @@ describe('DIDServiceClient Owner History Verification', () => {
 
             const uncompressedPubkey = getUncompressedG2PublicKey(currentBBSKeypair.publicKeyBuffer);
             expectedHistory.push({
-                oldOwner: keypairToAddress(currentBBSKeypair),
+                oldOwner: keypairToAddress(currentOwnerKeypair),
                 newOwner: nextOwnerAddress,
                 publicKey: `0x${Buffer.from(uncompressedPubkey).toString('hex')}`
             });
 
+            currentOwnerKeypair = nextBBSKeypair;
             currentBBSKeypair = nextBBSKeypair;
         }
 
@@ -270,24 +275,28 @@ describe('DIDServiceClient Owner History Verification', () => {
         console.log(`Fetched on-chain history for ${dualDID}:`, JSON.stringify(history, null, 2));
 
         // Verify the history
-        expect(history.length).toBe(2);
+        expect(history.length).toBe(3);
         const chainId = (await provider.getNetwork()).chainId;
 
         for (const [i, record] of history.entries()) {
             const expected = expectedHistory[i];
 
             // Verify message content matches expectations
-            // For Dual DID, the identity in the message should be the pId (hash of 40 bytes)
+            // For Dual DID, identity is 40 bytes, pId is the address
             const pId = getPId(dualDID);
+            const parsed = parseDID(dualDID);
+            const identity40Bytes = concat([parsed.secp256k1Address, parsed.bbsAddress]);
 
-            expect(record.message.identity.toLowerCase()).toBe(pId.toLowerCase());
+            expect(record.message.identity.toLowerCase()).toBe(identity40Bytes.toLowerCase());
+            expect(record.message.pId.toLowerCase()).toBe(pId.toLowerCase());
+            
             expect(record.message.oldOwner.toLowerCase()).toBe(expected.oldOwner.toLowerCase());
             expect(record.message.newOwner.toLowerCase()).toBe(expected.newOwner.toLowerCase());
             expect(record.publicKey.toLowerCase()).toBe(expected.publicKey.toLowerCase());
 
             // Verify BLS Signature
             const hash = createChangeOwnerWithPubkeyHash(
-                record.message.identity,
+                record.message.pId || record.message.identity,
                 record.message.oldOwner,
                 record.message.newOwner,
                 Number(chainId),

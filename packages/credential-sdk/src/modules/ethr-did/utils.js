@@ -7,6 +7,8 @@ import { keccak256, getBytes, getAddress, hexlify, isAddress, computeAddress, Js
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
 import { getUncompressedG2PublicKey } from './bbs-uncompressed';
 
+import { DEFAULT_REGISTRY_ADDRESS } from '../../vc/constants';
+
 /**
  * Default key ID fragment for BBS keys in ethr DIDs
  * Used when creating key documents and authorizing BBS keys
@@ -17,7 +19,6 @@ export const ETHR_BBS_KEY_ID = '#keys-bbs';
  * Default chain ID and registry address for DID operations
  */
 export const DEFAULT_CHAIN_ID = 1337;
-export const DEFAULT_REGISTRY_ADDRESS = '0x8697547b3b82327B70A90C6248662EC083ad5A62';
 
 /**
  * Convert private key to hex string

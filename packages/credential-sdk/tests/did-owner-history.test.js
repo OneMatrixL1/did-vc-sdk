@@ -4,7 +4,8 @@ import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import { DIDServiceClient } from '../src/api-client';
 import { EthrDIDModule } from '../src/modules/ethr-did';
 import { Secp256k1Keypair } from '../src/keypairs';
-import { verifyBLSSignature, publicKeyToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, DEFAULT_REGISTRY_ADDRESS, keypairToAddress, parseDID } from '../src/modules/ethr-did/utils';
+import { verifyBLSSignature, publicKeyToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, keypairToAddress, parseDID } from '../src/modules/ethr-did/utils';
+import { DEFAULT_REGISTRY_ADDRESS } from '../src/vc/constants';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
 import { getUncompressedG2PublicKey } from '../src/modules/ethr-did/bbs-uncompressed';
 
@@ -14,7 +15,7 @@ const networkConfig = {
     rpcUrl: process.env.ETHR_NETWORK_RPC_URL,
     registry:
         process.env.ETHR_REGISTRY_ADDRESS
-        || '0x4eb3B58d215059e3CEEe90bb100E8d9e8cc5Cb81', // registry default
+        || DEFAULT_REGISTRY_ADDRESS, // registry default
 };
 
 /**

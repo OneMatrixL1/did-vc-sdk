@@ -34,6 +34,7 @@ import {
   verifyCredential,
   Presentation,
   VerifiablePresentation,
+  DEFAULT_REGISTRY_ADDRESS,
 } from '../src/vc';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
 import { Secp256k1Keypair } from '../src/keypairs';
@@ -51,7 +52,7 @@ const networkConfig = SKIP_INTEGRATION
     rpcUrl: process.env.ETHR_NETWORK_RPC_URL,
     registry:
       process.env.ETHR_REGISTRY_ADDRESS
-      || '0xF0889fb2473F91c068178870ae2e1A0408059A03',
+      || DEFAULT_REGISTRY_ADDRESS,
   };
 
 // Context URLs

@@ -1,13 +1,15 @@
 import jsonld from 'jsonld';
 import { JsonWebKey } from '@transmute/json-web-signature';
 import defaultDocumentLoader from './document-loader';
+import { concat } from 'ethers';
 import {
   verifyBLSSignature,
   publicKeyToAddress,
   createChangeOwnerWithPubkeyHash,
   DEFAULT_CHAIN_ID,
-  DEFAULT_REGISTRY_ADDRESS,
+  parseDID,
 } from '../modules/ethr-did/utils';
+import { DEFAULT_REGISTRY_ADDRESS } from './constants';
 
 import {
   EcdsaSecp256k1VerKeyName,
@@ -219,9 +221,11 @@ export async function verifyDIDOwnerProof(history, identityDID) {
   }
 
   if (identityDID && identityDID.startsWith('did:ethr:')) {
-    const parts = identityDID.split(':');
-    let identity = parts[parts.length - 1];
-    if (!identity.startsWith('0x')) identity = `0x${identity}`;
+    const parsed = parseDID(identityDID);
+    let identity = parsed.address;
+    if (parsed.isDualAddress) {
+      identity = concat([parsed.secp256k1Address, parsed.bbsAddress]);
+    }
 
     for (let i = 0; i < history.length; i++) {
       const record = history[i];

@@ -1,7 +1,8 @@
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import AbstractApiClient from './abstract';
 import Bls12381BBSKeyPairDock2023 from '../vc/crypto/Bls12381BBSKeyPairDock2023';
-import { keypairToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, DEFAULT_REGISTRY_ADDRESS, signWithBLSKeypair, parseDID } from '../modules/ethr-did/utils';
+import { keypairToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, signWithBLSKeypair, parseDID } from '../modules/ethr-did/utils';
+import { DEFAULT_REGISTRY_ADDRESS } from '../vc/constants';
 import { concat, keccak256, getAddress } from 'ethers';
 import EthrDIDModule from '../modules/ethr-did/module';
 

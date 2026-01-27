@@ -66,6 +66,7 @@ export default withExtendedStaticProperties(
               '@type': '@id',
               '@container': '@graph',
             },
+            publicKeyBase58: 'sec:publicKeyBase58',
           },
           url,
         ],

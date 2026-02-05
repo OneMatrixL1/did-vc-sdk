@@ -39,6 +39,8 @@
     "@digitalcredentials/vc-status-list": "^9.0.0",
     "@docknetwork/crypto-wasm-ts": "^0.63.0",
     "@juanelas/base64": "^1.1.5",
+    "asn1js": "^3.0.5",
+    "pkijs": "^3.0.10",
     "@sphereon/ssi-sdk-ext.did-resolver-jwk": "^0.26.0",
     "@stablelib/ed25519": "^1.0.0",
     "@transmute/json-web-signature": "^0.7.0-unstable.82",

@@ -8,3 +8,5 @@ export * from './pattern-matcher';
 export * from './ident';
 export * from './error';
 export * from './assert';
+export * from './sod-verifier';
+export * from './dg-parser';

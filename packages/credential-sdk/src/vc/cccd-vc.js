@@ -30,10 +30,7 @@ class CCCDVerifiableCredential extends VerifiableCredential {
         const vc = new this(id);
 
         // 3. Set exact context and type as requested
-        vc.setContext([
-            'https://www.w3.org/ns/credentials/v2',
-            'https://cccd.gov.vn/credentials/v1'
-        ]);
+        vc.addContext('https://cccd.gov.vn/credentials/v1');
         vc.type = ['VerifiableCredential', 'CCCDCredential'];
 
         // 4. Set requested issuer and dates

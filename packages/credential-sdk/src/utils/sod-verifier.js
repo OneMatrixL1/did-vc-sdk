@@ -239,50 +239,43 @@ export class SODVerifier {
 
         // Browser/Fallback logic with elliptic
         let ec;
-        if (curveOID === "1.3.36.3.3.2.8.1.1.11") { // Brainpool P-256r1
+        if (curveOID === "1.3.36.3.3.2.8.1.1.7") { // Brainpool P-256r1
             ec = new ecModule.ec(new ecModule.curves.PresetCurve({
                 type: 'short',
                 p: 'A9FB57DBA1EEA9BC3E660A909D838D726E3BF623D52620282013481D1F6E5377',
                 a: '7D5A0975FC2C3057EEF67530417AFFE7FB8055C126DC5C6CE94A4B44F330B5D9',
-                b: '2664EFA05962C2226214E1312369524D134EEDF1769632051A56C2A029415724',
-                n: 'A9FB57DBA1EEA9BC3E660A909D838D718C397AA3B561A6F7901E0E82974473D1',
+                b: '26DC5C6CE94A4B44F330B5D9BBD77CBF958416295CF7E1CE6BCCDC18FF8C07B6',
+                n: 'A9FB57DBA1EEA9BC3E660A909D838D718C397AA3B561A6F7901E0E82974856A7',
                 hash: hashAlg.toLowerCase(),
                 gRed: false,
                 g: [
-                    '8BD2AEB9CB7E57CB2C4B482FFC81B7AFB9DE27E1E3BD23C23A4453BD9AD32284',
-                    '1471165A337470E45021203E04279F18F42B1D963F276F431784ACCAC3C97662'
+                    '8BD2AEB9CB7E57CB2C4B482FFC81B7AFB9DE27E1E3BD23C23A4453BD9ACE3262',
+                    '547EF835C3DAC4FD97F8461A14611DC9C27745132DED8E545C1D54C72F046997'
                 ]
             }));
-        } else if (curveOID === "1.3.36.3.3.2.8.1.1.13") { // Brainpool P-384r1
+        } else if (curveOID === "1.3.36.3.3.2.8.1.1.11") { // Brainpool P-384r1
             ec = new ecModule.ec(new ecModule.curves.PresetCurve({
                 type: 'short',
-                p: '8CB91E82A3386D280F5D6F7E50E641DF152F7109ED5456B412B1DA197FB71123ACD4A4527F31DDA583CDC478A6CA1F11',
-                a: '7BC382C63D8C150C3C72080ACE05AFA0C2BEA28E4FB22787139165EFBA91F90F8AA5814A503AD4EB04B8C7D6A8696F28',
-                b: '04A8C31D672472919AD146903F7499A523D5928CC996C2AC652BE865343E4249A240A7D8119CD20DB45C6CDEBE4A7513',
-                n: '8CB91E82A3386D280F5D6F7E50E641DF152F7109ED5456B412B1DA197FB711234473E67DEC14B57186FD0656E6688CD1',
+                p: '8CB91E82A3386D280F5D6F7E50E641DF152F7109ED5456B412B1DA197FB71123ACD3A729901D1A71874700133107EC53',
+                a: '7BC382C63D8C150C3C72080ACE05AFA0C2BEA28E4FB22787139165EFBA91F90F8AA5814A503AD4EB04A8C7DD22CE2826',
+                b: '04A8C7DD22CE28268B39B55416F0447C2FB77DE107DCD2A62E880EA53EEB62D57CB4390295DBC9943AB78696FA504C11',
+                n: '8CB91E82A3386D280F5D6F7E50E641DF152F7109ED5456B31F166E6CAC0425A7CF3AB6AF6B7FC3103B883202E9046565',
                 hash: hashAlg.toLowerCase(),
                 gRed: false,
                 g: [
-                    '1D1C64F140D081B74C907BA94F4B8A5EE6DEC22126D0F544A94BE9422F080FBA75EA6B1E8DB8128DC4A6570624BE3344',
-                    '2578E8981BEA307849B31D333909778D4D476602055627685D77EF69FA200B0265B77DBF0B46059AD7F8889146594C10'
+                    '1D1C64F068CF45FFA2A63A81B7C13F6B8847A3E77EF14FE3DB7FCAFE0CBD10E8E826E03436D646AAEF87B2E247D4AF1E',
+                    '8ABE1D7520F9C2A45CB1EB8E95CFD55262B70B29FEEC5864E19C054FF99129280E4646217791811142820341263C5315'
                 ]
             }));
         } else {
             ec = new ecModule.ec('p256');
         }
 
-        // Extract raw public key from SPKI for elliptic
-        let publicKey = publicKeyDer;
-        try {
-            const asn1 = asn1js.fromBER(publicKeyDer);
-            const spki = asn1.result;
-            const subjectPublicKey = spki.valueBlock.value[1]; // BIT STRING
-            publicKey = Buffer.from(subjectPublicKey.valueBlock.valueHex);
-        } catch (e) {
-            console.warn('Failed to extract raw public key from SPKI, trying as is');
-        }
+        const publicKey = this.extractECPointFromSPKI(Buffer.from(publicKeyDer));
+        const pubHex = Buffer.from(publicKey).toString("hex");
 
-        const key = ec.keyFromPublic(publicKey);
+        const key = ec.keyFromPublic(pubHex, 'hex');
+
         const md = hashAlg === 'SHA384' ? forge.md.sha384.create() : forge.md.sha256.create();
         md.update(data.toString('binary'), 'binary');
         const hashHex = md.digest().toHex();
@@ -312,5 +305,46 @@ export class SODVerifier {
             cscaPublicKeyDer,
             "" // Curve OID will be detected inside verifySignatureLowLevel if needed
         );
+    }
+
+    /**
+     * Extract raw uncompressed EC public key (04||X||Y) from SPKI DER
+     * @param {Uint8Array|Buffer} spkiDer
+     * @returns {Uint8Array}
+     */
+    static extractECPointFromSPKI(spkiDer) {
+        // đảm bảo truyền đúng ArrayBuffer cho asn1js
+        const buf = spkiDer.buffer
+            ? spkiDer.buffer.slice(spkiDer.byteOffset, spkiDer.byteOffset + spkiDer.byteLength)
+            : spkiDer;
+
+        const asn1 = asn1js.fromBER(buf);
+        if (asn1.offset === -1) {
+            throw new Error("Invalid ASN.1 DER");
+        }
+
+        const spki = asn1.result;
+
+        // SubjectPublicKeyInfo ::= SEQUENCE { algId, subjectPublicKey BIT STRING }
+        const subjectPublicKey = spki.valueBlock.value[1];
+
+        if (subjectPublicKey.idBlock.tagNumber !== 3) {
+            throw new Error("Not a BIT STRING");
+        }
+
+        // valueHex = [unusedBits(1 byte)] || [EC point]
+        let raw = new Uint8Array(subjectPublicKey.valueBlock.valueHex);
+
+        // strip unused-bits byte (must be 0x00)
+        if (raw[0] === 0x00) {
+            raw = raw.slice(1);
+        }
+
+        // sanity check: uncompressed only
+        if (raw[0] !== 0x04) {
+            throw new Error("Only uncompressed EC points supported");
+        }
+
+        return raw; // 04 || X || Y
     }
 }

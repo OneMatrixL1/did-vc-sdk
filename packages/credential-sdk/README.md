@@ -28,69 +28,127 @@ Or via yarn:
 yarn add @docknetwork/credential-sdk
 ```
 
+## Quick Start
+
+### 1. Initialize DID Module
+
+Create an instance of `EthrDIDModule` to manage Ethereum-based DIDs.
+
+```javascript
+import { EthrDIDModule } from '@docknetwork/credential-sdk/modules/ethr-did';
+
+const ethrDIDModule = new EthrDIDModule({
+  networks: [
+    {
+      name: 'sepolia',
+      rpcUrl: 'https://rpc.sepolia.org',
+      registry: '0xdcaad4d2a90c9578afe73211c1d0309990520f99'
+    }
+  ],
+  defaultNetwork: 'sepolia'
+});
+```
+
+### 2. Create a DID
+
+Generate a new DID using a `Secp256k1Keypair`.
+
+```javascript
+import { Secp256k1Keypair } from '@docknetwork/credential-sdk/keypairs';
+
+const keypair = Secp256k1Keypair.random();
+const did = await ethrDIDModule.createNewDID(keypair);
+console.log(`Created DID: ${did}`);
+```
+
+### 3. Issue a Verifiable Credential
+
+Sign a credential using an issuer's key and DID.
+
+```javascript
+import { issueCredential } from '@docknetwork/credential-sdk/vc';
+
+const issuerKeyDoc = {
+  id: `${did}#keys-1`,
+  controller: did,
+  type: 'EcdsaSecp256k1VerificationKey2019',
+  keypair: keypair,
+};
+
+const credential = await issueCredential(issuerKeyDoc, {
+  '@context': ['https://www.w3.org/2018/credentials/v1'],
+  type: ['VerifiableCredential'],
+  issuer: did,
+  issuanceDate: new Date().toISOString(),
+  credentialSubject: {
+    id: 'did:example:holder',
+    degree: 'Bachelor of Science'
+  }
+});
+```
+
+### 4. Verify a Credential
+
+Check the validity and signature of a credential.
+
+```javascript
+import { verifyCredential } from '@docknetwork/credential-sdk/vc';
+
+const result = await verifyCredential(credential);
+console.log('Verified:', result.verified);
+```
+
 ## Documentation
 
-Detailed documentation and API reference are provided at the [Dock Network Documentation](https://docs.dock.io) website. Please refer to this comprehensive resource for a deeper understanding of each module, its methods, and additional example codes.
+Detailed documentation and API reference:
+- [BBS+ Selective Disclosure](./docs/bbs-selective-disclosure.md) - Selective disclosure with BBS+ signatures.
+- [Optimistic DID Resolution](./docs/optimistic-did-resolution.md) - High-performance local-first DID resolution.
+- [DID Owner Proof](./docs/did-owner-proof.md) - Cryptographic history proofs for off-chain resolution.
+- [Dock Network Documentation](https://docs.dock.io) - Comprehensive resource for the Dock ecosystem.
 
-## Contribution
+## Core Data Structures
 
-Contributions to the @docknetwork/credential-sdk are welcome. Please feel free to open issues or submit pull requests to improve the SDK or add new features.
-
-## Types Overview
-
-The Credential SDK provides a flexible and extensible set of typed structures that facilitate working with complex data types. These types are designed to provide enhanced type safety, ensure consistent data handling, and simplify JSON and API integration. This includes support for versatile data representations such as Enums, Tuples, Strings, and Arrays, all of which come with utility methods for manipulation and comparison.
+The SDK uses a set of "Typed" structures to ensure type safety and consistent serialization across different platforms (e.g., Substrate, Ethereum, and Browser).
 
 ### Available Types
 
-- **TypedBytes**: Represents binary data as `Uint8Array`. It provides methods for conversion between base58, base64, and hexadecimal formats, facilitating seamless handling of raw bytes across different encodings.
+- **TypedBytes**: Binary data as `Uint8Array` with base58/base64/hex conversions.
+- **TypedString**: UTF-8 encoded string management.
+- **TypedEnum**: Extensible enumeration types for complex state management.
+- **TypedStruct**: Dictionary-like data with strict key/type constraints.
+- **TypedTuple**: Fixed-size collections with ordered type checks.
 
-- **TypedString**: Represents string data. Internally managed as a UTF-8 encoded byte array to handle string manipulation efficiently. Provides methods for serialization, encoding conversions (base58, base64), and equality checks.
+See [Types Overview](#types-overview-1) for more details.
 
-- **TypedNumber**: Ensures reliable numerical handling by enforcing strict type checks during instantiation. It supports conversion from different input formats, including strings, and provides consistent JSON integration.
+## Contribution
 
-- **TypedEnum**: Facilitates the representation of enumeration types with extensible variants. This class ensures strict type conformity when dealing with multiple possible representations of a single conceptual state, making it ideal for state management in applications.
+Contributions are welcome! Please open issues or submit pull requests to improve the SDK.
 
-- **TypedArray**: Provides an abstraction over JavaScript arrays, allowing uniform handling of a single item type. It includes methods for array operations like `push`, `unshift`, and equality checks, ensuring that type integrity is maintained throughout all operations.
+## Types Overview
 
-- **TypedMap**: Extends the native `Map` structure to provide consistent key/value type management and conversion capabilities. This class supports serialization to JSON and deserialization from API responses, making it suitable for handling complex data structures in networked applications.
+<details>
+<summary>Click to expand full types list</summary>
 
-- **TypedSet**: Extends the native `Set` structure to provide consistent unique values management and conversion capabilities. This class supports serialization to JSON and deserialization from API responses, making it suitable for handling complex data structures in networked applications.
-
-- **TypedUUID**: Tailored specifically for handling UUIDs, this class includes validation checks, parsing methods, and generation of random UUIDs. It ensures that any UUID operations within the application are robust and compliant with UUID standards.
-
-- **TypedStruct**: Represents structured, dictionary-like data with predefined keys and types. This class facilitates robust data manipulation by enforcing type constraints on each key and provides seamless JSON integration for serialization/deserialization.
-
-- **TypedTuple**: Enforces a fixed-size collection of elements, where each element has a specified type. This is essential for maintaining order and type checks in tuple-based data structures, ensuring that the data remains consistent across different parts of an application.
-
-- **TypedNull**: Placeholder type that can be used when an empty value is expected.
+- **TypedNumber**: Strict numerical handling.
+- **TypedArray**: Uniform handling of a single item type.
+- **TypedMap**: Consistent key/value type management.
+- **TypedSet**: Unique values management.
+- **TypedUUID**: Robust UUID generation and validation.
+- **TypedNull**: Placeholder for empty values.
 
 ### Utility Mixins
 
-- **anyOf**: Creates a type that can be constructed from any of the provided types by attempting them in sequence until one succeeds or all fail, ensuring flexible and ordered type construction.
+- **anyOf**: Ordered type construction from multiple types.
+- **option**: Graceful handling of missing/null data.
+- **sized**: Enforces specific data sizes.
+- **withBase**: Adds `from`, `toJSON`, and equality checks.
+- **withEq**: Deep comparison for complex objects.
+- **withQualifier**: Support for prefixed strings (like DIDs).
+</details>
 
-- **option**: Extends a class to handle optional values by allowing `null` instead of throwing errors when encountering `null` or `None`, enabling graceful handling of missing data.
+## License
 
-- **sized**: Enforces that instances of a class maintain a specific size, as defined by the `Size` property, ensuring consistent and valid data structures through size validation checks during construction and method calls.
-
-- **withBase**: A foundational mixin that adds basic methods like `from`, `toJSON`, and equality checks to a class.
-
-- **withCatchNull**: Ensures that `from` and `to` methods gracefully handle `null` or undefined values, safeguarding against unexpected errors.
-
-- **withEq**: Provides enhanced equality checking, allowing deep comparison among complex objects.
-
-- **withFrom**: Facilitates custom instantiation logic for classes, particularly useful when dealing with various input forms that require specialized initialization.
-
-- **option**: Allows to pass `null` to `from` method returning `null` in this case.
-
-- **withNullIfNotAVariant**: A class decorator for types extending `TypedEnum`. It ensures that instantiation from JSON or API data returns `null` if the provided value doesn't match any defined variant type. This mixin helps enforce strict type conformity.
-
-- **withProp**: Extends classes derived from `TypedStruct` or `TypedEnum` by adding or overriding properties. It facilitates dynamic property management, allowing for seamless integration of new fields or modifications without altering base classes.
-
-- **withProps**: Extends classes derived from `TypedStruct` or `TypedEnum` by adding or overriding properties. It facilitates dynamic property management, allowing for seamless integration of new fields or modifications without altering base classes.
-
-- **withQualifier**: Adds functionality for dealing with qualified strings, such as those used in decentralized identifiers (DIDs). This mixin supports operations involving strings with specific prefixes or encoding requirements.
-
-- **withoutProp**: Complements `withProp` by removing properties from classes that extend `TypedStruct` or `TypedEnum`. It is useful for deprecating or cleaning up obsolete properties.
+MIT License. See [LICENSE](./LICENSE) for details.
 
 ## License
 

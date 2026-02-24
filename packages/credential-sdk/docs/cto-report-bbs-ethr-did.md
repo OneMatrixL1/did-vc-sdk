@@ -550,7 +550,7 @@ tamperedVP.proof.publicKeyBase58 = attackerPublicKey;
 ### Example: BBS Selective Disclosure
 
 ```javascript
-import { Presentation } from '@truvera/credential-sdk/vc/presentation';
+import { Presentation } from '@docknetwork/credential-sdk/vc/presentation';
 
 // Create presentation with selective disclosure
 const presentation = new Presentation();
@@ -691,11 +691,11 @@ assertionMethod: ["...#controller", "...#keys-bbs"]  // Both keys
 
 ```javascript
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import { EthrDIDModule, createDualDID, generateDefaultDocument } from '@truvera/credential-sdk/modules/ethr-did';
-import { issueCredential } from '@truvera/credential-sdk/vc';
-import Bls12381BBSKeyPairDock2023 from '@truvera/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
-import { Secp256k1Keypair } from '@truvera/credential-sdk/keypairs';
-import { ETHR_BBS_KEY_ID } from '@truvera/credential-sdk/modules/ethr-did/utils';
+import { EthrDIDModule, createDualDID, generateDefaultDocument } from '@docknetwork/credential-sdk/modules/ethr-did';
+import { issueCredential } from '@docknetwork/credential-sdk/vc';
+import Bls12381BBSKeyPairDock2023 from '@docknetwork/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
+import { Secp256k1Keypair } from '@docknetwork/credential-sdk/keypairs';
+import { ETHR_BBS_KEY_ID } from '@docknetwork/credential-sdk/modules/ethr-did/utils';
 
 // Initialize
 await initializeWasm();
@@ -793,9 +793,9 @@ In this approach, the ethr DID is derived directly from the BBS public key. The 
 
 ```javascript
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import { issueCredential } from '@truvera/credential-sdk/vc';
-import Bls12381BBSKeyPairDock2023 from '@truvera/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
-import { keypairToAddress, addressToDID, ETHR_BBS_KEY_ID } from '@truvera/credential-sdk/modules/ethr-did/utils';
+import { issueCredential } from '@docknetwork/credential-sdk/vc';
+import Bls12381BBSKeyPairDock2023 from '@docknetwork/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
+import { keypairToAddress, addressToDID, ETHR_BBS_KEY_ID } from '@docknetwork/credential-sdk/modules/ethr-did/utils';
 
 // Initialize WASM (required for BBS operations)
 await initializeWasm();
@@ -850,9 +850,9 @@ In this approach, the issuer has an existing secp256k1-based ethr DID and wants 
 
 ```javascript
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import { issueCredential } from '@truvera/credential-sdk/vc';
-import Bls12381BBSKeyPairDock2023 from '@truvera/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
-import { Secp256k1Keypair } from '@truvera/credential-sdk/keypairs';
+import { issueCredential } from '@docknetwork/credential-sdk/vc';
+import Bls12381BBSKeyPairDock2023 from '@docknetwork/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
+import { Secp256k1Keypair } from '@docknetwork/credential-sdk/keypairs';
 import b58 from 'bs58';
 import { ethers } from 'ethers';
 
@@ -934,9 +934,9 @@ const signedCredential = await issueCredential(keyDoc, credential);
 ### Verifying with Optimistic Resolution
 
 ```javascript
-import { verifyCredentialOptimistic } from '@truvera/credential-sdk/modules/ethr-did';
-import { createMemoryStorage } from '@truvera/credential-sdk/modules/ethr-did/storage';
-import EthrDIDModule from '@truvera/credential-sdk/modules/ethr-did';
+import { verifyCredentialOptimistic } from '@docknetwork/credential-sdk/modules/ethr-did';
+import { createMemoryStorage } from '@docknetwork/credential-sdk/modules/ethr-did/storage';
+import EthrDIDModule from '@docknetwork/credential-sdk/modules/ethr-did';
 
 // Initialize module
 const ethrModule = new EthrDIDModule({

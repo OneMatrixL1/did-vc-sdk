@@ -365,10 +365,10 @@ The `publicKeyBase58` field:
 
 ```javascript
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
-import { issueCredential } from '@truvera/credential-sdk/vc';
-import Bls12381BBSKeyPairDock2023 from '@truvera/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
-import { keypairToAddress, addressToDID } from '@truvera/credential-sdk/modules/ethr-did/utils';
-import { Bls12381BBS23DockVerKeyName } from '@truvera/credential-sdk/vc/crypto/constants';
+import { issueCredential } from '@docknetwork/credential-sdk/vc';
+import Bls12381BBSKeyPairDock2023 from '@docknetwork/credential-sdk/vc/crypto/Bls12381BBSKeyPairDock2023';
+import { keypairToAddress, addressToDID } from '@docknetwork/credential-sdk/modules/ethr-did/utils';
+import { Bls12381BBS23DockVerKeyName } from '@docknetwork/credential-sdk/vc/crypto/constants';
 
 // Initialize WASM
 await initializeWasm();
@@ -415,7 +415,7 @@ console.log(signedCredential.proof.publicKeyBase58); // BBS public key embedded
 ### Verifying a Credential
 
 ```javascript
-import { verifyCredential } from '@truvera/credential-sdk/vc';
+import { verifyCredential } from '@docknetwork/credential-sdk/vc';
 
 // The credential contains embedded publicKeyBase58
 const result = await verifyCredential(signedCredential);
@@ -435,7 +435,7 @@ if (result.verified) {
 ### Manual Address Verification
 
 ```javascript
-import { bbsPublicKeyToAddress } from '@truvera/credential-sdk/modules/ethr-did/utils';
+import { bbsPublicKeyToAddress } from '@docknetwork/credential-sdk/modules/ethr-did/utils';
 import b58 from 'bs58';
 
 // From a credential proof

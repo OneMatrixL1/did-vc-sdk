@@ -1,0 +1,34 @@
+{
+    "@context": {
+        "cccd": "https://cccd.gov.vn/credentials#",
+        "CCCDCredential": "cccd:CCCDCredential",
+        "dg1": "cccd:dg1",
+        "dg2": "cccd:dg2",
+        "dg13": "cccd:dg13",
+        "dg14": "cccd:dg14",
+        "dg15": "cccd:dg15",
+        "com": "cccd:com",
+        "ICAO9303SODSignature": {
+            "@id": "cccd:ICAO9303SODSignature",
+            "@context": {
+                "created": {
+                    "@id": "http://purl.org/dc/terms/created",
+                    "@type": "http://www.w3.org/2001/XMLSchema#dateTime"
+                },
+                "proofPurpose": {
+                    "@id": "https://w3id.org/security#proofPurpose",
+                    "@type": "@vocab"
+                },
+                "verificationMethod": {
+                    "@id": "https://w3id.org/security#verificationMethod",
+                    "@type": "@id"
+                },
+                "sod": "cccd:sod",
+                "dsCertificate": "cccd:dsCertificate",
+                "icaoVersion": "cccd:icaoVersion",
+                "proofVersion": "cccd:proofVersion",
+                "dgProfile": "cccd:dgProfile"
+            }
+        }
+    }
+}

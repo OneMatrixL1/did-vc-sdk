@@ -107,10 +107,15 @@ export async function issueCredentialWithBBS(issuerKeyDoc, unsignedCredential) {
  * Derives a credential with selective disclosure
  */
 export function deriveCredential(credential, revealFields, nonce) {
+  if (!credential) {
+    throw new Error('Credential is required for derivation');
+  }
+
   const presentation = new Presentation();
   presentation.addCredentialToPresent(credential);
   presentation.addAttributeToReveal(0, revealFields);
   const derivedCredentials = presentation.deriveCredentials({ nonce });
+
   return derivedCredentials[0];
 }
 

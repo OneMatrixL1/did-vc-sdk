@@ -17,8 +17,8 @@ export function getUncompressedG2PublicKey(publicKey) {
 
   if (keyBytes.length === 96) {
     // Decompress: 96 → 192 bytes
-    const point = bls.G2.ProjectivePoint.fromHex(keyBytes);
-    return point.toRawBytes(false);
+    const point = bls.G2.Point.fromHex(keyBytes);
+    return point.toBytes(false);
   }
 
   throw new Error(`Invalid BLS G2 public key length: ${keyBytes.length} bytes. Expected 96 or 192`);
@@ -38,10 +38,10 @@ export function compressG2PublicKey(uncompressedKey) {
 
   try {
     // Parse the uncompressed point
-    const point = bls.G2.ProjectivePoint.fromHex(uncompressedKey);
+    const point = bls.G2.Point.fromHex(uncompressedKey);
 
     // Convert to compressed format (96 bytes)
-    const compressedKey = point.toRawBytes(true); // true = compressed format
+    const compressedKey = point.toBytes(true); // true = compressed format
 
     if (compressedKey.length !== 96) {
       throw new Error(`Compression produced ${compressedKey.length} bytes, expected 96`);

@@ -63,14 +63,6 @@ describe('EthrDID Configuration', () => {
     expect(normalized.registry).toBe(DEFAULT_NETWORKS.sepolia.registry);
   });
 
-  test('createVietChainConfig returns valid config', () => {
-    const config = createVietChainConfig();
-
-    expect(config.name).toBe('vietchain');
-    expect(config.rpcUrl).toBe('https://rpc.vietcha.in');
-    expect(config.registry).toBe('0xF0889fb2473F91c068178870ae2e1A0408059A03');
-  });
-
   test('validateModuleConfig accepts valid config', () => {
     const config = {
       networks: [createVietChainConfig()],

@@ -1,3 +1,4 @@
 export * from './abstract';
 export * from './multi-api';
 export * from './ethr-did';
+export * from './vbsn-did';

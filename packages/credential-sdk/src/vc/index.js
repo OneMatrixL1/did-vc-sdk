@@ -29,6 +29,7 @@ export async function isVerifiedPresentation(presentation, params) {
 export { default as Presentation } from './presentation';
 export { default as VerifiableCredential } from './verifiable-credential';
 export { default as VerifiablePresentation } from './verifiable-presentation';
+export { default as CCCDVerifiableCredential } from './cccd-vc';
 export { default as StatusList2021Credential } from './status-list2021-credential';
 export { default as PrivateStatusList2021Credential } from './private-status-list2021-credential';
 export * from './credentials';

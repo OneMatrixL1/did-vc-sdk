@@ -1,4 +1,4 @@
-import cachedUris from './contexts';
+import cachedUris from './contexts.js';
 import Resolver from "../resolver/generic/resolver"; // eslint-disable-line
 import jsonFetch from '../utils/json-fetch';
 

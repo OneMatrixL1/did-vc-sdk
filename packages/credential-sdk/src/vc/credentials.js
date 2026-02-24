@@ -60,6 +60,7 @@ import {
   Bls12381BBS23SigDockSigName,
   Bls12381BBDT16MacDockName,
   Bls12381BBDT16MacProofDockName,
+  ICAO9303SODSignature,
 } from './crypto';
 import { signJWS } from './jws';
 import Bls12381BBDT16MACProofDock2024 from './crypto/Bls12381BBDT16MACProofDock2024';
@@ -393,6 +394,7 @@ export async function verifyCredential(
     new Bls12381PSSignatureProofDock2023(anoncredsParams),
     // Only BBDT16MACProof is present and not BBDT16MAC since those aren't verified by the following
     new Bls12381BBDT16MACProofDock2024(anoncredsParams),
+    new ICAO9303SODSignature(),
     ...suite,
   ];
 

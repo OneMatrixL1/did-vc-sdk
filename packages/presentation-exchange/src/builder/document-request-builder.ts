@@ -5,6 +5,7 @@ import type {
   DiscloseCondition,
   ZKPCondition,
   ProofSystem,
+  DisclosureMode,
 } from '../types/request.js';
 
 /**
@@ -16,6 +17,7 @@ export class DocumentRequestBuilder {
   private issuer?: string | string[];
   private name?: LocalizableString;
   private purpose?: LocalizableString;
+  private disclosureMode?: DisclosureMode;
   private conditions: DocumentConditionNode[] = [];
 
   constructor(docRequestID: string, docType: string | string[]) {
@@ -35,6 +37,11 @@ export class DocumentRequestBuilder {
 
   setPurpose(purpose: LocalizableString): this {
     this.purpose = purpose;
+    return this;
+  }
+
+  setDisclosureMode(mode: DisclosureMode): this {
+    this.disclosureMode = mode;
     return this;
   }
 
@@ -92,6 +99,7 @@ export class DocumentRequestBuilder {
       ...(this.issuer !== undefined && { issuer: this.issuer }),
       ...(this.name !== undefined && { name: this.name }),
       ...(this.purpose !== undefined && { purpose: this.purpose }),
+      ...(this.disclosureMode !== undefined && { disclosureMode: this.disclosureMode }),
       conditions: this.conditions,
     };
   }

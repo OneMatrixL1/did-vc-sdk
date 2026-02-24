@@ -73,7 +73,21 @@ function matchDocumentRequest(
       if (!allowedIssuers.includes(credIssuerId)) continue;
     }
 
-    // 3. Check field coverage
+    // 3. Full-document mode: skip field coverage entirely
+    if (request.disclosureMode === 'full') {
+      candidates.push({
+        credential: cred,
+        index: i,
+        disclosedFields: [],
+        missingFields: [],
+        satisfiableZKPs: [],
+        unsatisfiableZKPs: [],
+        fullyQualified: true,
+      });
+      continue;
+    }
+
+    // 4. Selective mode: check field coverage
     const { disclose, zkp } = extractConditions(request.conditions);
 
     // Get the subject object for field resolution

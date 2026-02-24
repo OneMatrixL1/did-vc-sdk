@@ -6,6 +6,7 @@ export type {
   DocumentRequestNode,
   LogicalRequestNode,
   DocumentRequest,
+  DisclosureMode,
   DocumentConditionNode,
   LogicalConditionNode,
   DiscloseCondition,

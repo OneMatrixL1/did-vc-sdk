@@ -34,6 +34,8 @@ export interface LogicalRequestNode {
   values: DocumentRequestNode[];
 }
 
+export type DisclosureMode = 'selective' | 'full';
+
 export interface DocumentRequest {
   type: 'DocumentRequest';
   docRequestID: string;
@@ -41,6 +43,12 @@ export interface DocumentRequest {
   issuer?: string | string[];
   name?: LocalizableString;
   purpose?: LocalizableString;
+  /**
+   * 'selective' (default) — only disclosed fields / ZKP proofs are included.
+   * 'full'                — entire credential is passed verbatim; conditions are ignored.
+   *                         Trusted-verifier enforcement will be layered on top in a future release.
+   */
+  disclosureMode?: DisclosureMode;
   conditions: DocumentConditionNode[];
 }
 

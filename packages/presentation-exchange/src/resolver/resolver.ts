@@ -76,15 +76,18 @@ export async function resolvePresentation(
       );
     }
 
-    // Determine which fields to disclose
-    const { disclose } = extractConditions(docReq.conditions);
-    const disclosedFields = disclose.map((d) => d.field);
-
     let presented: PresentedCredential;
-    if (options.deriveCredential) {
+    if (docReq.disclosureMode === 'full') {
+      // Pass the entire credential verbatim — no field filtering, no derivation
+      presented = credentialToFull(cred);
+    } else if (options.deriveCredential) {
+      const { disclose } = extractConditions(docReq.conditions);
+      const disclosedFields = disclose.map((d) => d.field);
       presented = await options.deriveCredential(cred, disclosedFields);
     } else {
-      presented = credentialToPresented(cred, disclosedFields);
+      const { disclose } = extractConditions(docReq.conditions);
+      const disclosedFields = disclose.map((d) => d.field);
+      presented = credentialToSelective(cred, disclosedFields);
     }
 
     const credIndex = presentedCredentials.length;
@@ -132,10 +135,46 @@ function collectDocumentRequests(
 }
 
 /**
- * Convert a MatchableCredential to a PresentedCredential,
- * selecting only the disclosed fields in credentialSubject.
+ * Pass the credential through verbatim — all fields, original proof intact.
+ * Used for disclosureMode === 'full'.
  */
-function credentialToPresented(
+function credentialToFull(cred: MatchableCredential): PresentedCredential {
+  const subject = Array.isArray(cred.credentialSubject)
+    ? { ...cred.credentialSubject[0] }
+    : { ...cred.credentialSubject };
+
+  const types = [...(cred.type as readonly string[])];
+  const issuer = typeof cred.issuer === 'string'
+    ? cred.issuer
+    : { ...cred.issuer };
+
+  const presented: PresentedCredential = {
+    type: types,
+    issuer,
+    credentialSubject: subject,
+  };
+
+  if (cred['@context']) {
+    presented['@context'] = [...(cred['@context'] as string[])];
+  }
+  if (cred.issuanceDate !== undefined) {
+    presented.issuanceDate = cred.issuanceDate as string;
+  }
+  if (cred.id !== undefined) {
+    presented.id = cred.id as string;
+  }
+  if (cred.proof !== undefined) {
+    presented.proof = cred.proof as PresentedCredential['proof'];
+  }
+
+  return presented;
+}
+
+/**
+ * Build a selectively-disclosed credential containing only the requested fields.
+ * Used for disclosureMode === 'selective' (default).
+ */
+function credentialToSelective(
   cred: MatchableCredential,
   disclosedFields: string[],
 ): PresentedCredential {
@@ -143,7 +182,6 @@ function credentialToPresented(
     ? cred.credentialSubject[0]
     : cred.credentialSubject;
 
-  // Build selective subject with only disclosed fields
   const selectiveSubject: Record<string, unknown> = {};
   if (subject.id !== undefined) {
     selectiveSubject.id = subject.id;
@@ -154,14 +192,9 @@ function credentialToPresented(
       { ...cred, credentialSubject: subject },
       fieldPath,
     );
-    if (found) {
-      // Extract the last segment to set on selectiveSubject
-      const segments = fieldPath.split('.');
-      const lastSeg = segments[segments.length - 1];
-      // Only extract from credentialSubject fields
-      if (fieldPath.startsWith('$.credentialSubject.')) {
-        selectiveSubject[lastSeg] = value;
-      }
+    if (found && fieldPath.startsWith('$.credentialSubject.')) {
+      const lastSeg = fieldPath.split('.').at(-1)!;
+      selectiveSubject[lastSeg] = value;
     }
   }
 

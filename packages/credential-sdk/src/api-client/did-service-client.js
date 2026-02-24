@@ -1,7 +1,9 @@
 import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import AbstractApiClient from './abstract';
 import Bls12381BBSKeyPairDock2023 from '../vc/crypto/Bls12381BBSKeyPairDock2023';
-import { keypairToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, DEFAULT_REGISTRY_ADDRESS, signWithBLSKeypair, parseDID } from '../modules/ethr-did/utils';
+import { keypairToAddress, createChangeOwnerWithPubkeyHash, DEFAULT_CHAIN_ID, signWithBLSKeypair, parseDID } from '../modules/ethr-did/utils';
+import { DEFAULT_REGISTRY_ADDRESS } from '../vc/constants';
+import { concat, keccak256, getAddress } from 'ethers';
 import EthrDIDModule from '../modules/ethr-did/module';
 
 // Default base URL for the API service
@@ -28,7 +30,7 @@ class DIDServiceClient extends AbstractApiClient {
     /**
      * Get DID owner history with signature and message
      * @param {string} did - The DID identifier
-     * @returns {Promise<Array<{signature: string, message: {identity: string, oldOwner: string, newOwner: string}}>>} 
+     * @returns {Promise<Array<{signature: string, message: {identity: string, oldOwner: string, newOwner: string}}>>}
      * Returns array of objects, each containing:
      * - signature: string - The cryptographic signature
      * - message: object with:
@@ -36,13 +38,13 @@ class DIDServiceClient extends AbstractApiClient {
      *   - oldOwner: string - Address (uint160) of the previous owner
      *   - newOwner: string - Address (uint160) of the new owner
      * Example: [
-     *   { 
-     *     signature: '0x123...', 
+     *   {
+     *     signature: '0x123...',
      *     publicKey: '0x456...',
-     *     message: { 
-     *       identity: '0x742d...', 
+     *     message: {
+     *       identity: '0x742d...',
      *       oldOwner: '0x0000...',
-     *       newOwner: '0xA1B2...' 
+     *       newOwner: '0xA1B2...'
      *     }
      *   },
      *   ...
@@ -51,29 +53,16 @@ class DIDServiceClient extends AbstractApiClient {
     async getDIDOwnerHistory(did) {
         this._validateParams({ did }, ['did']);
 
-        // Parse DID to extract address
-        // Expected format: did:ethr:network:address or did:ethr:address
-        const parseDIDAddress = (didString) => {
-            const parts = didString.split(':');
-            // Get the last part which should be the address
-            let address = parts[parts.length - 1];
+        // Parse DID to extract identity components
+        const parsed = parseDID(did);
+        let identity = parsed.address;
+        let pId = null;
 
-            // Normalize address - add 0x prefix if not present
-            if (!address.startsWith('0x')) {
-                address = '0x' + address;
-            }
-
-            // Validate it looks like an Ethereum address (with or without 0x prefix)
-            if (!address || !address.match(/^0x[a-fA-F0-9]{40}$/)) {
-                // Invalid format, return null instead of throwing error
-                console.warn(`Invalid DID format: unable to extract valid address from ${didString}`);
-                return null;
-            }
-
-            return address;
-        };
-
-        const identity = parseDIDAddress(did);
+        if (parsed.isDualAddress) {
+            identity = concat([parsed.secp256k1Address, parsed.bbsAddress]);
+            const hash = keccak256(identity);
+            pId = getAddress('0x' + hash.slice(-40));
+        }
 
         // If DID format is invalid, return empty array (no owner history available)
         if (!identity) {
@@ -116,13 +105,20 @@ class DIDServiceClient extends AbstractApiClient {
 
     /**
      * Original mock implementation moved to separate method
-     * @param {string} identity - Identity address
+     * @param {string} identity - Identity address or raw 40-byte identity
      * @returns {Promise<Array>} Mock history
      * @private
      */
     async _getMockDIDOwnerHistory(identity) {
         // Initialize WASM for BBS operations
         await initializeWasm();
+
+        // Detect if identity is a Dual DID (40 bytes hex string)
+        let pId = null;
+        if (identity && identity.length === 82) {
+            const hash = keccak256(identity);
+            pId = getAddress('0x' + hash.slice(-40));
+        }
 
         // Generate a chain of owners and sign the transitions
         // We use consistent IDs for deterministic mock data per DID
@@ -155,14 +151,20 @@ class DIDServiceClient extends AbstractApiClient {
             // Sign the hash with BLS keypair
             const signature = await signWithBLSKeypair(hash, transition.signer);
 
+            const message = {
+                identity,
+                oldOwner: transition.from,
+                newOwner: transition.to,
+            };
+
+            if (pId) {
+                message.pId = pId;
+            }
+
             history.push({
                 signature: `0x${Buffer.from(signature).toString('hex')}`,
                 publicKey: `0x${Buffer.from(transition.signer.publicKeyBuffer).toString('hex')}`,
-                message: {
-                    identity,
-                    oldOwner: transition.from,
-                    newOwner: transition.to
-                }
+                message,
             });
         }
 
@@ -172,4 +174,3 @@ class DIDServiceClient extends AbstractApiClient {
 }
 
 export default DIDServiceClient;
-

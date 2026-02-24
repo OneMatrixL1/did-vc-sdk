@@ -40,6 +40,7 @@ export default new Map([
   ['https://w3id.org/did/v0.11', didV1Context],
   ['https://www.w3.org/ns/did/v1', didV1Context],
   ['https://w3id.org/security/suites/ed25519-2020/v1', ed25519V1Context],
+  ['https://w3id.org/security/suites/secp256k1recovery-2020/v2', secContext],
   ['https://w3id.org/security/suites/jws-2020/v1', jws2020V1Context],
   // This is overridden because the URL is 404 now, likely because domain name change. But the status-list library still uses the old domain name
   ['https://w3id.org/vc/status-list/2021/v1', statusList21Context],

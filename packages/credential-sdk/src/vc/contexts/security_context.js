@@ -93,6 +93,7 @@ export default {
       proof: { '@id': 'sec:proof', '@type': '@id', '@container': '@graph' },
       proofPurpose: { '@id': 'sec:proofPurpose', '@type': '@vocab' },
       proofValue: 'sec:proofValue',
+      publicKeyBase58: 'sec:publicKeyBase58',
       referenceId: 'sec:referenceId',
       unwrappedKey: 'sec:unwrappedKey',
       verificationMethod: { '@id': 'sec:verificationMethod', '@type': '@id' },

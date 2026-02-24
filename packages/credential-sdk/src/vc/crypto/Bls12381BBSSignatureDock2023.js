@@ -121,7 +121,9 @@ export default class Bls12381BBSSignatureDock2023 extends DockCryptoSignature {
           ? didParts.bbsAddress
           : didParts.address;
 
-        if (derivedAddress.toLowerCase() === expectedAddress.toLowerCase()) {
+        const derivedAddr = derivedAddress.toLowerCase();
+        const expectedAddr = expectedAddress.toLowerCase();
+        if (derivedAddr === expectedAddr) {
           // Address-based: BBS key derives to DID's address - use recovery method
           return Bls12381BBSRecoveryMethod2023.fromProof(proof, didPart);
         }

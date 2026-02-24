@@ -3,6 +3,8 @@
  * @module ethr-did/config
  */
 
+import { DEFAULT_REGISTRY_ADDRESS } from '../../vc/constants';
+
 /**
  * Verified default network configurations for ethr DID
  * Only includes networks with verified registry deployments and working RPC URLs
@@ -24,7 +26,7 @@ export const DEFAULT_NETWORKS = {
     description: 'VietChain Network',
     rpcUrl: 'https://rpc.vietcha.in',
     chainId: 84005,
-    registry: '0xF0889fb2473F91c068178870ae2e1A0408059A03',
+    registry: DEFAULT_REGISTRY_ADDRESS,
   },
 };
 

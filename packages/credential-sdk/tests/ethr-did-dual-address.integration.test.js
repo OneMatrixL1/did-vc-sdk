@@ -28,7 +28,14 @@ import {
   generateDefaultDocument,
   ETHR_BBS_KEY_ID,
 } from '../src/modules/ethr-did/utils';
-import { issueCredential, verifyCredential } from '../src/vc';
+import { verifyPresentationOptimistic } from '../src/modules/ethr-did';
+import {
+  issueCredential,
+  verifyCredential,
+  Presentation,
+  VerifiablePresentation,
+  DEFAULT_REGISTRY_ADDRESS,
+} from '../src/vc';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
 import { Secp256k1Keypair } from '../src/keypairs';
 import { Bls12381BBS23DockVerKeyName } from '../src/vc/crypto/constants';
@@ -45,15 +52,24 @@ const networkConfig = SKIP_INTEGRATION
     rpcUrl: process.env.ETHR_NETWORK_RPC_URL,
     registry:
       process.env.ETHR_REGISTRY_ADDRESS
-      || '0xF0889fb2473F91c068178870ae2e1A0408059A03',
+      || DEFAULT_REGISTRY_ADDRESS,
   };
 
 // Context URLs
 const CREDENTIALS_V1_CONTEXT = 'https://www.w3.org/2018/credentials/v1';
-const BBS_V1_CONTEXT = 'https://ld.truvera.io/security/bbs/v1';
+const BBS_V1_CONTEXT = 'https://ld.truvera.io/security/bbs23/v1';
 
-// Enable mock fetch for context URLs
-mockFetch();
+// Enable mock fetch for context URLs only if skipping integration
+if (SKIP_INTEGRATION) {
+  mockFetch();
+}
+
+const TEST_CONTEXT = {
+  '@context': {
+    '@version': 1.1,
+    publicKeyBase58: 'https://ld.truvera.io/security#publicKeyBase58',
+  },
+};
 
 describe('Dual-Address ethr DIDs Integration', () => {
   let module;
@@ -355,6 +371,105 @@ describe('Dual-Address ethr DIDs Integration', () => {
 
       const result = await verifyCredential(signedCredential, { resolver });
       expect(result.verified).toBe(true);
+    });
+  });
+
+  describe('Verifiable Presentation Creation and Verification', () => {
+    let resolver;
+
+    beforeAll(() => {
+      resolver = {
+        supports: (id) => isEthrDID(id.split('#')[0]),
+        resolve: (id) => {
+          const didPart = id.split('#')[0];
+          // Use chainId 84005 for Vietchain
+          const doc = generateDefaultDocument(didPart, { chainId: 84005 });
+
+          if (id.includes('#')) {
+            const fragment = id.split('#')[1];
+            const vm = doc.verificationMethod.find(
+              (v) => v.id === id || v.id.endsWith(`#${fragment}`),
+            );
+            if (vm) {
+              return { '@context': doc['@context'], ...vm };
+            }
+          }
+          return doc;
+        },
+      };
+    });
+
+    test('creates and verifies VP with dual-address holder DID', async () => {
+      if (SKIP_INTEGRATION) {
+        console.log('Skipping integration tests - ETHR_NETWORK_RPC_URL not set');
+        return;
+      }
+
+      // 1. Issue a credential
+      const holderDID = 'did:ethr:vietchain:0x1234567890123456789012345678901234567890';
+      const credential = {
+        '@context': [CREDENTIALS_V1_CONTEXT, BBS_V1_CONTEXT],
+        type: ['VerifiableCredential'],
+        issuer: dualDID,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: {
+          id: holderDID,
+          name: 'Integration Test Subject',
+        },
+      };
+
+      const keyDoc = {
+        id: `${dualDID}${ETHR_BBS_KEY_ID}`,
+        controller: dualDID,
+        type: Bls12381BBS23DockVerKeyName,
+        keypair: bbsKeypair,
+      };
+
+      const signedCredential = await issueCredential(keyDoc, credential);
+
+      // 2. Derive credential (selective disclosure)
+      const presBuilder = new Presentation();
+      await presBuilder.addCredentialToPresent(signedCredential);
+      presBuilder.addAttributeToReveal(0, ['credentialSubject.id']);
+      const [derivedCred] = presBuilder.deriveCredentials({ nonce: 'test-nonce' });
+
+      // 3. Create and sign VP
+      const vp = new VerifiablePresentation(`urn:uuid:vp-${Date.now()}`);
+      vp.addContext(BBS_V1_CONTEXT);
+      vp.addContext(TEST_CONTEXT);
+      vp.setHolder(dualDID);
+      vp.addCredential(derivedCred);
+
+      const holderKeyDoc = {
+        id: `${dualDID}#controller`,
+        controller: dualDID,
+        type: 'EcdsaSecp256k1RecoveryMethod2020',
+        keypair: secp256k1Keypair,
+      };
+
+      await vp.sign(holderKeyDoc, 'test-challenge', 'test-domain', resolver);
+      const signedPresentation = vp.toJSON();
+
+      expect(signedPresentation.proof).toBeDefined();
+      expect(signedPresentation.proof.verificationMethod).toBe(holderKeyDoc.id);
+
+      console.log('Signed Presentation:', JSON.stringify(signedPresentation, null, 2));
+
+      // 4. Verify VP
+      const result = await verifyPresentationOptimistic(signedPresentation, {
+        module,
+        challenge: 'test-challenge',
+        domain: 'test-domain',
+      });
+
+      expect(result.verified).toBe(true);
+      expect(result.presentationResult.verified).toBe(true);
+      expect(result.credentialResults[0].verified).toBe(true);
+
+      // Verify selective disclosure
+      const vcFromVP = signedPresentation.verifiableCredential[0];
+      expect(vcFromVP.credentialSubject.id).toBe(holderDID);
+      expect(vcFromVP.credentialSubject.name).toBeUndefined();
     });
   });
 });

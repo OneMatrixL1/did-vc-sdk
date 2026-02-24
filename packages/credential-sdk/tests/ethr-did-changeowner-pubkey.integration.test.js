@@ -35,6 +35,7 @@ import { initializeWasm } from '@docknetwork/crypto-wasm-ts';
 import { EthrDIDModule } from '../src/modules/ethr-did';
 import { Secp256k1Keypair } from '../src/keypairs';
 import { keypairToAddress, verifyBLSSignature, signWithBLSKeypair } from '../src/modules/ethr-did/utils';
+import { DEFAULT_REGISTRY_ADDRESS } from '../src/vc/constants';
 import Bls12381BBSKeyPairDock2023 from '../src/vc/crypto/Bls12381BBSKeyPairDock2023';
 
 // Configuration from environment (required for integration tests)
@@ -57,7 +58,7 @@ const networkConfig = {
   rpcUrl: process.env.ETHR_NETWORK_RPC_URL,
   registry:
     process.env.ETHR_REGISTRY_ADDRESS
-    || '0x8697547b3b82327B70A90C6248662EC083ad5A62', // VietChain default
+    || DEFAULT_REGISTRY_ADDRESS, // VietChain default
 };
 
 describe('EthrDID changeOwnerWithPubkey Integration Tests', () => {

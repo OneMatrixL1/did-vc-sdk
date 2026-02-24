@@ -5,7 +5,7 @@
 
 import { ethers } from 'ethers';
 import { EthrDID } from 'ethr-did';
-import { getResolver } from 'ethr-did-resolver';
+import { getResolver, EthereumDIDRegistry } from 'ethr-did-resolver';
 import { Resolver as DIDResolver } from 'did-resolver';
 import b58 from 'bs58';
 import AbstractDIDModule from '../abstract/did/module';
@@ -26,7 +26,9 @@ import {
   ETHR_BBS_KEY_ID,
   generateDefaultDocument,
   createDualDID,
+  signWithBLSKeypair,
 } from './utils';
+import { getUncompressedG2PublicKey } from './bbs-uncompressed';
 
 /**
  * EthrDIDModule extends AbstractDIDModule to provide ethr DID management
@@ -216,7 +218,7 @@ class EthrDIDModule extends AbstractDIDModule {
   /**
    * Get provider for a specific network
    * @param {string} [networkName] - Network name (uses default if not specified)
-   * @returns {ethers.providers.JsonRpcProvider} Provider instance
+   * @returns {ethers.JsonRpcProvider} Provider instance
    */
   #getProvider(networkName = null) {
     const name = networkName || this.defaultNetwork;
@@ -242,10 +244,12 @@ class EthrDIDModule extends AbstractDIDModule {
    * Create EthrDID instance for operations
    * @param {Object} keypair - Keypair instance (Secp256k1 or BBS)
    * @param {string} [networkName] - Network name
+   * @param {Object} [options] - Additional options
+   * @param {Object} [options.txSigner] - Custom signer for gas payment (required for BBS keypairs)
    * @returns {Promise<EthrDID>} EthrDID instance
-   * @throws {Error} If BBS keypair is used (transaction signing not yet supported)
+   * @throws {Error} If BBS keypair is used without custom signer
    */
-  async #createEthrDID(keypair, networkName = null) {
+  async #createEthrDID(keypair, networkName = null, options = {}) {
     const name = networkName || this.defaultNetwork;
     const networkConfig = this.networks.get(name);
     const provider = this.#getProvider(name);
@@ -255,7 +259,9 @@ class EthrDIDModule extends AbstractDIDModule {
     }
 
     const address = keypairToAddress(keypair);
-    const signer = createSigner(keypair, provider);
+
+    // Use custom signer if provided, otherwise create from keypair
+    const signer = options.txSigner || createSigner(keypair, provider);
 
     const ethrDidConfig = {
       identifier: address,
@@ -263,6 +269,38 @@ class EthrDIDModule extends AbstractDIDModule {
       registry: networkConfig.registry,
       chainNameOrId: networkConfig.chainId || name,
       txSigner: signer,
+    };
+
+    return new EthrDID(ethrDidConfig);
+  }
+
+  /**
+   * Create an EthrDID instance from an address
+   * @param {string} address - Ethereum address
+   * @param {string} [networkName] - Network name
+   * @param {Object} [options] - Additional options
+   * @param {Object} [options.txSigner] - Custom signer for transactions
+   * @returns {Promise<EthrDID>} EthrDID instance
+   */
+  async #createEthrDIDFromAddress(address, networkName = null, options = {}) {
+    const name = networkName || this.defaultNetwork;
+    const networkConfig = this.networks.get(name);
+    const provider = this.#getProvider(name);
+
+    if (!networkConfig) {
+      throw new Error(`Network not found: ${name}`);
+    }
+
+    if (!options.txSigner) {
+      throw new Error('txSigner is required when creating EthrDID from address');
+    }
+
+    const ethrDidConfig = {
+      identifier: ethers.getAddress(address),
+      provider,
+      registry: networkConfig.registry,
+      chainNameOrId: networkConfig.chainId || name,
+      txSigner: options.txSigner,
     };
 
     return new EthrDID(ethrDidConfig);
@@ -619,7 +657,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const provider = this.#getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
-    const checksummedAddress = ethers.utils.getAddress(delegateAddress);
+    const checksummedAddress = ethers.getAddress(delegateAddress);
 
     const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.addDelegate(checksummedAddress, { delegateType, expiresIn });
@@ -641,7 +679,7 @@ class EthrDIDModule extends AbstractDIDModule {
     const provider = this.#getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
-    const checksummedAddress = ethers.utils.getAddress(delegateAddress);
+    const checksummedAddress = ethers.getAddress(delegateAddress);
 
     const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.revokeDelegate(checksummedAddress, delegateType);
@@ -700,11 +738,182 @@ class EthrDIDModule extends AbstractDIDModule {
     const provider = this.#getProvider(networkName);
 
     // Ensure address is checksummed to avoid ENS lookups
-    const checksummedAddress = ethers.utils.getAddress(newOwnerAddress);
+    const checksummedAddress = ethers.getAddress(newOwnerAddress);
 
     const ethrDid = await this.#createEthrDID(keypair, networkName);
     const txHash = await ethrDid.changeOwner(checksummedAddress);
     return await waitForTransaction(txHash, provider);
+  }
+
+  /**
+   * Change the owner of a DID using BLS signature verification.
+   *
+   * This method allows changing ownership using a BBS keypair signature while
+   * a different keypair (gas payer) pays for the transaction. The BBS keypair
+   * proves ownership of the DID identity, and the gas payer keypair covers
+   * the transaction fees.
+   *
+   * @param {string} did - The ethr DID to update (e.g., 'did:ethr:0x...' or 'did:ethr:network:0x...')
+   * @param {string} newOwnerAddress - Ethereum address of the new owner
+   * @param {Object} bbsKeypair - BBS keypair whose address matches the DID identity. Used to sign the ownership change message.
+   * @param {import('../../keypairs/keypair-secp256k1').default} gasPayerKeypair - Secp256k1 keypair to pay for gas fees
+   * @returns {Promise<{txHash: string, blockNumber: number, gasUsed: bigint, status: number}>} Transaction result
+   * @throws {Error} If the BBS keypair address does not match the DID identity
+   * @throws {Error} If the transaction fails
+   */
+  async changeOwnerWithPubkey(did, newOwnerAddress, bbsKeypair, gasPayerKeypair) {
+    const { network, address: identityAddress } = parseDID(did);
+    const networkName = network || this.defaultNetwork;
+    const provider = this.#getProvider(networkName);
+
+    // Create signer from gas payer keypair
+    const txSigner = createSigner(gasPayerKeypair, provider);
+
+    // Create EthrDID with the DID's identity address and gas payer signer
+    const ethrDid = await this.#createEthrDIDFromAddress(identityAddress, networkName, { txSigner });
+
+    // Verify the BBS keypair matches the DID's current owner
+    const bbsAddress = keypairToAddress(bbsKeypair);
+    const currentOwner = await ethrDid.lookupOwner();
+    if (bbsAddress.toLowerCase() !== currentOwner.toLowerCase()) {
+      throw new Error(
+        `BBS keypair address ${bbsAddress} does not match current owner ${currentOwner} for DID ${did}`,
+      );
+    }
+
+    // Use BBS public key directly - the contract uses Dock's g2 generator
+    // so BBS public key and signature will be compatible
+    const { publicKeyBuffer } = bbsKeypair;
+    const uncompressedPubkey = getUncompressedG2PublicKey(publicKeyBuffer);
+
+    const checksummedNewOwner = ethers.getAddress(newOwnerAddress);
+
+    // Get the EIP-712 hash for signing
+    const hash = await ethrDid.createChangeOwnerWithPubkeyHash(
+      checksummedNewOwner,
+      uncompressedPubkey,
+    );
+
+    // Sign the hash with BLS keypair (uses same scalar as BBS public key)
+    const signature = await signWithBLSKeypair(hash, bbsKeypair);
+
+    // Submit the transaction using the gas payer's signer
+    try {
+      const txHash = await ethrDid.changeOwnerWithPubkey(
+        checksummedNewOwner,
+        uncompressedPubkey,
+        signature,
+      );
+
+      const receipt = await waitForTransaction(txHash, provider)
+
+      return {
+        txHash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed,
+        status: receipt.status,
+      };
+    } catch (error) {
+      // Re-throw with clean error to avoid BigInt serialization issues in Jest
+      const cleanError = new Error(error.message);
+      cleanError.code = error.code;
+      cleanError.txHash = error.receipt?.hash || error.receipt?.transactionHash;
+      throw cleanError;
+    }
+  }
+
+  /**
+   * Create the EIP-712 hash for changing owner with public key
+   * @param {string} did - DID string
+   * @param {string} newOwnerAddress - New owner address
+   * @returns {Promise<string>} EIP-712 hash
+   */
+  async createChangeOwnerWithPubkeyHash(did, newOwnerAddress) {
+    const { network, address: identityAddress } = parseDID(did);
+    const networkName = network || this.defaultNetwork;
+    const provider = this.#getProvider(networkName);
+
+    // Create EthrDID with the DID's identity address
+    const ethrDid = await this.#createEthrDIDFromAddress(identityAddress, networkName, { txSigner: provider });
+
+    return ethrDid.createChangeOwnerWithPubkeyHash(
+      ethers.getAddress(newOwnerAddress),
+    );
+  }
+
+
+  /**
+   * Fetch owner history for an ethr DID from the blockchain.
+   * Scans for DIDOwnerChanged events and decodes changeOwnerWithPubkey calls.
+   *
+   * @param {string} did - The ethr DID to fetch history for
+   * @returns {Promise<Array<{signature: string, publicKey: string, message: object}>>} Array of owner transitions
+   */
+  async getOwnerHistory(did) {
+    const didString = String(did);
+    if (!isEthrDID(didString)) {
+      throw new Error(`Not an ethr DID: ${didString}`);
+    }
+
+    const { network, address: identity } = parseDID(didString);
+    const networkName = network || this.defaultNetwork;
+    const networkConfig = this.networks.get(networkName);
+    const provider = this.#getProvider(networkName);
+    const registryAddress = networkConfig.registry;
+
+    const registry = new ethers.Contract(registryAddress, EthereumDIDRegistry.abi, provider);
+    const iface = new ethers.Interface(EthereumDIDRegistry.abi);
+
+    const history = [];
+    let previousChange = await registry.changed(identity);
+
+    while (previousChange > 0n) {
+      const blockNumber = Number(previousChange);
+      const topics = iface.encodeFilterTopics('DIDOwnerChanged', [identity]);
+
+      // eslint-disable-next-line no-await-in-loop
+      const logs = await provider.getLogs({
+        address: registryAddress,
+        topics,
+        fromBlock: blockNumber,
+        toBlock: blockNumber,
+      });
+
+      const log = logs[0];
+      if (!log) break;
+
+      const event = iface.parseLog(log);
+      const { previousChange: nextPreviousChange } = event.args;
+
+      // Extract public key and signature if it was a changeOwnerWithPubkey call
+      // eslint-disable-next-line no-await-in-loop
+      const tx = await provider.getTransaction(log.transactionHash);
+      try {
+        const decodedTx = iface.parseTransaction({ data: tx.data });
+        if (decodedTx?.name === 'changeOwnerWithPubkey') {
+          const {
+            identity: identityArg, oldOwner, newOwner, publicKey, signature,
+          } = decodedTx.args;
+
+          history.unshift({
+            signature,
+            publicKey,
+            message: {
+              identity: identityArg,
+              oldOwner,
+              newOwner,
+            },
+          });
+        }
+      } catch (e) {
+        // Skip non-pubkey transitions
+        console.warn('Skip non-pubkey transitions', e);
+      }
+
+      previousChange = nextPreviousChange;
+    }
+
+    return history;
   }
 }
 

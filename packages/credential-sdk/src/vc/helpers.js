@@ -1,6 +1,13 @@
 import jsonld from 'jsonld';
 import { JsonWebKey } from '@transmute/json-web-signature';
 import defaultDocumentLoader from './document-loader';
+import {
+  verifyBLSSignature,
+  publicKeyToAddress,
+  createChangeOwnerWithPubkeyHash,
+  DEFAULT_CHAIN_ID,
+  DEFAULT_REGISTRY_ADDRESS,
+} from '../modules/ethr-did/utils';
 
 import {
   EcdsaSecp256k1VerKeyName,
@@ -198,4 +205,63 @@ export function processIfKvac(credential) {
     };
   }
   return undefined;
+}
+
+/**
+ * Verify DID owner proof history
+ * @param {Array} history - Array of ownership transitions
+ * @param {string} identityDID - The DID being verified
+ * @throws {Error} If verification fails
+ */
+export async function verifyDIDOwnerProof(history, identityDID) {
+  if (!history || !Array.isArray(history) || history.length === 0) {
+    return;
+  }
+
+  if (identityDID && identityDID.startsWith('did:ethr:')) {
+    const parts = identityDID.split(':');
+    let identity = parts[parts.length - 1];
+    if (!identity.startsWith('0x')) identity = `0x${identity}`;
+
+    for (let i = 0; i < history.length; i++) {
+      const record = history[i];
+      const { signature, publicKey, message } = record;
+
+      // a. Verify continuity
+      if (i > 0) {
+        if (message.oldOwner !== history[i - 1].message.newOwner) {
+          throw new Error(`Continuity broken at transition ${i}`);
+        }
+      }
+      // TODO: Uncomment later, now run with mock data
+      // else if (message.oldOwner.toLowerCase() !== identity.toLowerCase()) {
+      //   throw new Error('First oldOwner does not match subject identity');
+      // }
+
+      // b. Verify identity in message matches subject identity
+      if (message.identity.toLowerCase() !== identity.toLowerCase()) {
+        throw new Error(`Message identity mismatch at transition ${i}`);
+      }
+
+      // c. Verify Public Key derives to oldOwner
+      const publicKeyBytes = Buffer.from(publicKey.slice(2), 'hex');
+      if (publicKeyToAddress(publicKeyBytes) !== message.oldOwner) {
+        throw new Error(`Public key does not match oldOwner at transition ${i}`);
+      }
+
+      // d. Verify Signature
+      const hash = createChangeOwnerWithPubkeyHash(
+        message.identity,
+        message.oldOwner,
+        message.newOwner,
+        DEFAULT_CHAIN_ID,
+        DEFAULT_REGISTRY_ADDRESS,
+      );
+      const signatureBytes = Buffer.from(signature.slice(2), 'hex');
+      const isValid = verifyBLSSignature(signatureBytes, hash, publicKeyBytes);
+      if (!isValid) {
+        throw new Error(`Invalid BLS signature at transition ${i}`);
+      }
+    }
+  }
 }

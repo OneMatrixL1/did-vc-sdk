@@ -51,9 +51,8 @@ export default class EcdsaSecp256k1Signature2020 extends CustomLinkedDataSignatu
     return {
       id: verificationMethod,
       async sign({ data }) {
-        // Import ethers for Ethereum-style signing with recovery ID
-        const { SigningKey } = await import('@ethersproject/signing-key');
-        const { hashMessage } = await import('@ethersproject/hash');
+        // Import ethers v6 for Ethereum-style signing with recovery ID
+        const { SigningKey, hashMessage } = await import('ethers');
 
         // Get private key from keypair (handle both function and property)
         const privateKeyBytes = typeof keypair.privateKey === 'function'
@@ -64,11 +63,9 @@ export default class EcdsaSecp256k1Signature2020 extends CustomLinkedDataSignatu
 
         // Hash the data and sign
         const messageHash = hashMessage(data);
-        const signature = signingKey.signDigest(messageHash);
+        const signature = signingKey.sign(messageHash);
 
-        // The signature object has r, s, v properties
-        // We need to serialize it properly for recovery
-        // ethers serialized format: r (32 bytes) + s (32 bytes) + v (1 byte)
+        // ethers v6 serialized format: r (32 bytes) + s (32 bytes) + v (1 byte)
         const r = signature.r.substring(2); // Remove 0x prefix
         const s = signature.s.substring(2); // Remove 0x prefix
         const v = signature.v.toString(16).padStart(2, '0'); // Convert to hex

@@ -63,10 +63,8 @@ export default class EcdsaSecp256k1RecoveryMethod2020 {
 
     return {
       async verify({ data, signature }) {
-        // Import ethers for public key recovery
-        const { recoverPublicKey } = await import('@ethersproject/signing-key');
-        const { computeAddress } = await import('@ethersproject/transactions');
-        const { hashMessage } = await import('@ethersproject/hash');
+        // Import ethers v6 for public key recovery
+        const { SigningKey, computeAddress, hashMessage } = await import('ethers');
 
         try {
           // Recover public key from signature
@@ -75,7 +73,7 @@ export default class EcdsaSecp256k1RecoveryMethod2020 {
           // Convert signature to hex string format that ethers expects
           const signatureHex = `0x${Buffer.from(signature).toString('hex')}`;
 
-          const recoveredPubKey = recoverPublicKey(messageHash, signatureHex);
+          const recoveredPubKey = SigningKey.recoverPublicKey(messageHash, signatureHex);
 
           // Derive address from recovered public key
           const recoveredAddress = computeAddress(recoveredPubKey).toLowerCase();

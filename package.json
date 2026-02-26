@@ -17,7 +17,9 @@
   "resolutions": {
     "@digitalbazaar/http-client": "^3.4.1"
   },
-  "dependencies": {},
+  "dependencies": {
+    "ethers": "^6.16.0"
+  },
   "devDependencies": {
     "@babel/cli": "^7.24.1",
     "@babel/core": "^7.24.3",

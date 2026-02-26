@@ -2,12 +2,18 @@
   "name": "root",
   "version": "0.51.0",
   "private": true,
-  "workspaces": [
-    "packages/*",
-    "examples",
-    "scripts/migration",
-    "scripts/bench"
-  ],
+  "workspaces": {
+    "packages": [
+      "packages/*",
+      "examples",
+      "scripts/migration",
+      "scripts/bench"
+    ],
+    "nohoist": [
+      "@docknetwork/credential-sdk/multiformats",
+      "@1matrix/presentation-exchange/multiformats"
+    ]
+  },
   "resolutions": {
     "@digitalbazaar/http-client": "^3.4.1"
   },

@@ -14,5 +14,5 @@ export function resolveLocalized(
   const match = value.find(
     (v: LocalizedValue) => v['@language'] === preferredLanguage,
   );
-  return match ? match['@value'] : value[0]['@value'];
+  return match ? match['@value'] : value[0]!['@value'];
 }

@@ -101,7 +101,7 @@ export function verifyPresentationStructure(
       continue;
     }
 
-    const cred = presentation.verifiableCredential[entry.credentialIndex];
+    const cred = presentation.verifiableCredential[entry.credentialIndex]!;
     const credTypes = cred.type ?? [];
     const hasMatchingType = docReq.docType.some((dt) => credTypes.includes(dt));
     if (!hasMatchingType) {

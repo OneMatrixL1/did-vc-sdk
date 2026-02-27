@@ -100,7 +100,7 @@ export class VPRequestBuilder {
     if (this.rules) {
       rules = this.rules;
     } else if (this.pendingDocRequests.length === 1) {
-      rules = this.pendingDocRequests[0];
+      rules = this.pendingDocRequests[0]!;
     } else if (this.pendingDocRequests.length > 1) {
       rules = {
         type: 'Logical',

@@ -164,7 +164,7 @@ function credentialToFull(cred: MatchableCredential): PresentedCredential {
     presented.id = cred.id as string;
   }
   if (cred.proof !== undefined) {
-    presented.proof = cred.proof as PresentedCredential['proof'];
+    (presented as Record<string, unknown>).proof = cred.proof;
   }
 
   return presented;
@@ -193,7 +193,8 @@ function credentialToSelective(
       fieldPath,
     );
     if (found && fieldPath.startsWith('$.credentialSubject.')) {
-      const lastSeg = fieldPath.split('.').at(-1)!;
+      const parts = fieldPath.split('.');
+      const lastSeg = parts[parts.length - 1]!;
       selectiveSubject[lastSeg] = value;
     }
   }
@@ -219,7 +220,7 @@ function credentialToSelective(
     presented.id = cred.id as string;
   }
   if (cred.proof !== undefined) {
-    presented.proof = cred.proof as PresentedCredential['proof'];
+    (presented as Record<string, unknown>).proof = cred.proof;
   }
 
   return presented;

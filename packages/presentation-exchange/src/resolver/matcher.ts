@@ -55,7 +55,7 @@ function matchDocumentRequest(
   const candidates: CandidateCredential[] = [];
 
   for (let i = 0; i < credentials.length; i++) {
-    const cred = credentials[i];
+    const cred = credentials[i]!;
 
     // 1. Filter by docType: credential must have at least one matching type
     const credTypes = cred.type as readonly string[];

@@ -1,5 +1,5 @@
 {
-  "name": "@docknetwork/credential-sdk",
+  "name": "@1matrix/credential-sdk",
   "version": "0.54.9",
   "license": "MIT",
   "type": "module",
@@ -21,6 +21,34 @@
       "import": "./dist/esm/*",
       "require": "./dist/cjs/*",
       "default": "./dist/esm/*"
+    },
+    "./sod-verifier": {
+      "import": "./dist/esm/utils/sod-verifier.js",
+      "default": "./dist/esm/utils/sod-verifier.js"
+    },
+    "./dg-parser": {
+      "import": "./dist/esm/utils/dg-parser.js",
+      "default": "./dist/esm/utils/dg-parser.js"
+    },
+    "./icao-profile": {
+      "import": "./dist/esm/icao-profile/index.js",
+      "default": "./dist/esm/icao-profile/index.js"
+    },
+    "./keypairs/secp256k1": {
+      "import": "./dist/esm/keypairs/keypair-secp256k1.js",
+      "default": "./dist/esm/keypairs/keypair-secp256k1.js"
+    },
+    "./vc-crypto-constants": {
+      "import": "./dist/esm/vc/crypto/constants.js",
+      "default": "./dist/esm/vc/crypto/constants.js"
+    },
+    "./document-loader": {
+      "import": "./dist/esm/vc/document-loader.js",
+      "default": "./dist/esm/vc/document-loader.js"
+    },
+    "./vc-crypto-secp256k1-2019": {
+      "import": "./dist/esm/vc/crypto/EcdsaSecp256k1Signature2019.js",
+      "default": "./dist/esm/vc/crypto/EcdsaSecp256k1Signature2019.js"
     }
   },
   "resolutions": {

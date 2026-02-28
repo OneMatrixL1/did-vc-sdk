@@ -23,30 +23,37 @@
       "default": "./dist/esm/*"
     },
     "./sod-verifier": {
+      "types": "./dist/types/utils/sod-verifier.d.ts",
       "import": "./dist/esm/utils/sod-verifier.js",
       "default": "./dist/esm/utils/sod-verifier.js"
     },
     "./dg-parser": {
+      "types": "./dist/types/utils/dg-parser.d.ts",
       "import": "./dist/esm/utils/dg-parser.js",
       "default": "./dist/esm/utils/dg-parser.js"
     },
     "./icao-profile": {
+      "types": "./dist/types/icao-profile/index.d.ts",
       "import": "./dist/esm/icao-profile/index.js",
       "default": "./dist/esm/icao-profile/index.js"
     },
     "./keypairs/secp256k1": {
+      "types": "./dist/types/keypairs/keypair-secp256k1.d.ts",
       "import": "./dist/esm/keypairs/keypair-secp256k1.js",
       "default": "./dist/esm/keypairs/keypair-secp256k1.js"
     },
     "./vc-crypto-constants": {
+      "types": "./dist/types/vc/crypto/constants.d.ts",
       "import": "./dist/esm/vc/crypto/constants.js",
       "default": "./dist/esm/vc/crypto/constants.js"
     },
     "./document-loader": {
+      "types": "./dist/types/vc/document-loader.d.ts",
       "import": "./dist/esm/vc/document-loader.js",
       "default": "./dist/esm/vc/document-loader.js"
     },
     "./vc-crypto-secp256k1-2019": {
+      "types": "./dist/types/vc/crypto/EcdsaSecp256k1Signature2019.d.ts",
       "import": "./dist/esm/vc/crypto/EcdsaSecp256k1Signature2019.js",
       "default": "./dist/esm/vc/crypto/EcdsaSecp256k1Signature2019.js"
     }

@@ -11,9 +11,16 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "types": [],
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true
   },
-  "include": ["src"],
-  "exclude": ["node_modules", "dist", "__tests__"]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "__tests__"
+  ]
 }

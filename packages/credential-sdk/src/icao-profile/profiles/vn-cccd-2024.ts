@@ -132,6 +132,22 @@ export const VN_CCCD_2024: ICAODocumentProfile = {
     },
 
     // -----------------------------------------------------------------------
+    // Aliases for backward compatibility with old event schemas
+    // -----------------------------------------------------------------------
+    idNumber: {
+      source: 'dg13',
+      at: 1,
+      type: 'string',
+      label: { en: 'ID Number', vi: 'Số CMND/CCCD' },
+    },
+    address: {
+      source: 'dg13',
+      at: 9,
+      type: 'string',
+      label: { en: 'Address', vi: 'Địa chỉ' },
+    },
+
+    // -----------------------------------------------------------------------
     // DG1 fields (mrz decode, at = MRZ parsed field name)
     // -----------------------------------------------------------------------
     documentType: {

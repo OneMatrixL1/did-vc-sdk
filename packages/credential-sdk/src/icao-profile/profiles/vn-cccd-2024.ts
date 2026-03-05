@@ -146,6 +146,12 @@ export const VN_CCCD_2024: ICAODocumentProfile = {
       type: 'string',
       label: { en: 'Address', vi: 'Địa chỉ' },
     },
+    age: {
+      source: 'dg13',
+      at: 3,
+      type: 'date',
+      label: { en: 'Age', vi: 'Tuổi' },
+    },
 
     // -----------------------------------------------------------------------
     // DG1 fields (mrz decode, at = MRZ parsed field name)
@@ -183,6 +189,12 @@ export const VN_CCCD_2024: ICAODocumentProfile = {
       at: 0,
       type: 'biometric',
       label: { en: 'Photo', vi: 'Ảnh chân dung' },
+    },
+    portrait: {
+      source: 'dg2',
+      at: 0,
+      type: 'biometric',
+      label: { en: 'Portrait', vi: 'Ảnh chân dung' },
     },
   },
 };

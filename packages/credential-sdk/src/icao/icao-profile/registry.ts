@@ -12,3 +12,12 @@ const profileMap: Record<string, ICAODocumentProfile> = {
 export function getProfile(profileId: string): ICAODocumentProfile | undefined {
   return profileMap[profileId];
 }
+
+/**
+ * Retrieve an ICAO Document Profile by a credential docType string.
+ * Searches all registered profiles for one whose `docType` array contains the given type.
+ * Returns undefined if no profile matches.
+ */
+export function getProfileByDocType(docType: string): ICAODocumentProfile | undefined {
+  return Object.values(profileMap).find((p) => p.docType.includes(docType));
+}

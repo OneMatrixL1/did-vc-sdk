@@ -16,6 +16,8 @@ export class DocumentRequestBuilder {
 
   private docType: string[];
 
+  private schemaType?: string;
+
   private issuer?: string | string[];
 
   private name?: LocalizableString;
@@ -29,6 +31,12 @@ export class DocumentRequestBuilder {
   constructor(docRequestID: string, docType: string | string[]) {
     this.docRequestID = docRequestID;
     this.docType = Array.isArray(docType) ? docType : [docType];
+  }
+
+  /** Set the schema resolution strategy (e.g. 'JsonSchema', 'ICAO9303SOD') */
+  setSchemaType(type: string): this {
+    this.schemaType = type;
+    return this;
   }
 
   setIssuer(issuer: string | string[]): this {
@@ -98,10 +106,18 @@ export class DocumentRequestBuilder {
   }
 
   build(): DocumentRequest {
+    if (!this.schemaType) {
+      throw new Error(
+        `DocumentRequestBuilder "${this.docRequestID}": schemaType is required. ` +
+        'Call setSchemaType() before build().',
+      );
+    }
+
     return {
       type: 'DocumentRequest',
       docRequestID: this.docRequestID,
       docType: this.docType,
+      schemaType: this.schemaType,
       ...(this.issuer !== undefined && { issuer: this.issuer }),
       ...(this.name !== undefined && { name: this.name }),
       ...(this.purpose !== undefined && { purpose: this.purpose }),

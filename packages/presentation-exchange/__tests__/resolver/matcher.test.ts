@@ -87,12 +87,14 @@ describe('matchCredentials', () => {
           type: 'DocumentRequest' as const,
           docRequestID: 'natid',
           docType: ['CCCDCredential'],
+          schemaType: 'JsonSchema',
           conditions: [],
         },
         {
           type: 'DocumentRequest' as const,
           docRequestID: 'passport',
           docType: ['PassportCredential'],
+          schemaType: 'JsonSchema',
           conditions: [],
         },
       ],
@@ -115,6 +117,7 @@ describe('matchCredentials', () => {
       type: 'DocumentRequest' as const,
       docRequestID: 'gov-id',
       docType: ['CCCDCredential'],
+      schemaType: 'JsonSchema',
       issuer: 'did:web:other-issuer.vn',
       conditions: [],
     };

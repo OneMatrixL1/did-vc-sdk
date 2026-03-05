@@ -1,1 +1,1 @@
-export { issueCredential as issueCCCDCredential } from './cccd';
+export { issueCredential as issueCCCDCredential } from './cccd.js';

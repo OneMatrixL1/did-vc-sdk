@@ -7,8 +7,9 @@ import type {
   SubmissionEntry,
 } from '../types/response.js';
 import type { CredentialSelection } from '../types/matching.js';
+import type { SchemaResolverMap } from '../types/schema-resolver.js';
+import { defaultResolvers } from '../resolvers/index.js';
 import { extractConditions } from './field-extractor.js';
-import { resolveJsonPath } from '../utils/jsonpath.js';
 
 // ---------------------------------------------------------------------------
 // Options
@@ -25,16 +26,13 @@ export interface UnsignedPresentation {
 export interface ResolveOptions {
   /** The holder's DID */
   holder: string;
+  /**
+   * Optional — extra or overriding resolvers merged on top of
+   * the built-in defaults (JsonSchema + ICAO9303SOD).
+   */
+  resolvers?: SchemaResolverMap;
   /** Sign the presentation envelope (challenge = nonce, domain = verifier.url) */
   signPresentation: (payload: UnsignedPresentation) => Promise<HolderProof>;
-  /**
-   * Optional: derive a selective-disclosure credential (BBS+ or similar).
-   * If not provided, the full credential is included as-is.
-   */
-  deriveCredential?: (
-    credential: MatchableCredential,
-    disclosedFields: string[],
-  ) => Promise<PresentedCredential>;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +45,7 @@ export interface ResolveOptions {
  * This function:
  * 1. Validates that selections cover the request's rules
  * 2. Extracts disclosed fields per credential
- * 3. Optionally derives selective-disclosure credentials
+ * 3. Derives selective-disclosure credentials via the schema resolver
  * 4. Signs the presentation via the provided callback
  */
 export async function resolvePresentation(
@@ -79,16 +77,24 @@ export async function resolvePresentation(
     items.push({ docRequestID: sel.docRequestID, docReq, cred });
   }
 
+  const resolvers = { ...defaultResolvers, ...options.resolvers };
+
   const presentedList = await Promise.all(items.map(({ docReq, cred }) => {
     if (docReq.disclosureMode === 'full') {
       return Promise.resolve(credentialToFull(cred));
     }
+
+    const resolver = resolvers[docReq.schemaType];
+    if (!resolver) {
+      throw new Error(
+        `No SchemaResolver registered for schemaType "${docReq.schemaType}". ` +
+        `Available resolvers: [${Object.keys(resolvers).join(', ')}]`,
+      );
+    }
+
     const { disclose } = extractConditions(docReq.conditions);
     const disclosedFields = disclose.map((d) => d.field);
-    if (options.deriveCredential) {
-      return options.deriveCredential(cred, disclosedFields);
-    }
-    return Promise.resolve(credentialToSelective(cred, disclosedFields));
+    return resolver.deriveCredential(cred, disclosedFields);
   }));
 
   const presentedCredentials: PresentedCredential[] = [];
@@ -153,62 +159,6 @@ function credentialToFull(cred: MatchableCredential): PresentedCredential {
     type: types,
     issuer,
     credentialSubject: subject,
-  };
-
-  if (cred['@context']) {
-    presented['@context'] = [...(cred['@context'] as string[])];
-  }
-  if (cred.issuanceDate !== undefined) {
-    presented.issuanceDate = cred.issuanceDate as string;
-  }
-  if (cred.id !== undefined) {
-    presented.id = cred.id as string;
-  }
-  if (cred.proof !== undefined) {
-    (presented as Record<string, unknown>).proof = cred.proof;
-  }
-
-  return presented;
-}
-
-/**
- * Build a selectively-disclosed credential containing only the requested fields.
- * Used for disclosureMode === 'selective' (default).
- */
-function credentialToSelective(
-  cred: MatchableCredential,
-  disclosedFields: string[],
-): PresentedCredential {
-  const subject = Array.isArray(cred.credentialSubject)
-    ? cred.credentialSubject[0]
-    : cred.credentialSubject;
-
-  const selectiveSubject: Record<string, unknown> = {};
-  if (subject.id !== undefined) {
-    selectiveSubject.id = subject.id;
-  }
-
-  for (const fieldPath of disclosedFields) {
-    const { found, value } = resolveJsonPath(
-      { ...cred, credentialSubject: subject },
-      fieldPath,
-    );
-    if (found && fieldPath.startsWith('$.credentialSubject.')) {
-      const parts = fieldPath.split('.');
-      const lastSeg = parts[parts.length - 1]!;
-      selectiveSubject[lastSeg] = value;
-    }
-  }
-
-  const types = [...(cred.type as readonly string[])];
-  const issuer = typeof cred.issuer === 'string'
-    ? cred.issuer
-    : { ...cred.issuer };
-
-  const presented: PresentedCredential = {
-    type: types,
-    issuer,
-    credentialSubject: selectiveSubject,
   };
 
   if (cred['@context']) {

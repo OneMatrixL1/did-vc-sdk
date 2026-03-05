@@ -33,9 +33,9 @@
       "default": "./dist/esm/utils/dg-parser.js"
     },
     "./icao-profile": {
-      "types": "./dist/types/icao-profile/index.d.ts",
-      "import": "./dist/esm/icao-profile/index.js",
-      "default": "./dist/esm/icao-profile/index.js"
+      "types": "./dist/types/icao/icao-profile/index.d.ts",
+      "import": "./dist/esm/icao/icao-profile/index.js",
+      "default": "./dist/esm/icao/icao-profile/index.js"
     },
     "./keypairs/secp256k1": {
       "types": "./dist/types/keypairs/keypair-secp256k1.d.ts",

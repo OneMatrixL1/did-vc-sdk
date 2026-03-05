@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(yarn test:*)",
+      "Bash(npx jest:*)",
+      "Bash(git add:*)",
+      "Bash(npx eslint:*)",
+      "Bash(ls:*)",
+      "Bash(python3:*)",
+      "Bash(yarn jest:*)",
+      "Bash(npx turbo:*)",
+      "Bash(yarn build:*)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

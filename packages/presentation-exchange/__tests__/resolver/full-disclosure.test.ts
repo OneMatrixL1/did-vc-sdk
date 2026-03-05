@@ -12,11 +12,11 @@ import {
 
 describe('disclosureMode: full', () => {
   const fullRequest = new DocumentRequestBuilder('natid', 'CCCDCredential')
+    .setSchemaType('JsonSchema')
     .setDisclosureMode('full')
     .build();
 
   it('marks any type-matching credential as fullyQualified regardless of fields', () => {
-    // incompleteCredential is missing dateOfBirth — would fail selective mode
     const result = matchCredentials(fullRequest, [incompleteCredential]);
     const match = result as DocumentRequestMatch;
 
@@ -38,6 +38,7 @@ describe('disclosureMode: full', () => {
       .setVerifier({ id: 'did:web:example', name: 'Example', url: 'https://example.com' })
       .addDocumentRequest(
         new DocumentRequestBuilder('natid', 'CCCDCredential')
+          .setSchemaType('JsonSchema')
           .setDisclosureMode('full'),
       )
       .build();

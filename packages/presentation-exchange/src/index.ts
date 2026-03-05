@@ -26,6 +26,8 @@ export type {
   DocumentRequestMatch,
   CandidateCredential,
   CredentialSelection,
+  SchemaResolver,
+  SchemaResolverMap,
 } from './types/index.js';
 
 export { getCredentialIssuerId } from './types/credential.js';
@@ -46,6 +48,9 @@ export type { ExtractedFields } from './resolver/index.js';
 // Verifier
 export { verifyPresentationStructure } from './verifier/index.js';
 export type { VerificationResult } from './verifier/index.js';
+
+// Schema Resolvers
+export { jsonSchemaResolver, createICAOSchemaResolver, defaultResolvers } from './resolvers/index.js';
 
 // Utils
 export { resolveJsonPath } from './utils/jsonpath.js';

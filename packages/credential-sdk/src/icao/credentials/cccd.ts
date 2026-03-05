@@ -1,6 +1,6 @@
-import VerifiableCredential from '../../vc/verifiable-credential';
-import { SODVerifier } from '../sod-verifier';
-import { VN_CCCD_2024 } from '../icao-profile';
+import VerifiableCredential from '../../vc/verifiable-credential.js';
+import { SODVerifier } from '../sod-verifier.js';
+import { VN_CCCD_2024 } from '../icao-profile/index.js';
 
 /**
  * Creates a CCCD (Căn Cước Công Dân) Verifiable Credential from SOD data.

@@ -14,6 +14,14 @@ import { resolveJsonPath } from '../utils/jsonpath.js';
 // Options
 // ---------------------------------------------------------------------------
 
+export interface UnsignedPresentation {
+  '@context': string[];
+  type: ['VerifiablePresentation'];
+  holder: string;
+  verifiableCredential: PresentedCredential[];
+  presentationSubmission: SubmissionEntry[];
+}
+
 export interface ResolveOptions {
   /** The holder's DID */
   holder: string;
@@ -27,14 +35,6 @@ export interface ResolveOptions {
     credential: MatchableCredential,
     disclosedFields: string[],
   ) => Promise<PresentedCredential>;
-}
-
-export interface UnsignedPresentation {
-  '@context': string[];
-  type: ['VerifiablePresentation'];
-  holder: string;
-  verifiableCredential: PresentedCredential[];
-  presentationSubmission: SubmissionEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -59,9 +59,9 @@ export async function resolvePresentation(
   // Build a map of docRequestID → DocumentRequest for lookup
   const docRequests = collectDocumentRequests(request.rules);
 
-  // Build presented credentials and submission entries
-  const presentedCredentials: PresentedCredential[] = [];
-  const submission: SubmissionEntry[] = [];
+  // Validate all selections synchronously first, then derive credentials in parallel
+  type ResolvedItem = { docRequestID: string; docReq: DocumentRequest; cred: MatchableCredential };
+  const items: ResolvedItem[] = [];
 
   for (const sel of selections) {
     const docReq = docRequests.get(sel.docRequestID);
@@ -76,26 +76,27 @@ export async function resolvePresentation(
       );
     }
 
-    let presented: PresentedCredential;
-    if (docReq.disclosureMode === 'full') {
-      // Pass the entire credential verbatim — no field filtering, no derivation
-      presented = credentialToFull(cred);
-    } else if (options.deriveCredential) {
-      const { disclose } = extractConditions(docReq.conditions);
-      const disclosedFields = disclose.map((d) => d.field);
-      presented = await options.deriveCredential(cred, disclosedFields);
-    } else {
-      const { disclose } = extractConditions(docReq.conditions);
-      const disclosedFields = disclose.map((d) => d.field);
-      presented = credentialToSelective(cred, disclosedFields);
-    }
+    items.push({ docRequestID: sel.docRequestID, docReq, cred });
+  }
 
-    const credIndex = presentedCredentials.length;
-    presentedCredentials.push(presented);
-    submission.push({
-      docRequestID: sel.docRequestID,
-      credentialIndex: credIndex,
-    });
+  const presentedList = await Promise.all(items.map(({ docReq, cred }) => {
+    if (docReq.disclosureMode === 'full') {
+      return Promise.resolve(credentialToFull(cred));
+    }
+    const { disclose } = extractConditions(docReq.conditions);
+    const disclosedFields = disclose.map((d) => d.field);
+    if (options.deriveCredential) {
+      return options.deriveCredential(cred, disclosedFields);
+    }
+    return Promise.resolve(credentialToSelective(cred, disclosedFields));
+  }));
+
+  const presentedCredentials: PresentedCredential[] = [];
+  const submission: SubmissionEntry[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    presentedCredentials.push(presentedList[i]!);
+    submission.push({ docRequestID: items[i]!.docRequestID, credentialIndex: i });
   }
 
   const unsigned: UnsignedPresentation = {

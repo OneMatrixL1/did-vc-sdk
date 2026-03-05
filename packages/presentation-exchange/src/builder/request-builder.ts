@@ -19,14 +19,23 @@ import { DocumentRequestBuilder } from './document-request-builder.js';
  */
 export class VPRequestBuilder {
   private id: string;
+
   private version = '1.0';
+
   private name: LocalizableString = '';
+
   private nonce: string;
+
   private verifier!: VerifierInfo;
+
   private createdAt: string;
+
   private expiresAt?: string;
+
   private context?: string[];
+
   private rules?: DocumentRequestNode;
+
   private pendingDocRequests: DocumentRequest[] = [];
 
   constructor(id: string, nonce?: string) {
@@ -83,10 +92,9 @@ export class VPRequestBuilder {
   addDocumentRequest(
     docRequest: DocumentRequest | DocumentRequestBuilder,
   ): this {
-    const dr =
-      docRequest instanceof DocumentRequestBuilder
-        ? docRequest.build()
-        : docRequest;
+    const dr = docRequest instanceof DocumentRequestBuilder
+      ? docRequest.build()
+      : docRequest;
     this.pendingDocRequests.push(dr);
     return this;
   }

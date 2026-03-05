@@ -1,20 +1,8 @@
 import type { LocalizableString } from './localization.js';
 
 // ---------------------------------------------------------------------------
-// Top-level request
+// Verifier info (defined before VPRequest which references it)
 // ---------------------------------------------------------------------------
-
-export interface VPRequest {
-  id: string;
-  version: string;
-  name: LocalizableString;
-  nonce: string;
-  verifier: VerifierInfo;
-  createdAt: string;
-  expiresAt: string;
-  '@context'?: string[];
-  rules: DocumentRequestNode;
-}
 
 export interface VerifierInfo {
   id: string;
@@ -23,49 +11,10 @@ export interface VerifierInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Rules tree (recursive)
+// Proof system & conditions (defined before DocumentRequest which uses them)
 // ---------------------------------------------------------------------------
 
-export type DocumentRequestNode = LogicalRequestNode | DocumentRequest;
-
-export interface LogicalRequestNode {
-  type: 'Logical';
-  operator: 'AND' | 'OR';
-  values: DocumentRequestNode[];
-}
-
-export type DisclosureMode = 'selective' | 'full';
-
-export interface DocumentRequest {
-  type: 'DocumentRequest';
-  docRequestID: string;
-  docType: string[];
-  issuer?: string | string[];
-  name?: LocalizableString;
-  purpose?: LocalizableString;
-  /**
-   * 'selective' (default) — only disclosed fields / ZKP proofs are included.
-   * 'full'                — entire credential is passed verbatim; conditions are ignored.
-   *                         Trusted-verifier enforcement will be layered on top in a future release.
-   */
-  disclosureMode?: DisclosureMode;
-  conditions: DocumentConditionNode[];
-}
-
-// ---------------------------------------------------------------------------
-// Conditions tree (per credential)
-// ---------------------------------------------------------------------------
-
-export type DocumentConditionNode =
-  | LogicalConditionNode
-  | DiscloseCondition
-  | ZKPCondition;
-
-export interface LogicalConditionNode {
-  type: 'Logical';
-  operator: 'AND' | 'OR';
-  values: DocumentConditionNode[];
-}
+export type ProofSystem = 'groth16' | 'plonk' | 'fflonk' | 'halo2' | 'stark' | (string & {});
 
 export interface DiscloseCondition {
   type: 'DocumentCondition';
@@ -89,4 +38,63 @@ export interface ZKPCondition {
   dependsOn?: Record<string, string>;
 }
 
-export type ProofSystem = 'groth16' | 'plonk' | 'fflonk' | 'halo2' | 'stark' | (string & {});
+export interface LogicalConditionNode {
+  type: 'Logical';
+  operator: 'AND' | 'OR';
+  values: (LogicalConditionNode | DiscloseCondition | ZKPCondition)[];
+}
+
+export type DocumentConditionNode =
+  | LogicalConditionNode
+  | DiscloseCondition
+  | ZKPCondition;
+
+// ---------------------------------------------------------------------------
+// Rules tree (recursive)
+// ---------------------------------------------------------------------------
+
+export type DisclosureMode = 'selective' | 'full';
+
+export interface DocumentRequest {
+  type: 'DocumentRequest';
+  docRequestID: string;
+  docType: string[];
+  issuer?: string | string[];
+  name?: LocalizableString;
+  purpose?: LocalizableString;
+  /**
+   * 'selective' (default) — only disclosed fields / ZKP proofs are included.
+   * 'full'                — entire credential is passed verbatim; conditions are ignored.
+   *                         Trusted-verifier enforcement will be layered on top in a future release.
+   */
+  disclosureMode?: DisclosureMode;
+  conditions: DocumentConditionNode[];
+}
+
+/**
+ * LogicalRequestNode.values uses an inline union instead of the DocumentRequestNode
+ * type alias to avoid a circular forward reference.
+ */
+export interface LogicalRequestNode {
+  type: 'Logical';
+  operator: 'AND' | 'OR';
+  values: (LogicalRequestNode | DocumentRequest)[];
+}
+
+export type DocumentRequestNode = LogicalRequestNode | DocumentRequest;
+
+// ---------------------------------------------------------------------------
+// Top-level request
+// ---------------------------------------------------------------------------
+
+export interface VPRequest {
+  id: string;
+  version: string;
+  name: LocalizableString;
+  nonce: string;
+  verifier: VerifierInfo;
+  createdAt: string;
+  expiresAt: string;
+  '@context'?: string[];
+  rules: DocumentRequestNode;
+}

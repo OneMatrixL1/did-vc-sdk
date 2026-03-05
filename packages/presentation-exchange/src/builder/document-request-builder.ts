@@ -13,11 +13,17 @@ import type {
  */
 export class DocumentRequestBuilder {
   private docRequestID: string;
+
   private docType: string[];
+
   private issuer?: string | string[];
+
   private name?: LocalizableString;
+
   private purpose?: LocalizableString;
+
   private disclosureMode?: DisclosureMode;
+
   private conditions: DocumentConditionNode[] = [];
 
   constructor(docRequestID: string, docType: string | string[]) {

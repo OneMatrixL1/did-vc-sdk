@@ -329,7 +329,7 @@ export class SODVerifier {
     const result: SODVerificationResult = {
       signatureValid,
       certificateChainValid: false,
-      passiveAuthSuccess: signatureValid && dgHashes.every((dg) => dg.isValid),
+      passiveAuthSuccess: signatureValid && dgHashes.length > 0 && dgHashes.every((dg) => dg.isValid),
       dgHashes,
     };
 

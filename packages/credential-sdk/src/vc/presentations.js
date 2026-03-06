@@ -182,11 +182,6 @@ export async function verifyPresentation(presentation, options = {}) {
       return { verified, results: [presentation], credentialResults };
     }
 
-    // Early out incase credentials arent verified
-    if (!verified) {
-      return { verified, results: [presentation], credentialResults };
-    }
-
     // Get proof purpose
     if (!presentationPurpose && !challenge) {
       throw new Error(

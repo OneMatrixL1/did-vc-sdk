@@ -98,9 +98,9 @@ function validateRequestProof(request: VPRequest, errors: string[]): void {
     errors.push('VPRequest proof is missing "verificationMethod"');
   }
 
-  if (proof.proofPurpose !== 'assertionMethod' && proof.proofPurpose !== 'authentication') {
+  if (proof.proofPurpose !== 'assertionMethod') {
     errors.push(
-      `VPRequest proof purpose must be "assertionMethod" or "authentication", got "${proof.proofPurpose}"`,
+      `VPRequest proof purpose must be "assertionMethod", got "${proof.proofPurpose}"`,
     );
   }
 

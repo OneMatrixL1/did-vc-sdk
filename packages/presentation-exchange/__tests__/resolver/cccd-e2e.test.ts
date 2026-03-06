@@ -37,6 +37,7 @@ import { VPRequestBuilder } from '../../src/builder/request-builder.js';
 import { createICAOSchemaResolver } from '../../src/resolvers/icao-schema-resolver.js';
 import type { DocumentRequestMatch } from '../../src/types/matching.js';
 import type { HolderProof } from '../../src/types/response.js';
+import type { PresentedCredential } from '../../src/types/credential.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -259,8 +260,18 @@ describe('CCCD E2E with real secp256k1 signing', () => {
     expect(signedVC.proof.verificationMethod).toBe(issuerKeyDoc.id);
 
     // ---------------------------------------------------------------
-    // Step 2: Verifier creates VPRequest
+    // Step 2: Verifier creates VPRequest (with verifier credential)
     // ---------------------------------------------------------------
+    const verifierCredential: PresentedCredential = {
+      type: ['VerifiableCredential', 'GovernmentPortalCredential'],
+      issuer: 'did:web:ca.gov.vn',
+      credentialSubject: {
+        id: 'did:web:gov.vn',
+        name: 'Vietnam Government Portal',
+        operatingLicense: 'GOV-2026-001',
+      },
+    };
+
     const vpRequest = new VPRequestBuilder('req-cccd-kyc', 'nonce-e2e-123')
       .setName('CCCD Identity Verification')
       .setVerifier({
@@ -268,6 +279,7 @@ describe('CCCD E2E with real secp256k1 signing', () => {
         name: 'Vietnam Gov Portal',
         url: 'https://gov.vn',
       })
+      .addVerifierCredential(verifierCredential)
       .setExpiresAt('2099-12-31T23:59:59Z')
       .addDocumentRequest(
         new DocumentRequestBuilder('dr-cccd', 'CCCDCredential')
@@ -333,6 +345,15 @@ describe('CCCD E2E with real secp256k1 signing', () => {
     expect(vp.verifiableCredential).toHaveLength(1);
     expect(vp.presentationSubmission).toHaveLength(1);
     expect(vp.presentationSubmission[0].docRequestID).toBe('dr-cccd');
+
+    // VP request-response binding fields
+    expect(vp.verifier).toBe('did:web:gov.vn');
+    expect(vp.requestId).toBe('req-cccd-kyc');
+    expect(vp.requestNonce).toBe('nonce-e2e-123');
+    expect(vp.verifierCredentials).toBeDefined();
+    expect(Array.isArray(vp.verifierCredentials)).toBe(true);
+    expect(vp.verifierCredentials).toHaveLength(1);
+    expect(vp.verifierCredentials![0].type).toContain('GovernmentPortalCredential');
 
     // The proof is a REAL EcdsaSecp256k1Signature2019 (not mocked)
     expect(vp.proof.type).toBe('EcdsaSecp256k1Signature2019');

@@ -372,6 +372,24 @@ export async function verifyCredential(
     return r;
   }
 
+  // Bypass jsigs for ICAO SOD credentials (they lack proofPurpose/verificationMethod)
+  if (credential.proof && credential.proof.type === 'ICAO9303SODSignature') {
+    const icaoSuite = new ICAO9303SODSignature();
+    const icaoResult = await icaoSuite.verifyProof({
+      proof: credential.proof,
+      document: credential,
+    });
+    return {
+      verified: icaoResult.verified,
+      results: [{
+        verified: icaoResult.verified,
+        proof: credential.proof,
+        purposeResult: { valid: icaoResult.verified },
+      }],
+      error: icaoResult.error,
+    };
+  }
+
   // Specify certain parameters for anoncreds
   const anoncredsParams = {
     accumulatorPublicKeys,

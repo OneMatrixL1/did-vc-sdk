@@ -15,6 +15,7 @@ export type {
   DiscloseCondition,
   ZKPCondition,
   ProofSystem,
+  KeyDoc,
   VerifiablePresentation,
   SubmissionEntry,
   HolderProof,

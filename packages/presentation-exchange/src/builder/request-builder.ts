@@ -2,12 +2,14 @@ import type { LocalizableString } from '../types/localization.js';
 import type { PresentedCredential } from '../types/response.js';
 import type {
   VPRequest,
-  UnsignedVPRequest,
   VerifierRequestProof,
   DocumentRequestNode,
   DocumentRequest,
+  KeyDoc,
 } from '../types/request.js';
 import { DocumentRequestBuilder } from './document-request-builder.js';
+import { signPresentation } from '@1matrix/credential-sdk/vc';
+import jsigs from 'jsonld-signatures';
 
 /**
  * Fluent builder for VPRequest.
@@ -162,15 +164,49 @@ export class VPRequestBuilder {
   }
 
   /**
-   * Build and sign the VPRequest. The callback receives the unsigned request
-   * and must return a VerifierRequestProof.
+   * Build and sign the VPRequest using credential-sdk's `signPresentation`.
+   *
+   * Uses `AssertionProofPurpose` (not `authentication`) so that
+   * `verifyVPRequest` accepts the proof envelope.
+   *
+   * @param keyDoc  Key document with `id`, `type`, `keypair`, and `controller`.
+   * @param resolver  Optional DID resolver forwarded to credential-sdk.
    */
   async buildSigned(
-    signRequest: (unsigned: UnsignedVPRequest) => Promise<VerifierRequestProof>,
+    keyDoc: KeyDoc,
+    resolver?: unknown,
   ): Promise<VPRequest> {
     const unsigned = this.build();
-    const { proof: _, ...payload } = unsigned;
-    const proof = await signRequest(payload);
+
+    const domain = new URL(unsigned.verifierUrl).hostname;
+    const challenge = unsigned.nonce;
+
+    // Wrap the request as a VP-like LD document so signPresentation can sign it.
+    const vpLikeDoc = {
+      '@context': [
+        'https://www.w3.org/2018/credentials/v1',
+        ...(unsigned['@context'] ?? []),
+      ],
+      ...unsigned,
+      type: ['VerifiablePresentation'],
+      holder: unsigned.verifier,
+    };
+
+    const { AssertionProofPurpose } = jsigs.purposes;
+    const purpose = new AssertionProofPurpose({ domain, challenge });
+
+    const signed = await signPresentation(
+      vpLikeDoc,
+      keyDoc,
+      challenge,
+      domain,
+      resolver ?? null,
+      true,    // compactProof
+      purpose,
+      false,   // addSuiteContext — avoid redefining credentials/v1 terms
+    );
+
+    const proof = (signed as Record<string, unknown>).proof as VerifierRequestProof;
     return { ...unsigned, proof };
   }
 }

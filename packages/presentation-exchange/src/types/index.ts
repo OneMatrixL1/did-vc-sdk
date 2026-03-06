@@ -14,6 +14,7 @@ export type {
   DiscloseCondition,
   ZKPCondition,
   ProofSystem,
+  KeyDoc,
 } from './request.js';
 
 export type {

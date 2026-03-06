@@ -93,25 +93,25 @@ new VPRequestBuilder('req-1')
 
 ### 3. Signed requests (new)
 
-Use `buildSigned()` to attach a verifier proof:
+Use `buildSigned()` to attach a verifier proof. The method handles the signing ceremony internally using `AssertionProofPurpose`:
 
 ```ts
+import type { KeyDoc } from '@1matrix/presentation-exchange';
+
+const keyDoc: KeyDoc = {
+  id: 'did:web:example#key-1',
+  type: 'EcdsaSecp256k1VerificationKey2019',
+  keypair: myKeypair,       // crypto keypair instance
+  controller: 'did:web:example',
+};
+
 const signedRequest = await new VPRequestBuilder('req-1')
   .setVerifier({ id: 'did:web:example', name: 'Example', url: 'https://example.com' })
   .addDocumentRequest(docReq)
-  .buildSigned(async (unsigned) => {
-    // Sign the unsigned request with your key
-    return {
-      type: 'DataIntegrityProof',
-      cryptosuite: 'eddsa-jcs-2022',
-      verificationMethod: 'did:web:example#key-1',
-      proofPurpose: 'assertionMethod',
-      challenge: unsigned.nonce,
-      domain: new URL(unsigned.verifierUrl).hostname,
-      proofValue: await sign(unsigned),
-    };
-  });
+  .buildSigned(keyDoc, resolver);
 ```
+
+The proof `domain` is derived from `verifierUrl` hostname and `challenge` from the request `nonce`.
 
 Proof is **optional** — unsigned requests still work for dev/testing.
 

@@ -25,7 +25,7 @@ export interface VerifierRequestProof {
   created?: string;
   cryptosuite?: string;
   verificationMethod: string;
-  proofPurpose: 'assertionMethod' | 'authentication';
+  proofPurpose: 'assertionMethod';
   challenge: string;
   domain: string;
   proofValue?: string;
@@ -129,3 +129,22 @@ export interface VPRequest {
 
 /** VPRequest without proof — the payload passed to a signing callback. */
 export type UnsignedVPRequest = Omit<VPRequest, 'proof'>;
+
+// ---------------------------------------------------------------------------
+// Signing helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Key document passed to credential-sdk's `signPresentation`.
+ * Contains the DID key identifier, type, keypair, and controller DID.
+ */
+export interface KeyDoc {
+  /** Fully-qualified key ID, e.g. `'did:ethr:0x...#controller'` */
+  id: string;
+  /** Key type, e.g. `'EcdsaSecp256k1VerificationKey2019'` */
+  type: string;
+  /** Crypto keypair instance (library-specific) */
+  keypair: unknown;
+  /** Controller DID */
+  controller: string;
+}

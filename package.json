@@ -15,7 +15,8 @@
     ]
   },
   "resolutions": {
-    "@digitalbazaar/http-client": "^3.4.1"
+    "@digitalbazaar/http-client": "^3.4.1",
+    "@digitalcredentials/open-badges-context": "^3.0.0"
   },
   "dependencies": {
     "ethers": "^6.16.0"

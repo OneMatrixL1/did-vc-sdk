@@ -23,9 +23,9 @@
       "default": "./dist/esm/*"
     },
     "./sod-verifier": {
-      "types": "./dist/types/utils/sod-verifier.d.ts",
-      "import": "./dist/esm/utils/sod-verifier.js",
-      "default": "./dist/esm/utils/sod-verifier.js"
+      "types": "./dist/types/icao/sod-verifier.d.ts",
+      "import": "./dist/esm/icao/sod-verifier.js",
+      "default": "./dist/esm/icao/sod-verifier.js"
     },
     "./dg-parser": {
       "types": "./dist/types/utils/dg-parser.d.ts",

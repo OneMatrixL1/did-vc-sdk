@@ -282,8 +282,8 @@ describe('CCCD full flow: create → fulfill → verify', () => {
   it('Step 1 — verifier builds a valid VPRequest', () => {
     expect(vpRequest.id).toBe('req-cccd-kyc');
     expect(vpRequest.nonce).toBe('nonce-abc-123');
-    expect(vpRequest.verifier.id).toBe('did:web:gov.vn');
-    expect(vpRequest.verifier.url).toBe('https://gov.vn');
+    expect(vpRequest.verifier).toBe('did:web:gov.vn');
+    expect(vpRequest.verifierUrl).toBe('https://gov.vn');
 
     const rule = vpRequest.rules;
     expect(rule.type).toBe('DocumentRequest');
@@ -336,6 +336,11 @@ describe('CCCD full flow: create → fulfill → verify', () => {
     expect(vp.verifiableCredential).toHaveLength(1);
     expect(vp.presentationSubmission).toHaveLength(1);
     expect(vp.presentationSubmission[0].docRequestID).toBe('dr-cccd');
+
+    // VP request-response binding fields
+    expect(vp.verifier).toBe('did:web:gov.vn');
+    expect(vp.requestId).toBe('req-cccd-kyc');
+    expect(vp.requestNonce).toBe('nonce-abc-123');
 
     // Derived credential has only the required DGs (dg13 + dg2), not all original data
     const cred = vp.verifiableCredential[0];

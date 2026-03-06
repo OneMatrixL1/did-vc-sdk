@@ -1,7 +1,9 @@
 import type { LocalizableString } from '../types/localization.js';
+import type { PresentedCredential } from '../types/credential.js';
 import type {
   VPRequest,
-  VerifierInfo,
+  UnsignedVPRequest,
+  VerifierRequestProof,
   DocumentRequestNode,
   DocumentRequest,
 } from '../types/request.js';
@@ -20,13 +22,19 @@ import { DocumentRequestBuilder } from './document-request-builder.js';
 export class VPRequestBuilder {
   private id: string;
 
-  private version = '1.0';
+  private version = '2.0';
 
   private name: LocalizableString = '';
 
   private nonce: string;
 
-  private verifier!: VerifierInfo;
+  private verifierId?: string;
+
+  private verifierName: LocalizableString = '';
+
+  private verifierUrl?: string;
+
+  private verifierCredentials: PresentedCredential[] = [];
 
   private createdAt: string;
 
@@ -59,8 +67,16 @@ export class VPRequestBuilder {
     return this;
   }
 
-  setVerifier(verifier: VerifierInfo): this {
-    this.verifier = verifier;
+  /** Same call-site shape as before: `{ id, name, url }`. */
+  setVerifier(verifier: { id: string; name: LocalizableString; url: string }): this {
+    this.verifierId = verifier.id;
+    this.verifierName = verifier.name;
+    this.verifierUrl = verifier.url;
+    return this;
+  }
+
+  addVerifierCredential(credential: PresentedCredential): this {
+    this.verifierCredentials.push(credential);
     return this;
   }
 
@@ -99,8 +115,9 @@ export class VPRequestBuilder {
     return this;
   }
 
+  /** Build an unsigned VPRequest (no proof). */
   build(): VPRequest {
-    if (!this.verifier) {
+    if (!this.verifierId) {
       throw new Error('VPRequestBuilder: verifier is required');
     }
 
@@ -120,20 +137,40 @@ export class VPRequestBuilder {
     }
 
     const req: VPRequest = {
+      type: ['VerifiablePresentationRequest'],
       id: this.id,
       version: this.version,
       name: this.name,
       nonce: this.nonce,
-      verifier: this.verifier,
+      verifier: this.verifierId,
+      verifierName: this.verifierName,
+      verifierUrl: this.verifierUrl!,
       createdAt: this.createdAt,
       expiresAt: this.expiresAt ?? new Date(Date.now() + 30 * 60_000).toISOString(),
       rules,
     };
+
+    if (this.verifierCredentials.length > 0) {
+      req.verifierCredentials = this.verifierCredentials;
+    }
 
     if (this.context) {
       req['@context'] = this.context;
     }
 
     return req;
+  }
+
+  /**
+   * Build and sign the VPRequest. The callback receives the unsigned request
+   * and must return a VerifierRequestProof.
+   */
+  async buildSigned(
+    signRequest: (unsigned: UnsignedVPRequest) => Promise<VerifierRequestProof>,
+  ): Promise<VPRequest> {
+    const unsigned = this.build();
+    const { proof: _, ...payload } = unsigned;
+    const proof = await signRequest(payload);
+    return { ...unsigned, proof };
   }
 }

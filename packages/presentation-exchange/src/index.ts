@@ -3,6 +3,8 @@ export type {
   LocalizedValue,
   LocalizableString,
   VPRequest,
+  UnsignedVPRequest,
+  VerifierRequestProof,
   VerifierInfo,
   DocumentRequestNode,
   LogicalRequestNode,
@@ -48,7 +50,8 @@ export type { ExtractedFields } from './resolver/index.js';
 
 // Verifier
 export { verifyPresentationStructure } from './verifier/index.js';
-export type { VerificationResult } from './verifier/index.js';
+export { verifyVPRequest } from './verifier/index.js';
+export type { VerificationResult, VerifyRequestOptions } from './verifier/index.js';
 
 // Schema Resolvers
 export { jsonSchemaResolver, createICAOSchemaResolver, createBBSResolver, isBBSProof, defaultResolvers } from './resolvers/index.js';

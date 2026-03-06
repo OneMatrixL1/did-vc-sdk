@@ -2,6 +2,8 @@ export type { LocalizedValue, LocalizableString } from './localization.js';
 
 export type {
   VPRequest,
+  UnsignedVPRequest,
+  VerifierRequestProof,
   VerifierInfo,
   DocumentRequestNode,
   LogicalRequestNode,

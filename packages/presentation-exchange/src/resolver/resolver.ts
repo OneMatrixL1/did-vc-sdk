@@ -20,6 +20,10 @@ export interface UnsignedPresentation {
   '@context': string[];
   type: ['VerifiablePresentation'];
   holder: string;
+  verifier: string;
+  requestId: string;
+  requestNonce: string;
+  verifierCredentials?: PresentedCredential[];
   verifiableCredential: PresentedCredential[];
   presentationSubmission: SubmissionEntry[];
 }
@@ -32,7 +36,7 @@ export interface ResolveOptions {
    * the built-in defaults (JsonSchema + ICAO9303SOD).
    */
   resolvers?: SchemaResolverMap;
-  /** Sign the presentation envelope (challenge = nonce, domain = verifier.url) */
+  /** Sign the presentation envelope (challenge = nonce, domain = verifierUrl) */
   signPresentation: (payload: UnsignedPresentation) => Promise<HolderProof>;
 }
 
@@ -114,6 +118,10 @@ export async function resolvePresentation(
     '@context': ['https://www.w3.org/ns/credentials/v2'],
     type: ['VerifiablePresentation'],
     holder: options.holder,
+    verifier: request.verifier,
+    requestId: request.id,
+    requestNonce: request.nonce,
+    ...(request.verifierCredentials?.length ? { verifierCredentials: request.verifierCredentials } : {}),
     verifiableCredential: presentedCredentials,
     presentationSubmission: submission,
   };

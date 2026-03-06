@@ -1,20 +1,34 @@
 import type { LocalizableString } from './localization.js';
+import type { ProofSystem, PresentedCredential } from './credential.js';
+
+export type { ProofSystem };
 
 // ---------------------------------------------------------------------------
-// Verifier info (defined before VPRequest which references it)
+// Verifier info
 // ---------------------------------------------------------------------------
 
+/** @deprecated Use flat verifier fields on VPRequest instead. */
 export interface VerifierInfo {
   id: string;
   name: LocalizableString;
   url: string;
+  /** Verifier's credentials proving their identity (selectively disclosed). */
+  credentials?: PresentedCredential[];
 }
 
 // ---------------------------------------------------------------------------
-// Proof system & conditions (defined before DocumentRequest which uses them)
+// Verifier request proof (mirrors HolderProof on the VP side)
 // ---------------------------------------------------------------------------
 
-export type ProofSystem = 'groth16' | 'plonk' | 'fflonk' | 'halo2' | 'stark' | (string & {});
+export interface VerifierRequestProof {
+  type: string;
+  cryptosuite?: string;
+  verificationMethod: string;
+  proofPurpose: 'assertionMethod';
+  challenge: string;
+  domain: string;
+  proofValue: string;
+}
 
 export interface DiscloseCondition {
   type: 'DocumentCondition';
@@ -95,13 +109,21 @@ export type DocumentRequestNode = LogicalRequestNode | DocumentRequest;
 // ---------------------------------------------------------------------------
 
 export interface VPRequest {
+  '@context'?: string[];
+  type: ['VerifiablePresentationRequest'];
   id: string;
   version: string;
   name: LocalizableString;
   nonce: string;
-  verifier: VerifierInfo;
+  verifier: string;
+  verifierName: LocalizableString;
+  verifierUrl: string;
+  verifierCredentials?: PresentedCredential[];
   createdAt: string;
   expiresAt: string;
-  '@context'?: string[];
   rules: DocumentRequestNode;
+  proof?: VerifierRequestProof;
 }
+
+/** VPRequest without proof — the payload passed to a signing callback. */
+export type UnsignedVPRequest = Omit<VPRequest, 'proof'>;

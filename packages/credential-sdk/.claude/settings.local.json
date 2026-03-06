@@ -10,7 +10,10 @@
       "Bash(yarn jest:*)",
       "Bash(npx turbo:*)",
       "Bash(yarn build:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npx vitest:*)",
+      "Bash(grep:*)",
+      "Bash(node:*)"
     ]
   }
 }

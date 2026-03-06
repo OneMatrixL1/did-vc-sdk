@@ -47,7 +47,7 @@ export type CredentialProof = DataIntegrityProof | ZKPProof;
 export interface PresentedCredential {
   '@context'?: string[];
   id?: string;
-  type: string[];
+  type: string[] | readonly string[];
   issuer: string | { id: string; name?: string };
   issuanceDate?: string;
   credentialSubject: Record<string, unknown>;

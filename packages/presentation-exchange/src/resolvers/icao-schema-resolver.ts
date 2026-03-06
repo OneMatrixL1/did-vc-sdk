@@ -47,12 +47,8 @@ function detectProfile(credential: MatchableCredential): ICAODocumentProfile | u
  * DGs are stored as base64 strings keyed by DG name (e.g. 'dg1', 'dg2', 'dg13').
  */
 function extractRawDGs(credential: MatchableCredential): Record<string, string> {
-  const subject = Array.isArray(credential.credentialSubject)
-    ? credential.credentialSubject[0]
-    : credential.credentialSubject;
-
   const rawDGs: Record<string, string> = {};
-  for (const [key, value] of Object.entries(subject)) {
+  for (const [key, value] of Object.entries(credential.credentialSubject)) {
     if (key.startsWith('dg') && typeof value === 'string') {
       rawDGs[key] = value;
     }
@@ -105,13 +101,9 @@ export function createICAOSchemaResolver(defaultProfile?: ICAODocumentProfile): 
       const requiredDGNames = getRequiredDGs(profile, disclosedFields);
 
       // Build credentialSubject with only the required DGs
-      const subject = Array.isArray(credential.credentialSubject)
-        ? credential.credentialSubject[0]
-        : credential.credentialSubject;
-
       const selectiveSubject: Record<string, unknown> = {};
-      if (subject.id !== undefined) {
-        selectiveSubject.id = subject.id;
+      if (credential.credentialSubject.id !== undefined) {
+        selectiveSubject.id = credential.credentialSubject.id;
       }
       for (const dgName of requiredDGNames) {
         if (rawDGs[dgName]) {

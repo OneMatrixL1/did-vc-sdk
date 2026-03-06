@@ -11,20 +11,13 @@ function credentialToSelective(
   cred: MatchableCredential,
   disclosedFields: string[],
 ): PresentedCredential {
-  const subject = Array.isArray(cred.credentialSubject)
-    ? cred.credentialSubject[0]
-    : cred.credentialSubject;
-
   const selectiveSubject: Record<string, unknown> = {};
-  if (subject.id !== undefined) {
-    selectiveSubject.id = subject.id;
+  if (cred.credentialSubject.id !== undefined) {
+    selectiveSubject.id = cred.credentialSubject.id;
   }
 
   for (const fieldPath of disclosedFields) {
-    const { found, value } = resolveJsonPath(
-      { ...cred, credentialSubject: subject },
-      fieldPath,
-    );
+    const { found, value } = resolveJsonPath(cred, fieldPath);
     if (found && fieldPath.startsWith('$.credentialSubject.')) {
       const parts = fieldPath.split('.');
       const lastSeg = parts[parts.length - 1]!;
@@ -70,11 +63,7 @@ export const jsonSchemaResolver: SchemaResolver = {
     credential: MatchableCredential,
     field: string,
   ): { found: boolean; value: unknown } {
-    const subject = Array.isArray(credential.credentialSubject)
-      ? credential.credentialSubject[0]
-      : credential.credentialSubject;
-    const credObj = { ...credential, credentialSubject: subject };
-    return resolveJsonPath(credObj, field);
+    return resolveJsonPath(credential, field);
   },
 
   deriveCredential(

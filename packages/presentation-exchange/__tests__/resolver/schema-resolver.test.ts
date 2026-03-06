@@ -4,6 +4,7 @@ import { jsonSchemaResolver } from '../../src/resolvers/json-schema-resolver.js'
 import { createICAOSchemaResolver } from '../../src/resolvers/icao-schema-resolver.js';
 import { matchCredentials } from '../../src/resolver/matcher.js';
 import { resolvePresentation } from '../../src/resolver/resolver.js';
+import { verifyPresentationStructure } from '../../src/verifier/structural-verifier.js';
 import { DocumentRequestBuilder } from '../../src/builder/document-request-builder.js';
 import { VPRequestBuilder } from '../../src/builder/request-builder.js';
 import type { DocumentRequestMatch } from '../../src/types/matching.js';
@@ -255,35 +256,64 @@ describe('matchCredentials with built-in resolvers', () => {
 });
 
 // ---------------------------------------------------------------------------
-// ICAO resolvePresentation E2E
+// CCCD full flow: create VPRequest → fulfill → verify
 // ---------------------------------------------------------------------------
 
-describe('ICAO resolvePresentation E2E', () => {
-  it('match → resolve → verify with ICAO CCCD credential', async () => {
-    const request = new VPRequestBuilder('req-icao', 'test-nonce')
-      .setName('CCCD Verification')
-      .setVerifier({
-        id: 'did:web:gov.vn',
-        name: 'Gov Portal',
-        url: 'https://gov.vn',
-      })
-      .setExpiresAt('2099-12-31T23:59:59Z')
-      .addDocumentRequest(
-        new DocumentRequestBuilder('dr-cccd', 'CCCDCredential')
-          .setSchemaType('ICAO9303SOD')
-          .disclose('c-name', 'fullName', { purpose: 'Họ và tên' })
-          .disclose('c-address', 'permanentAddress', { purpose: 'Địa chỉ' })
-          .disclose('c-photo', 'photo', { purpose: 'Ảnh', optional: true }),
-      )
-      .build();
+describe('CCCD full flow: create → fulfill → verify', () => {
+  // --- Step 1: Verifier creates VPRequest ---
+  const vpRequest = new VPRequestBuilder('req-cccd-kyc', 'nonce-abc-123')
+    .setName('CCCD Identity Verification')
+    .setVerifier({
+      id: 'did:web:gov.vn',
+      name: 'Vietnam Gov Portal',
+      url: 'https://gov.vn',
+    })
+    .setExpiresAt('2099-12-31T23:59:59Z')
+    .addDocumentRequest(
+      new DocumentRequestBuilder('dr-cccd', 'CCCDCredential')
+        .setSchemaType('ICAO9303SOD')
+        .disclose('c-name', 'fullName', { purpose: 'Họ và tên' })
+        .disclose('c-dob', 'dateOfBirth', { purpose: 'Ngày sinh' })
+        .disclose('c-address', 'permanentAddress', { purpose: 'Địa chỉ thường trú' })
+        .disclose('c-photo', 'photo', { purpose: 'Ảnh chân dung', optional: true }),
+    )
+    .build();
 
-    // Match
-    const matchResult = matchCredentials(request.rules, [icaoCredential]);
-    expect(matchResult.satisfied).toBe(true);
+  it('Step 1 — verifier builds a valid VPRequest', () => {
+    expect(vpRequest.id).toBe('req-cccd-kyc');
+    expect(vpRequest.nonce).toBe('nonce-abc-123');
+    expect(vpRequest.verifier.id).toBe('did:web:gov.vn');
+    expect(vpRequest.verifier.url).toBe('https://gov.vn');
 
-    // Resolve
-    const vp = await resolvePresentation(
-      request,
+    const rule = vpRequest.rules;
+    expect(rule.type).toBe('DocumentRequest');
+    if (rule.type === 'DocumentRequest') {
+      expect(rule.schemaType).toBe('ICAO9303SOD');
+      expect(rule.docType).toContain('CCCDCredential');
+      expect(rule.conditions).toHaveLength(4);
+    }
+  });
+
+  it('Step 2 — holder wallet matches CCCD credential against the request', () => {
+    const matchResult = matchCredentials(vpRequest.rules, [icaoCredential]);
+    const match = matchResult as DocumentRequestMatch;
+
+    expect(match.satisfied).toBe(true);
+    expect(match.candidates).toHaveLength(1);
+    expect(match.candidates[0].fullyQualified).toBe(true);
+    // All required + optional fields resolvable from our DGs
+    expect(match.candidates[0].disclosedFields).toContain('fullName');
+    expect(match.candidates[0].disclosedFields).toContain('dateOfBirth');
+    expect(match.candidates[0].disclosedFields).toContain('permanentAddress');
+    expect(match.candidates[0].disclosedFields).toContain('photo');
+    expect(match.candidates[0].missingFields).toHaveLength(0);
+  });
+
+  let vp: Awaited<ReturnType<typeof resolvePresentation>>;
+
+  it('Step 3 — holder wallet resolves VP (selective disclosure + sign)', async () => {
+    vp = await resolvePresentation(
+      vpRequest,
       [icaoCredential],
       [{ docRequestID: 'dr-cccd', credentialIndex: 0 }],
       {
@@ -293,23 +323,58 @@ describe('ICAO resolvePresentation E2E', () => {
           cryptosuite: 'eddsa-rdfc-2022',
           verificationMethod: 'did:vbsn:cccd:test-key#keys-1',
           proofPurpose: 'authentication',
-          challenge: request.nonce,
+          challenge: vpRequest.nonce,
           domain: 'gov.vn',
-          proofValue: 'mock-signature',
+          proofValue: 'mock-holder-signature',
         }),
       },
     );
 
+    // VP structure
+    expect(vp.type).toContain('VerifiablePresentation');
+    expect(vp.holder).toBe('did:vbsn:cccd:test-key');
     expect(vp.verifiableCredential).toHaveLength(1);
-    const presented = vp.verifiableCredential[0];
+    expect(vp.presentationSubmission).toHaveLength(1);
+    expect(vp.presentationSubmission[0].docRequestID).toBe('dr-cccd');
 
-    // Derived credential should contain dg13 + dg2 (sources for fullName, permanentAddress, photo)
-    expect(presented.credentialSubject.dg13).toBe(dg13Base64);
-    expect(presented.credentialSubject.dg2).toBe(dg2Base64);
-    expect(presented.credentialSubject.id).toBe('did:vbsn:cccd:test-key');
+    // Derived credential has only the required DGs (dg13 + dg2), not all original data
+    const cred = vp.verifiableCredential[0];
+    expect(cred.type).toContain('CCCDCredential');
+    expect(cred.issuer).toBe('did:web:cccd.gov.vn');
+    expect(cred.credentialSubject.dg13).toBe(dg13Base64);
+    expect(cred.credentialSubject.dg2).toBe(dg2Base64);
+    expect(cred.credentialSubject.id).toBe('did:vbsn:cccd:test-key');
 
-    // Proof preserved for SOD verification
-    expect((presented as Record<string, unknown>).proof).toBeDefined();
+    // SOD proof preserved for verifier to check
+    expect((cred as Record<string, unknown>).proof).toBeDefined();
+  });
+
+  it('Step 4 — verifier validates VP structure against original request', () => {
+    const result = verifyPresentationStructure(vpRequest, vp);
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('Step 5 — verifier reads disclosed fields from the presented credential', () => {
+    const resolver = createICAOSchemaResolver();
+    const cred = vp.verifiableCredential[0];
+
+    const fullName = resolver.resolveField(cred, 'fullName');
+    expect(fullName.found).toBe(true);
+    expect(fullName.value).toBe('NGUYEN VAN A');
+
+    const dob = resolver.resolveField(cred, 'dateOfBirth');
+    expect(dob.found).toBe(true);
+    expect(dob.value).toBe('15/03/1985');
+
+    const address = resolver.resolveField(cred, 'permanentAddress');
+    expect(address.found).toBe(true);
+    expect(address.value).toBe('123 Main St, Hanoi');
+
+    const photo = resolver.resolveField(cred, 'photo');
+    expect(photo.found).toBe(true);
+    expect(typeof photo.value).toBe('string');
   });
 });
 

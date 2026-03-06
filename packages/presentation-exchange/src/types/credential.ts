@@ -1,3 +1,5 @@
+import { CredentialProof } from './response';
+
 /**
  * Structural supertype for credentials that can be matched against a VPRequest.
  * Compatible with the app's existing VerifiableCredential from vc.types.ts
@@ -6,8 +8,8 @@
 export interface MatchableCredential {
   type: readonly string[] | string[];
   issuer: string | { id: string; name?: string };
-  credentialSubject: Record<string, unknown> | readonly Record<string, unknown>[];
-  proof?: unknown;
+  credentialSubject: Record<string, unknown>;
+  proof?: CredentialProof | CredentialProof[] | undefined;
   [key: string]: unknown;
 }
 

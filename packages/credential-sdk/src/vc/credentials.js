@@ -3,7 +3,7 @@ import jsigs from 'jsonld-signatures';
 import {
   statusTypeMatches,
   checkStatus,
-} from '@digitalcredentials/vc-status-list';
+} from '@digitalbazaar/vc-status-list';
 
 import base64url from 'base64url';
 import {

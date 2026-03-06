@@ -45,7 +45,7 @@ export type CredentialProof = DataIntegrityProof | ZKPProof;
 // ---------------------------------------------------------------------------
 
 export interface PresentedCredential {
-  '@context'?: string[];
+  '@context'?: (string | Record<string, unknown>)[];
   id?: string;
   type: string[] | readonly string[];
   issuer: string | { id: string; name?: string };
@@ -60,9 +60,15 @@ export interface PresentedCredential {
 // ---------------------------------------------------------------------------
 
 export interface VerifiablePresentation {
-  '@context': string[];
+  '@context': (string | Record<string, unknown>)[];
   type: ['VerifiablePresentation'];
   holder: string;
+  /** Echoed request ID — binds this VP to the specific VPRequest. */
+  requestId?: string;
+  /** Echoed request nonce — binds this VP to the specific VPRequest. */
+  requestNonce?: string;
+  /** Echoed verifier DID — binds this VP to the intended verifier. */
+  verifier?: string;
   verifiableCredential: PresentedCredential[];
   presentationSubmission: SubmissionEntry[];
   proof: HolderProof;

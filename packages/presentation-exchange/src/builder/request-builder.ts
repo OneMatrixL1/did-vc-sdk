@@ -1,5 +1,5 @@
 import type { LocalizableString } from '../types/localization.js';
-import type { PresentedCredential } from '../types/credential.js';
+import type { PresentedCredential } from '../types/response.js';
 import type {
   VPRequest,
   UnsignedVPRequest,

@@ -57,6 +57,10 @@
       "import": "./dist/esm/vc/index.js",
       "default": "./dist/esm/vc/index.js"
     },
+    "./ethr-did": {
+      "import": "./dist/esm/modules/ethr-did/index.js",
+      "default": "./dist/esm/modules/ethr-did/index.js"
+    },
     "./vc-crypto-secp256k1-2019": {
       "types": "./dist/types/vc/crypto/EcdsaSecp256k1Signature2019.d.ts",
       "import": "./dist/esm/vc/crypto/EcdsaSecp256k1Signature2019.js",
@@ -76,7 +80,7 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@digitalcredentials/vc-status-list": "^9.0.0",
+    "@digitalbazaar/vc-status-list": "^8.0.1",
     "@docknetwork/crypto-wasm-ts": "^0.67.0",
     "@juanelas/base64": "^1.1.5",
     "@sphereon/ssi-sdk-ext.did-resolver-jwk": "^0.26.0",

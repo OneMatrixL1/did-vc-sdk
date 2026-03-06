@@ -1,7 +1,7 @@
 import type { LocalizableString } from './localization.js';
-import type { ProofSystem, PresentedCredential } from './credential.js';
+import type { PresentedCredential } from './response.js';
 
-export type { ProofSystem };
+export type ProofSystem = 'groth16' | 'plonk' | 'halo2' | 'bulletproofs';
 
 // ---------------------------------------------------------------------------
 // Verifier info
@@ -22,12 +22,14 @@ export interface VerifierInfo {
 
 export interface VerifierRequestProof {
   type: string;
+  created?: string;
   cryptosuite?: string;
   verificationMethod: string;
-  proofPurpose: 'assertionMethod';
+  proofPurpose: 'assertionMethod' | 'authentication';
   challenge: string;
   domain: string;
-  proofValue: string;
+  proofValue?: string;
+  jws?: string;
 }
 
 export interface DiscloseCondition {

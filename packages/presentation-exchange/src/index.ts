@@ -28,6 +28,7 @@ export type {
   CredentialSelection,
   SchemaResolver,
   SchemaResolverMap,
+  DeriveOptions,
 } from './types/index.js';
 
 export { getCredentialIssuerId } from './types/credential.js';
@@ -50,7 +51,7 @@ export { verifyPresentationStructure } from './verifier/index.js';
 export type { VerificationResult } from './verifier/index.js';
 
 // Schema Resolvers
-export { jsonSchemaResolver, createICAOSchemaResolver, defaultResolvers } from './resolvers/index.js';
+export { jsonSchemaResolver, createICAOSchemaResolver, createBBSResolver, isBBSProof, defaultResolvers } from './resolvers/index.js';
 
 // Utils
 export { resolveJsonPath } from './utils/jsonpath.js';

@@ -35,4 +35,4 @@ export type {
   CredentialSelection,
 } from './matching.js';
 
-export type { SchemaResolver, SchemaResolverMap } from './schema-resolver.js';
+export type { SchemaResolver, SchemaResolverMap, DeriveOptions } from './schema-resolver.js';

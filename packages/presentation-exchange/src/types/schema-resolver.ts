@@ -1,6 +1,10 @@
 import type { MatchableCredential } from './credential.js';
 import type { PresentedCredential } from './response.js';
 
+export interface DeriveOptions {
+  nonce?: string;
+}
+
 /**
  * Schema-specific resolver for field resolution and credential derivation.
  *
@@ -29,6 +33,7 @@ export interface SchemaResolver {
   deriveCredential(
     credential: MatchableCredential,
     disclosedFields: string[],
+    options?: DeriveOptions,
   ): Promise<PresentedCredential>;
 }
 

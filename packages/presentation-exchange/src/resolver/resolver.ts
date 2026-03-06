@@ -9,6 +9,7 @@ import type {
 import type { CredentialSelection } from '../types/matching.js';
 import type { SchemaResolverMap } from '../types/schema-resolver.js';
 import { defaultResolvers } from '../resolvers/index.js';
+import { createBBSResolver, isBBSProof } from '../resolvers/bbs-resolver.js';
 import { extractConditions } from './field-extractor.js';
 
 // ---------------------------------------------------------------------------
@@ -81,10 +82,10 @@ export async function resolvePresentation(
 
   const presentedList = await Promise.all(items.map(({ docReq, cred }) => {
     if (docReq.disclosureMode === 'full') {
-      return Promise.resolve(credentialToFull(cred));
+      return Promise.resolve(cred);
     }
 
-    const resolver = resolvers[docReq.schemaType];
+    let resolver = resolvers[docReq.schemaType];
     if (!resolver) {
       throw new Error(
         `No SchemaResolver registered for schemaType "${docReq.schemaType}". ` +
@@ -92,9 +93,13 @@ export async function resolvePresentation(
       );
     }
 
+    if (isBBSProof(cred)) {
+      resolver = createBBSResolver(resolver);
+    }
+
     const { disclose } = extractConditions(docReq.conditions);
     const disclosedFields = disclose.map((d) => d.field);
-    return resolver.deriveCredential(cred, disclosedFields);
+    return resolver.deriveCredential(cred, disclosedFields, { nonce: request.nonce });
   }));
 
   const presentedCredentials: PresentedCredential[] = [];
@@ -139,40 +144,4 @@ function collectDocumentRequests(
 
   walk(node);
   return map;
-}
-
-/**
- * Pass the credential through verbatim — all fields, original proof intact.
- * Used for disclosureMode === 'full'.
- */
-function credentialToFull(cred: MatchableCredential): PresentedCredential {
-  const subject = Array.isArray(cred.credentialSubject)
-    ? { ...cred.credentialSubject[0] }
-    : { ...cred.credentialSubject };
-
-  const types = [...(cred.type as readonly string[])];
-  const issuer = typeof cred.issuer === 'string'
-    ? cred.issuer
-    : { ...cred.issuer };
-
-  const presented: PresentedCredential = {
-    type: types,
-    issuer,
-    credentialSubject: subject,
-  };
-
-  if (cred['@context']) {
-    presented['@context'] = [...(cred['@context'] as string[])];
-  }
-  if (cred.issuanceDate !== undefined) {
-    presented.issuanceDate = cred.issuanceDate as string;
-  }
-  if (cred.id !== undefined) {
-    presented.id = cred.id as string;
-  }
-  if (cred.proof !== undefined) {
-    (presented as Record<string, unknown>).proof = cred.proof;
-  }
-
-  return presented;
 }

@@ -8,8 +8,7 @@ import type {
   KeyDoc,
 } from '../types/request.js';
 import { DocumentRequestBuilder } from './document-request-builder.js';
-import { signPresentation } from '@1matrix/credential-sdk/vc';
-import jsigs from 'jsonld-signatures';
+import { signWithAssertionPurpose } from '@1matrix/credential-sdk/vc';
 
 /**
  * Fluent builder for VPRequest.
@@ -174,7 +173,7 @@ export class VPRequestBuilder {
    */
   async buildSigned(
     keyDoc: KeyDoc,
-    resolver?: unknown,
+    resolver?: object,
   ): Promise<VPRequest> {
     const unsigned = this.build();
 
@@ -192,18 +191,12 @@ export class VPRequestBuilder {
       holder: unsigned.verifier,
     };
 
-    const { AssertionProofPurpose } = jsigs.purposes;
-    const purpose = new AssertionProofPurpose({ domain, challenge });
-
-    const signed = await signPresentation(
+    const signed = await signWithAssertionPurpose(
       vpLikeDoc,
       keyDoc,
       challenge,
       domain,
-      resolver ?? null,
-      true,    // compactProof
-      purpose,
-      false,   // addSuiteContext — avoid redefining credentials/v1 terms
+      resolver,
     );
 
     const proof = (signed as Record<string, unknown>).proof as VerifierRequestProof;

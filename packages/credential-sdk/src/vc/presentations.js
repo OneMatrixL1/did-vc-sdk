@@ -283,6 +283,24 @@ export async function signPresentation(
   return signed;
 }
 
+/**
+ * Sign a document using AssertionProofPurpose.
+ * Used by presentation-exchange to sign VPRequests so consumers
+ * don't need to import jsonld-signatures directly.
+ *
+ * @param {object} document - The document to sign
+ * @param {object} keyDoc - Key document with id, controller, type, keypair
+ * @param {string} challenge - Proof challenge
+ * @param {string} domain - Proof domain
+ * @param {object} [resolver] - Optional DID resolver
+ * @returns {Promise<object>} Signed document with proof
+ */
+export async function signWithAssertionPurpose(document, keyDoc, challenge, domain, resolver = null) {
+  const { AssertionProofPurpose } = jsigs.purposes;
+  const purpose = new AssertionProofPurpose({ domain, challenge });
+  return signPresentation(document, keyDoc, challenge, domain, resolver, true, purpose, false);
+}
+
 export function isAnoncreds(presentation) {
   // Since there is no type parameter present we have to guess by checking field types
   // these wont exist in a standard VP

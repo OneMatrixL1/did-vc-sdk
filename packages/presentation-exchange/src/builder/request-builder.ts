@@ -180,11 +180,26 @@ export class VPRequestBuilder {
     const domain = new URL(unsigned.verifierUrl).hostname;
     const challenge = unsigned.nonce;
 
-    // Wrap the request as a VP-like LD document so signPresentation can sign it.
+    // Inline context maps VPRequest-specific terms to IRIs so
+    // JSON-LD canonicalization includes them in the signed hash.
+    // `rules` uses @json to avoid recursive expansion of the tree.
+    const vpRequestContext = {
+      verifier: { '@id': 'https://w3id.org/vprequest#verifier', '@type': '@id' },
+      version: 'https://schema.org/version',
+      name: 'https://schema.org/name',
+      nonce: 'https://w3id.org/security#nonce',
+      verifierName: 'https://schema.org/alternateName',
+      verifierUrl: 'https://schema.org/url',
+      verifierCredentials: 'https://w3id.org/security#verifiableCredential',
+      createdAt: 'https://schema.org/dateCreated',
+      expiresAt: 'https://schema.org/expires',
+      rules: { '@id': 'https://w3id.org/vprequest#rules', '@type': '@json' },
+    };
+
     const vpLikeDoc = {
       '@context': [
         'https://www.w3.org/2018/credentials/v1',
-        ...(unsigned['@context'] ?? []),
+        vpRequestContext,
       ],
       ...unsigned,
       type: ['VerifiablePresentation'],

@@ -297,7 +297,26 @@ export async function signPresentation(
  */
 export async function signWithAssertionPurpose(document, keyDoc, challenge, domain, resolver = null) {
   const { AssertionProofPurpose } = jsigs.purposes;
-  const purpose = new AssertionProofPurpose({ domain, challenge });
+
+  // AssertionProofPurpose doesn't include challenge/domain in the proof
+  // (only AuthenticationProofPurpose does). We extend it so verifiers can
+  // validate the proof is bound to a specific nonce + domain.
+  class AssertionWithChallenge extends AssertionProofPurpose {
+    constructor(opts) {
+      super(opts);
+      this.challenge = opts.challenge;
+      this.domain = opts.domain;
+    }
+
+    async update(proof, args) {
+      proof = await super.update(proof, args);
+      proof.challenge = this.challenge;
+      proof.domain = this.domain;
+      return proof;
+    }
+  }
+
+  const purpose = new AssertionWithChallenge({ domain, challenge });
   return signPresentation(document, keyDoc, challenge, domain, resolver, true, purpose, false);
 }
 

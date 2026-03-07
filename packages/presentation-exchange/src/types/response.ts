@@ -18,6 +18,13 @@ export interface SubmissionEntry {
   credentialIndex: number;
 }
 
+/**
+ * Proof attached to a VerifiablePresentation by the holder.
+ *
+ * Supports multiple signature suites:
+ * - `jws` — EcdsaSecp256k1 suites (Signature2019, Signature2020)
+ * - `proofValue` — DataIntegrity / BBS+ suites
+ */
 export interface HolderProof {
   type: string;
   cryptosuite?: string;
@@ -25,7 +32,11 @@ export interface HolderProof {
   proofPurpose: 'authentication';
   challenge: string;
   domain: string;
-  proofValue: string;
+  /** JWS value — present for EcdsaSecp256k1 signature suites. */
+  jws?: string;
+  /** Proof value — present for DataIntegrity / BBS+ suites. */
+  proofValue?: string;
+  [key: string]: unknown;
 }
 
 // ---------------------------------------------------------------------------

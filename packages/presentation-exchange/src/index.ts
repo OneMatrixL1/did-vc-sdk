@@ -52,7 +52,11 @@ export type { ExtractedFields } from './resolver/index.js';
 // Verifier
 export { verifyPresentationStructure } from './verifier/index.js';
 export { verifyVPRequest } from './verifier/index.js';
-export type { VerificationResult, VerifyRequestOptions } from './verifier/index.js';
+export { verifyVPResponse } from './verifier/index.js';
+export type { VerificationResult, VerifyRequestOptions, VerifyVPResponseOptions, VerifyVPResponseResult } from './verifier/index.js';
+
+// Signer
+export { signVPResponse } from './signer/index.js';
 
 // Schema Resolvers
 export { jsonSchemaResolver, createICAOSchemaResolver, createBBSResolver, isBBSProof, defaultResolvers } from './resolvers/index.js';
@@ -60,3 +64,5 @@ export { jsonSchemaResolver, createICAOSchemaResolver, createBBSResolver, isBBSP
 // Utils
 export { resolveJsonPath } from './utils/jsonpath.js';
 export { resolveLocalized } from './utils/localization.js';
+export { createKeyDoc } from './utils/keydoc.js';
+export type { KeySystem } from './utils/keydoc.js';

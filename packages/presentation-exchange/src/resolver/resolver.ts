@@ -1,5 +1,5 @@
 import type { MatchableCredential } from '../types/credential.js';
-import type { VPRequest, DocumentRequest, DocumentRequestNode } from '../types/request.js';
+import type { VPRequest, DocumentRequest, DocumentRequestNode, KeyDoc } from '../types/request.js';
 import type {
   VerifiablePresentation,
   PresentedCredential,
@@ -11,6 +11,7 @@ import type { SchemaResolverMap } from '../types/schema-resolver.js';
 import { defaultResolvers } from '../resolvers/index.js';
 import { createBBSResolver, isBBSProof } from '../resolvers/bbs-resolver.js';
 import { extractConditions } from './field-extractor.js';
+import { signVPResponse } from '../signer/vp-signer.js';
 
 // ---------------------------------------------------------------------------
 // Options
@@ -28,16 +29,35 @@ export interface UnsignedPresentation {
   presentationSubmission: SubmissionEntry[];
 }
 
+/**
+ * Options for {@link resolvePresentation}.
+ *
+ * Provide **one** of `keyDoc` or `signPresentation` to sign the VP envelope:
+ *
+ * @example
+ * // Recommended — automatic signing via createKeyDoc
+ * { holder: did, keyDoc: createKeyDoc(did, keypair, 'secp256k1') }
+ *
+ * // Custom signing callback
+ * { holder: did, signPresentation: async (unsigned) => { ... } }
+ */
 export interface ResolveOptions {
-  /** The holder's DID */
+  /** The holder's DID. */
   holder: string;
   /**
    * Optional — extra or overriding resolvers merged on top of
    * the built-in defaults (JsonSchema + ICAO9303SOD).
    */
   resolvers?: SchemaResolverMap;
-  /** Sign the presentation envelope (challenge = nonce, domain = verifierUrl) */
-  signPresentation: (payload: UnsignedPresentation) => Promise<HolderProof>;
+  /** Custom signing callback (challenge = nonce, domain = verifierUrl). */
+  signPresentation?: (payload: UnsignedPresentation) => Promise<HolderProof>;
+  /**
+   * Alternative to `signPresentation` — a {@link KeyDoc} for automatic signing
+   * via credential-sdk. Use {@link createKeyDoc} to create one.
+   */
+  keyDoc?: KeyDoc;
+  /** Optional DID resolver forwarded to credential-sdk when using `keyDoc`. */
+  didResolver?: object;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +146,18 @@ export async function resolvePresentation(
     presentationSubmission: submission,
   };
 
-  const proof = await options.signPresentation(unsigned);
+  let sign: (payload: UnsignedPresentation) => Promise<HolderProof>;
+
+  if (options.signPresentation) {
+    sign = options.signPresentation;
+  } else if (options.keyDoc) {
+    const { keyDoc, didResolver } = options;
+    sign = (payload) => signVPResponse(payload, keyDoc, request.nonce, request.verifierUrl, didResolver);
+  } else {
+    throw new Error('ResolveOptions requires either "signPresentation" or "keyDoc"');
+  }
+
+  const proof = await sign(unsigned);
 
   return { ...unsigned, proof };
 }

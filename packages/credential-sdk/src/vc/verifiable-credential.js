@@ -27,15 +27,18 @@ import {
 class VerifiableCredential {
   /**
    * Create a new Verifiable Credential instance.
-   * @param {string} id - id of the credential
+   * @param {string} [id] - Optional id of the credential
    */
   constructor(id) {
     if (id) {
       this.setId(id);
     }
 
+    /** @type {string[]} */
     this.context = [DEFAULT_CONTEXT];
+    /** @type {string[]} */
     this.type = [DEFAULT_TYPE];
+    /** @type {object | object[]} */
     this.credentialSubject = [];
     this.setIssuanceDate(new Date().toISOString());
   }

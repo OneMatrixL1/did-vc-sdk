@@ -3,6 +3,8 @@ export type {
   LocalizedValue,
   LocalizableString,
   VPRequest,
+  UnsignedVPRequest,
+  VerifierRequestProof,
   VerifierInfo,
   DocumentRequestNode,
   LogicalRequestNode,
@@ -13,6 +15,7 @@ export type {
   DiscloseCondition,
   ZKPCondition,
   ProofSystem,
+  KeyDoc,
   VerifiablePresentation,
   SubmissionEntry,
   HolderProof,
@@ -26,6 +29,9 @@ export type {
   DocumentRequestMatch,
   CandidateCredential,
   CredentialSelection,
+  SchemaResolver,
+  SchemaResolverMap,
+  DeriveOptions,
 } from './types/index.js';
 
 export { getCredentialIssuerId } from './types/credential.js';
@@ -45,7 +51,11 @@ export type { ExtractedFields } from './resolver/index.js';
 
 // Verifier
 export { verifyPresentationStructure } from './verifier/index.js';
-export type { VerificationResult } from './verifier/index.js';
+export { verifyVPRequest } from './verifier/index.js';
+export type { VerificationResult, VerifyRequestOptions } from './verifier/index.js';
+
+// Schema Resolvers
+export { jsonSchemaResolver, createICAOSchemaResolver, createBBSResolver, isBBSProof, defaultResolvers } from './resolvers/index.js';
 
 // Utils
 export { resolveJsonPath } from './utils/jsonpath.js';

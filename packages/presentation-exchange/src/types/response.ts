@@ -1,17 +1,17 @@
-import type { ProofSystem } from './request.js';
+// Re-export credential proof types for backward compatibility
+export type {
+  ProofSystem,
+  DataIntegrityProof,
+  ZKPProof,
+  CredentialProof,
+  PresentedCredential,
+} from './credential.js';
+
+import type { PresentedCredential } from './credential.js';
 
 // ---------------------------------------------------------------------------
-// Verifiable Presentation (VP response)
+// Supporting types (defined before they are referenced)
 // ---------------------------------------------------------------------------
-
-export interface VerifiablePresentation {
-  '@context': string[];
-  type: ['VerifiablePresentation'];
-  holder: string;
-  verifiableCredential: PresentedCredential[];
-  presentationSubmission: SubmissionEntry[];
-  proof: HolderProof;
-}
 
 export interface SubmissionEntry {
   docRequestID: string;
@@ -29,37 +29,18 @@ export interface HolderProof {
 }
 
 // ---------------------------------------------------------------------------
-// Presented credential (may have derived proof)
+// Verifiable Presentation (VP response)
 // ---------------------------------------------------------------------------
 
-export interface PresentedCredential {
-  '@context'?: string[];
-  id?: string;
-  type: string[];
-  issuer: string | { id: string; name?: string };
-  issuanceDate?: string;
-  credentialSubject: Record<string, unknown>;
-  proof?: CredentialProof | CredentialProof[];
-  [key: string]: unknown;
-}
-
-export type CredentialProof = DataIntegrityProof | ZKPProof;
-
-export interface DataIntegrityProof {
-  type: 'DataIntegrityProof';
-  cryptosuite: string;
-  proofValue?: string;
-  sodSignature?: string;
-  dgHashes?: Record<string, string>;
-  [key: string]: unknown;
-}
-
-export interface ZKPProof {
-  type: 'ZKPProof';
-  conditionID: string;
-  circuitId: string;
-  proofSystem: ProofSystem;
-  publicInputs: Record<string, unknown>;
-  publicOutputs: Record<string, unknown>;
-  proofValue: string;
+export interface VerifiablePresentation {
+  '@context': (string | Record<string, unknown>)[];
+  type: ['VerifiablePresentation'];
+  holder: string;
+  verifier: string;
+  requestId: string;
+  requestNonce: string;
+  verifierCredentials?: PresentedCredential[];
+  verifiableCredential: PresentedCredential[];
+  presentationSubmission: SubmissionEntry[];
+  proof: HolderProof;
 }

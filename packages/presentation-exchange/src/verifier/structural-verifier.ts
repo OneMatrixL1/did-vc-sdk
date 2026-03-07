@@ -1,5 +1,5 @@
 import type { VPRequest, DocumentRequestNode, DocumentRequest } from '../types/request.js';
-import type { VerifiablePresentation } from '../types/response.js';
+import type { VerifiablePresentation, SubmissionEntry } from '../types/response.js';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -20,7 +20,7 @@ export interface VerificationResult {
  * Checks:
  * - VP type is correct
  * - Nonce matches (proof.challenge === request.nonce)
- * - Domain matches (proof.domain === request.verifier.url)
+ * - Domain matches (proof.domain === request.verifierUrl)
  * - Every required DocumentRequest is covered by a submission entry
  * - Submission credential indices are valid
  * - Credential types match the document request docTypes
@@ -32,42 +32,67 @@ export function verifyPresentationStructure(
   presentation: VerifiablePresentation,
 ): VerificationResult {
   const errors: string[] = [];
+  validateTypeAndProof(request, presentation, errors);
+  validateSubmissions(request, presentation, errors);
+  return { valid: errors.length === 0, errors };
+}
 
-  // 1. Type check
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function validateTypeAndProof(
+  request: VPRequest,
+  presentation: VerifiablePresentation,
+  errors: string[],
+): void {
   if (
-    !presentation.type ||
-    !presentation.type.includes('VerifiablePresentation')
+    !presentation.type
+    || !presentation.type.includes('VerifiablePresentation')
   ) {
     errors.push('VP must have type "VerifiablePresentation"');
   }
 
-  // 2. Nonce
   if (!presentation.proof) {
     errors.push('VP is missing proof');
-  } else {
-    if (presentation.proof.challenge !== request.nonce) {
-      errors.push(
-        `Nonce mismatch: expected "${request.nonce}", got "${presentation.proof.challenge}"`,
-      );
-    }
-
-    // 3. Domain — compare against verifier URL host
-    const expectedDomain = extractDomain(request.verifier.url);
-    if (presentation.proof.domain !== expectedDomain && presentation.proof.domain !== request.verifier.url) {
-      errors.push(
-        `Domain mismatch: expected "${expectedDomain}" or "${request.verifier.url}", got "${presentation.proof.domain}"`,
-      );
-    }
-
-    // 4. Proof purpose
-    if (presentation.proof.proofPurpose !== 'authentication') {
-      errors.push(
-        `Proof purpose must be "authentication", got "${presentation.proof.proofPurpose}"`,
-      );
-    }
+    return;
   }
 
-  // 5. Collect required docRequestIDs from the rules tree
+  if (presentation.proof.challenge !== request.nonce) {
+    errors.push(
+      `Nonce mismatch: expected "${request.nonce}", got "${presentation.proof.challenge}"`,
+    );
+  }
+
+  const expectedDomain = extractDomain(request.verifierUrl);
+  if (presentation.proof.domain !== expectedDomain && presentation.proof.domain !== request.verifierUrl) {
+    errors.push(
+      `Domain mismatch: expected "${expectedDomain}" or "${request.verifierUrl}", got "${presentation.proof.domain}"`,
+    );
+  }
+
+  if (presentation.proof.proofPurpose !== 'authentication') {
+    errors.push(
+      `Proof purpose must be "authentication", got "${presentation.proof.proofPurpose}"`,
+    );
+  }
+
+  if (presentation.requestId !== request.id) {
+    errors.push(`Request ID mismatch: expected "${request.id}", got "${presentation.requestId}"`);
+  }
+  if (presentation.requestNonce !== request.nonce) {
+    errors.push(`Request nonce mismatch: expected "${request.nonce}", got "${presentation.requestNonce}"`);
+  }
+  if (presentation.verifier !== request.verifier) {
+    errors.push(`Verifier mismatch: expected "${request.verifier}", got "${presentation.verifier}"`);
+  }
+}
+
+function validateSubmissions(
+  request: VPRequest,
+  presentation: VerifiablePresentation,
+  errors: string[],
+): void {
   const requiredIDs = collectRequiredDocRequestIDs(request.rules);
   const submissionMap = new Map(
     presentation.presentationSubmission.map((s) => [s.docRequestID, s]),
@@ -79,44 +104,43 @@ export function verifyPresentationStructure(
     }
   }
 
-  // 6. Validate each submission entry
   const docRequests = collectAllDocumentRequests(request.rules);
 
   for (const entry of presentation.presentationSubmission) {
-    // Check credential index validity
-    if (
-      entry.credentialIndex < 0 ||
-      entry.credentialIndex >= presentation.verifiableCredential.length
-    ) {
-      errors.push(
-        `Submission "${entry.docRequestID}" has invalid credentialIndex ${entry.credentialIndex}`,
-      );
-      continue;
-    }
-
-    // Check that the credential type matches the document request
-    const docReq = docRequests.get(entry.docRequestID);
-    if (!docReq) {
-      errors.push(`Submission references unknown docRequestID "${entry.docRequestID}"`);
-      continue;
-    }
-
-    const cred = presentation.verifiableCredential[entry.credentialIndex]!;
-    const credTypes = cred.type ?? [];
-    const hasMatchingType = docReq.docType.some((dt) => credTypes.includes(dt));
-    if (!hasMatchingType) {
-      errors.push(
-        `Credential at index ${entry.credentialIndex} has types [${credTypes.join(', ')}] but docRequestID "${entry.docRequestID}" requires one of [${docReq.docType.join(', ')}]`,
-      );
-    }
+    validateSubmissionEntry(entry, presentation, docRequests, errors);
   }
-
-  return { valid: errors.length === 0, errors };
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+function validateSubmissionEntry(
+  entry: SubmissionEntry,
+  presentation: VerifiablePresentation,
+  docRequests: Map<string, DocumentRequest>,
+  errors: string[],
+): void {
+  if (
+    entry.credentialIndex < 0
+    || entry.credentialIndex >= presentation.verifiableCredential.length
+  ) {
+    errors.push(
+      `Submission "${entry.docRequestID}" has invalid credentialIndex ${entry.credentialIndex}`,
+    );
+    return;
+  }
+
+  const docReq = docRequests.get(entry.docRequestID);
+  if (!docReq) {
+    errors.push(`Submission references unknown docRequestID "${entry.docRequestID}"`);
+    return;
+  }
+
+  const cred = presentation.verifiableCredential[entry.credentialIndex]!;
+  const credTypes = cred.type ?? [];
+  if (!docReq.docType.some((dt) => credTypes.includes(dt))) {
+    errors.push(
+      `Credential at index ${entry.credentialIndex} has types [${credTypes.join(', ')}] but docRequestID "${entry.docRequestID}" requires one of [${docReq.docType.join(', ')}]`,
+    );
+  }
+}
 
 function extractDomain(url: string): string {
   try {

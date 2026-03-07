@@ -3,7 +3,7 @@ import {
   createList,
   createCredential,
   StatusList, // eslint-disable-line
-} from '@digitalcredentials/vc-status-list';
+} from '@digitalbazaar/vc-status-list';
 import { gzip, ungzip } from 'pako';
 import { u8aToU8a } from '../utils/types/bytes';
 import VerifiableCredential from './verifiable-credential';

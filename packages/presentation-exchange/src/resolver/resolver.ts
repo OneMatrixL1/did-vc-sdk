@@ -7,34 +7,37 @@ import type {
   SubmissionEntry,
 } from '../types/response.js';
 import type { CredentialSelection } from '../types/matching.js';
+import type { SchemaResolverMap } from '../types/schema-resolver.js';
+import { defaultResolvers } from '../resolvers/index.js';
+import { createBBSResolver, isBBSProof } from '../resolvers/bbs-resolver.js';
 import { extractConditions } from './field-extractor.js';
-import { resolveJsonPath } from '../utils/jsonpath.js';
 
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
 
-export interface ResolveOptions {
-  /** The holder's DID */
-  holder: string;
-  /** Sign the presentation envelope (challenge = nonce, domain = verifier.url) */
-  signPresentation: (payload: UnsignedPresentation) => Promise<HolderProof>;
-  /**
-   * Optional: derive a selective-disclosure credential (BBS+ or similar).
-   * If not provided, the full credential is included as-is.
-   */
-  deriveCredential?: (
-    credential: MatchableCredential,
-    disclosedFields: string[],
-  ) => Promise<PresentedCredential>;
-}
-
 export interface UnsignedPresentation {
   '@context': string[];
   type: ['VerifiablePresentation'];
   holder: string;
+  verifier: string;
+  requestId: string;
+  requestNonce: string;
+  verifierCredentials?: PresentedCredential[];
   verifiableCredential: PresentedCredential[];
   presentationSubmission: SubmissionEntry[];
+}
+
+export interface ResolveOptions {
+  /** The holder's DID */
+  holder: string;
+  /**
+   * Optional — extra or overriding resolvers merged on top of
+   * the built-in defaults (JsonSchema + ICAO9303SOD).
+   */
+  resolvers?: SchemaResolverMap;
+  /** Sign the presentation envelope (challenge = nonce, domain = verifierUrl) */
+  signPresentation: (payload: UnsignedPresentation) => Promise<HolderProof>;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +50,7 @@ export interface UnsignedPresentation {
  * This function:
  * 1. Validates that selections cover the request's rules
  * 2. Extracts disclosed fields per credential
- * 3. Optionally derives selective-disclosure credentials
+ * 3. Derives selective-disclosure credentials via the schema resolver
  * 4. Signs the presentation via the provided callback
  */
 export async function resolvePresentation(
@@ -59,9 +62,9 @@ export async function resolvePresentation(
   // Build a map of docRequestID → DocumentRequest for lookup
   const docRequests = collectDocumentRequests(request.rules);
 
-  // Build presented credentials and submission entries
-  const presentedCredentials: PresentedCredential[] = [];
-  const submission: SubmissionEntry[] = [];
+  // Validate all selections synchronously first, then derive credentials in parallel
+  type ResolvedItem = { docRequestID: string; docReq: DocumentRequest; cred: MatchableCredential };
+  const items: ResolvedItem[] = [];
 
   for (const sel of selections) {
     const docReq = docRequests.get(sel.docRequestID);
@@ -76,32 +79,49 @@ export async function resolvePresentation(
       );
     }
 
-    let presented: PresentedCredential;
+    items.push({ docRequestID: sel.docRequestID, docReq, cred });
+  }
+
+  const resolvers = { ...defaultResolvers, ...options.resolvers };
+
+  const presentedList = await Promise.all(items.map(({ docReq, cred }) => {
     if (docReq.disclosureMode === 'full') {
-      // Pass the entire credential verbatim — no field filtering, no derivation
-      presented = credentialToFull(cred);
-    } else if (options.deriveCredential) {
-      const { disclose } = extractConditions(docReq.conditions);
-      const disclosedFields = disclose.map((d) => d.field);
-      presented = await options.deriveCredential(cred, disclosedFields);
-    } else {
-      const { disclose } = extractConditions(docReq.conditions);
-      const disclosedFields = disclose.map((d) => d.field);
-      presented = credentialToSelective(cred, disclosedFields);
+      return Promise.resolve(cred);
     }
 
-    const credIndex = presentedCredentials.length;
-    presentedCredentials.push(presented);
-    submission.push({
-      docRequestID: sel.docRequestID,
-      credentialIndex: credIndex,
-    });
+    let resolver = resolvers[docReq.schemaType];
+    if (!resolver) {
+      throw new Error(
+        `No SchemaResolver registered for schemaType "${docReq.schemaType}". ` +
+        `Available resolvers: [${Object.keys(resolvers).join(', ')}]`,
+      );
+    }
+
+    if (isBBSProof(cred)) {
+      resolver = createBBSResolver(resolver);
+    }
+
+    const { disclose } = extractConditions(docReq.conditions);
+    const disclosedFields = disclose.map((d) => d.field);
+    return resolver.deriveCredential(cred, disclosedFields, { nonce: request.nonce });
+  }));
+
+  const presentedCredentials: PresentedCredential[] = [];
+  const submission: SubmissionEntry[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    presentedCredentials.push(presentedList[i]!);
+    submission.push({ docRequestID: items[i]!.docRequestID, credentialIndex: i });
   }
 
   const unsigned: UnsignedPresentation = {
     '@context': ['https://www.w3.org/ns/credentials/v2'],
     type: ['VerifiablePresentation'],
     holder: options.holder,
+    verifier: request.verifier,
+    requestId: request.id,
+    requestNonce: request.nonce,
+    ...(request.verifierCredentials?.length ? { verifierCredentials: request.verifierCredentials } : {}),
     verifiableCredential: presentedCredentials,
     presentationSubmission: submission,
   };
@@ -132,96 +152,4 @@ function collectDocumentRequests(
 
   walk(node);
   return map;
-}
-
-/**
- * Pass the credential through verbatim — all fields, original proof intact.
- * Used for disclosureMode === 'full'.
- */
-function credentialToFull(cred: MatchableCredential): PresentedCredential {
-  const subject = Array.isArray(cred.credentialSubject)
-    ? { ...cred.credentialSubject[0] }
-    : { ...cred.credentialSubject };
-
-  const types = [...(cred.type as readonly string[])];
-  const issuer = typeof cred.issuer === 'string'
-    ? cred.issuer
-    : { ...cred.issuer };
-
-  const presented: PresentedCredential = {
-    type: types,
-    issuer,
-    credentialSubject: subject,
-  };
-
-  if (cred['@context']) {
-    presented['@context'] = [...(cred['@context'] as string[])];
-  }
-  if (cred.issuanceDate !== undefined) {
-    presented.issuanceDate = cred.issuanceDate as string;
-  }
-  if (cred.id !== undefined) {
-    presented.id = cred.id as string;
-  }
-  if (cred.proof !== undefined) {
-    (presented as Record<string, unknown>).proof = cred.proof;
-  }
-
-  return presented;
-}
-
-/**
- * Build a selectively-disclosed credential containing only the requested fields.
- * Used for disclosureMode === 'selective' (default).
- */
-function credentialToSelective(
-  cred: MatchableCredential,
-  disclosedFields: string[],
-): PresentedCredential {
-  const subject = Array.isArray(cred.credentialSubject)
-    ? cred.credentialSubject[0]
-    : cred.credentialSubject;
-
-  const selectiveSubject: Record<string, unknown> = {};
-  if (subject.id !== undefined) {
-    selectiveSubject.id = subject.id;
-  }
-
-  for (const fieldPath of disclosedFields) {
-    const { found, value } = resolveJsonPath(
-      { ...cred, credentialSubject: subject },
-      fieldPath,
-    );
-    if (found && fieldPath.startsWith('$.credentialSubject.')) {
-      const parts = fieldPath.split('.');
-      const lastSeg = parts[parts.length - 1]!;
-      selectiveSubject[lastSeg] = value;
-    }
-  }
-
-  const types = [...(cred.type as readonly string[])];
-  const issuer = typeof cred.issuer === 'string'
-    ? cred.issuer
-    : { ...cred.issuer };
-
-  const presented: PresentedCredential = {
-    type: types,
-    issuer,
-    credentialSubject: selectiveSubject,
-  };
-
-  if (cred['@context']) {
-    presented['@context'] = [...(cred['@context'] as string[])];
-  }
-  if (cred.issuanceDate !== undefined) {
-    presented.issuanceDate = cred.issuanceDate as string;
-  }
-  if (cred.id !== undefined) {
-    presented.id = cred.id as string;
-  }
-  if (cred.proof !== undefined) {
-    (presented as Record<string, unknown>).proof = cred.proof;
-  }
-
-  return presented;
 }

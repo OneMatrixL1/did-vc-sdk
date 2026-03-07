@@ -25,6 +25,7 @@ export const schoolEnrollmentRequest: VPRequest = {
         type: 'DocumentRequest',
         docRequestID: 'parent',
         docType: ['CCCDCredential'],
+        schemaType: 'JsonSchema',
         name: 'Parent ID',
         conditions: [
           {
@@ -49,6 +50,7 @@ export const schoolEnrollmentRequest: VPRequest = {
         type: 'DocumentRequest',
         docRequestID: 'child',
         docType: ['CCCDCredential'],
+        schemaType: 'JsonSchema',
         name: 'Child ID',
         conditions: [
           {

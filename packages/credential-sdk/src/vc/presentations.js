@@ -182,11 +182,6 @@ export async function verifyPresentation(presentation, options = {}) {
       return { verified, results: [presentation], credentialResults };
     }
 
-    // Early out incase credentials arent verified
-    if (!verified) {
-      return { verified, results: [presentation], credentialResults };
-    }
-
     // Get proof purpose
     if (!presentationPurpose && !challenge) {
       throw new Error(
@@ -286,6 +281,43 @@ export async function signPresentation(
   }
 
   return signed;
+}
+
+/**
+ * Sign a document using AssertionProofPurpose.
+ * Used by presentation-exchange to sign VPRequests so consumers
+ * don't need to import jsonld-signatures directly.
+ *
+ * @param {object} document - The document to sign
+ * @param {object} keyDoc - Key document with id, controller, type, keypair
+ * @param {string} challenge - Proof challenge
+ * @param {string} domain - Proof domain
+ * @param {object} [resolver] - Optional DID resolver
+ * @returns {Promise<object>} Signed document with proof
+ */
+export async function signWithAssertionPurpose(document, keyDoc, challenge, domain, resolver = null) {
+  const { AssertionProofPurpose } = jsigs.purposes;
+
+  // AssertionProofPurpose doesn't include challenge/domain in the proof
+  // (only AuthenticationProofPurpose does). We extend it so verifiers can
+  // validate the proof is bound to a specific nonce + domain.
+  class AssertionWithChallenge extends AssertionProofPurpose {
+    constructor(opts) {
+      super(opts);
+      this.challenge = opts.challenge;
+      this.domain = opts.domain;
+    }
+
+    async update(proof, args) {
+      proof = await super.update(proof, args);
+      proof.challenge = this.challenge;
+      proof.domain = this.domain;
+      return proof;
+    }
+  }
+
+  const purpose = new AssertionWithChallenge({ domain, challenge });
+  return signPresentation(document, keyDoc, challenge, domain, resolver, true, purpose, false);
 }
 
 export function isAnoncreds(presentation) {

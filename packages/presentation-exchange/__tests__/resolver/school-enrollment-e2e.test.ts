@@ -23,6 +23,7 @@ describe('School Enrollment E2E', () => {
       .setExpiresAt('2099-12-31T23:59:59Z')
       .addDocumentRequest(
         new DocumentRequestBuilder('parent', 'CCCDCredential')
+          .setSchemaType('JsonSchema')
           .setName('Parent ID')
           .disclose('c1', '$.credentialSubject.fullName')
           .zkp('c2', {
@@ -35,6 +36,7 @@ describe('School Enrollment E2E', () => {
       )
       .addDocumentRequest(
         new DocumentRequestBuilder('child', 'CCCDCredential')
+          .setSchemaType('JsonSchema')
           .setName('Child ID')
           .disclose('c3', '$.credentialSubject.fullName')
           .disclose('c4', '$.credentialSubject.dateOfBirth'),
@@ -65,7 +67,7 @@ describe('School Enrollment E2E', () => {
     // 4. Resolve VP
     const vp = await resolvePresentation(request, credentials, selections, {
       holder: 'did:key:z6MkTest',
-      signPresentation: async (unsigned) => ({
+      signPresentation: async () => ({
         type: 'DataIntegrityProof',
         cryptosuite: 'eddsa-rdfc-2022',
         verificationMethod: 'did:key:z6MkTest#keys-1',
@@ -108,7 +110,8 @@ describe('School Enrollment E2E', () => {
         url: 'https://school.vn',
       })
       .addDocumentRequest(
-        new DocumentRequestBuilder('doc1', 'CCCDCredential'),
+        new DocumentRequestBuilder('doc1', 'CCCDCredential')
+          .setSchemaType('JsonSchema'),
       )
       .build();
 

@@ -1,11 +1,14 @@
 import type { LocalizableString } from '../types/localization.js';
+import type { PresentedCredential } from '../types/response.js';
 import type {
   VPRequest,
-  VerifierInfo,
+  VerifierRequestProof,
   DocumentRequestNode,
   DocumentRequest,
+  KeyDoc,
 } from '../types/request.js';
 import { DocumentRequestBuilder } from './document-request-builder.js';
+import { signWithAssertionPurpose } from '@1matrix/credential-sdk/vc';
 
 /**
  * Fluent builder for VPRequest.
@@ -19,14 +22,29 @@ import { DocumentRequestBuilder } from './document-request-builder.js';
  */
 export class VPRequestBuilder {
   private id: string;
-  private version = '1.0';
+
+  private version = '2.0';
+
   private name: LocalizableString = '';
+
   private nonce: string;
-  private verifier!: VerifierInfo;
+
+  private verifierId?: string;
+
+  private verifierName: LocalizableString = '';
+
+  private verifierUrl?: string;
+
+  private verifierCredentials: PresentedCredential[] = [];
+
   private createdAt: string;
+
   private expiresAt?: string;
+
   private context?: string[];
+
   private rules?: DocumentRequestNode;
+
   private pendingDocRequests: DocumentRequest[] = [];
 
   constructor(id: string, nonce?: string) {
@@ -50,8 +68,16 @@ export class VPRequestBuilder {
     return this;
   }
 
-  setVerifier(verifier: VerifierInfo): this {
-    this.verifier = verifier;
+  /** Same call-site shape as before: `{ id, name, url }`. */
+  setVerifier(verifier: { id: string; name: LocalizableString; url: string }): this {
+    this.verifierId = verifier.id;
+    this.verifierName = verifier.name;
+    this.verifierUrl = verifier.url;
+    return this;
+  }
+
+  addVerifierCredential(credential: PresentedCredential): this {
+    this.verifierCredentials.push(credential);
     return this;
   }
 
@@ -83,16 +109,16 @@ export class VPRequestBuilder {
   addDocumentRequest(
     docRequest: DocumentRequest | DocumentRequestBuilder,
   ): this {
-    const dr =
-      docRequest instanceof DocumentRequestBuilder
-        ? docRequest.build()
-        : docRequest;
+    const dr = docRequest instanceof DocumentRequestBuilder
+      ? docRequest.build()
+      : docRequest;
     this.pendingDocRequests.push(dr);
     return this;
   }
 
+  /** Build an unsigned VPRequest (no proof). */
   build(): VPRequest {
-    if (!this.verifier) {
+    if (!this.verifierId) {
       throw new Error('VPRequestBuilder: verifier is required');
     }
 
@@ -112,20 +138,83 @@ export class VPRequestBuilder {
     }
 
     const req: VPRequest = {
+      type: ['VerifiablePresentationRequest'],
       id: this.id,
       version: this.version,
       name: this.name,
       nonce: this.nonce,
-      verifier: this.verifier,
+      verifier: this.verifierId,
+      verifierName: this.verifierName,
+      verifierUrl: this.verifierUrl!,
       createdAt: this.createdAt,
       expiresAt: this.expiresAt ?? new Date(Date.now() + 30 * 60_000).toISOString(),
       rules,
     };
+
+    if (this.verifierCredentials.length > 0) {
+      req.verifierCredentials = this.verifierCredentials;
+    }
 
     if (this.context) {
       req['@context'] = this.context;
     }
 
     return req;
+  }
+
+  /**
+   * Build and sign the VPRequest using credential-sdk's `signPresentation`.
+   *
+   * Uses `AssertionProofPurpose` (not `authentication`) so that
+   * `verifyVPRequest` accepts the proof envelope.
+   *
+   * @param keyDoc  Key document with `id`, `type`, `keypair`, and `controller`.
+   * @param resolver  Optional DID resolver forwarded to credential-sdk.
+   */
+  async buildSigned(
+    keyDoc: KeyDoc,
+    resolver?: object,
+  ): Promise<VPRequest> {
+    const unsigned = this.build();
+
+    const domain = new URL(unsigned.verifierUrl).hostname;
+    const challenge = unsigned.nonce;
+
+    // Inline context maps VPRequest-specific terms to IRIs so
+    // JSON-LD canonicalization includes them in the signed hash.
+    // `rules` uses @json to avoid recursive expansion of the tree.
+    const vpRequestContext = {
+      verifier: { '@id': 'https://w3id.org/vprequest#verifier', '@type': '@id' },
+      version: 'https://schema.org/version',
+      name: 'https://schema.org/name',
+      nonce: 'https://w3id.org/security#nonce',
+      verifierName: 'https://schema.org/alternateName',
+      verifierUrl: 'https://schema.org/url',
+      verifierCredentials: 'https://w3id.org/security#verifiableCredential',
+      createdAt: 'https://schema.org/dateCreated',
+      expiresAt: 'https://schema.org/expires',
+      rules: { '@id': 'https://w3id.org/vprequest#rules', '@type': '@json' },
+    };
+
+    const vpLikeDoc = {
+      '@context': [
+        'https://www.w3.org/2018/credentials/v1',
+        vpRequestContext,
+      ],
+      ...unsigned,
+      type: ['VerifiablePresentation'],
+      holder: unsigned.verifier,
+    };
+
+    const signed = await signWithAssertionPurpose(
+      vpLikeDoc,
+      keyDoc,
+      challenge,
+      domain,
+      resolver,
+    );
+
+    const proof = (signed as Record<string, unknown>).proof as VerifierRequestProof;
+    return { ...unsigned, proof };
   }
 }

@@ -2,12 +2,15 @@
  * Generic AND/OR tree evaluator. Reused for both:
  * - DocumentRequestNode trees (rules matching)
  * - DocumentConditionNode trees (condition coverage)
+ *
+ * LogicalNode.values uses an inline union `(LogicalNode<T> | T)[]` instead of
+ * the TreeNode<T> alias to avoid a circular forward reference.
  */
 
 export interface LogicalNode<T> {
   type: 'Logical';
   operator: 'AND' | 'OR';
-  values: TreeNode<T>[];
+  values: (LogicalNode<T> | T)[];
 }
 
 export type TreeNode<T> = LogicalNode<T> | T;
@@ -35,9 +38,7 @@ export function evaluateTree<T, R>(
   }
 
   const logical = node as LogicalNode<T>;
-  const childResults = logical.values.map((child) =>
-    evaluateTree(child, isLeaf, evalLeaf, combineLogical),
-  );
+  const childResults = logical.values.map((child) => evaluateTree(child, isLeaf, evalLeaf, combineLogical));
 
   return combineLogical(logical.operator, childResults);
 }
@@ -50,9 +51,8 @@ export function booleanCombine(
   operator: 'AND' | 'OR',
   children: EvalResult<boolean>[],
 ): EvalResult<boolean> {
-  const satisfied =
-    operator === 'AND'
-      ? children.every((c) => c.satisfied)
-      : children.some((c) => c.satisfied);
+  const satisfied = operator === 'AND'
+    ? children.every((c) => c.satisfied)
+    : children.some((c) => c.satisfied);
   return { satisfied, result: satisfied };
 }

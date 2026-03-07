@@ -3,7 +3,7 @@ import jsigs from 'jsonld-signatures';
 import {
   statusTypeMatches,
   checkStatus,
-} from '@digitalcredentials/vc-status-list';
+} from '@digitalbazaar/vc-status-list';
 
 import base64url from 'base64url';
 import {
@@ -370,6 +370,24 @@ export async function verifyCredential(
   const r = processIfKvac(credential);
   if (r) {
     return r;
+  }
+
+  // Bypass jsigs for ICAO SOD credentials (they lack proofPurpose/verificationMethod)
+  if (credential.proof && credential.proof.type === 'ICAO9303SODSignature') {
+    const icaoSuite = new ICAO9303SODSignature();
+    const icaoResult = await icaoSuite.verifyProof({
+      proof: credential.proof,
+      document: credential,
+    });
+    return {
+      verified: icaoResult.verified,
+      results: [{
+        verified: icaoResult.verified,
+        proof: credential.proof,
+        purposeResult: { valid: icaoResult.verified },
+      }],
+      error: icaoResult.error,
+    };
   }
 
   // Specify certain parameters for anoncreds

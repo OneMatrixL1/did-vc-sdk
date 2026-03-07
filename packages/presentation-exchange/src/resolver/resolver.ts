@@ -11,14 +11,14 @@ import type { SchemaResolverMap } from '../types/schema-resolver.js';
 import { defaultResolvers } from '../resolvers/index.js';
 import { createBBSResolver, isBBSProof } from '../resolvers/bbs-resolver.js';
 import { extractConditions } from './field-extractor.js';
-import { signVPResponse } from '../signer/vp-signer.js';
+import { signVPResponse, vpResponseContext } from '../signer/vp-signer.js';
 
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
 
 export interface UnsignedPresentation {
-  '@context': string[];
+  '@context': (string | Record<string, unknown>)[];
   type: ['VerifiablePresentation'];
   holder: string;
   verifier: string;
@@ -135,7 +135,7 @@ export async function resolvePresentation(
   }
 
   const unsigned: UnsignedPresentation = {
-    '@context': ['https://www.w3.org/ns/credentials/v2'],
+    '@context': ['https://www.w3.org/2018/credentials/v1', vpResponseContext],
     type: ['VerifiablePresentation'],
     holder: options.holder,
     verifier: request.verifier,

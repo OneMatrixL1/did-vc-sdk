@@ -42,15 +42,8 @@ export async function signVPResponse(
 ): Promise<HolderProof> {
   const domain = new URL(verifierUrl).hostname;
 
-  // Destructure to separate @context from the rest, then override it
-  const { '@context': _ctx, ...rest } = unsigned;
-
   const vpDoc = {
-    '@context': [
-      'https://www.w3.org/2018/credentials/v1',
-      vpResponseContext,
-    ],
-    ...rest,
+    ...unsigned,
     type: ['VerifiablePresentation'],
     holder: unsigned.holder,
   };

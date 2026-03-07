@@ -2,8 +2,9 @@ import * as asn1js from 'asn1js';
 import * as pkijs from 'pkijs';
 import forge from 'node-forge';
 import { Buffer } from 'buffer';
-import { ec as EC, curves } from 'elliptic';
+import elliptic from 'elliptic';
 
+const { ec: EC, curves } = elliptic as any;
 const { PresetCurve } = curves;
 
 // OIDs

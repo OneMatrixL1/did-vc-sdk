@@ -3,6 +3,11 @@ import type { HolderProof } from '../types/response.js';
 import type { UnsignedPresentation } from '../resolver/resolver.js';
 import { signPresentation } from '@1matrix/credential-sdk/vc';
 
+export interface SignVPResult {
+  proof: HolderProof;
+  '@context': (string | Record<string, unknown>)[];
+}
+
 /**
  * Inline context that maps VP-response–specific fields to IRIs so that
  * JSON-LD canonicalization includes them in the signed hash.
@@ -31,7 +36,7 @@ const vpResponseContext: Record<string, unknown> = {
  * @param nonce     Challenge nonce (from VPRequest.nonce).
  * @param verifierUrl  Verifier URL — hostname is used as the proof domain.
  * @param resolver  Optional DID resolver forwarded to credential-sdk.
- * @returns The proof object to attach to the VP.
+ * @returns The proof and the final `@context` (which may include suite contexts added during signing).
  */
 export async function signVPResponse(
   unsigned: UnsignedPresentation,
@@ -39,7 +44,7 @@ export async function signVPResponse(
   nonce: string,
   verifierUrl: string,
   resolver?: object,
-): Promise<HolderProof> {
+): Promise<SignVPResult> {
   const domain = new URL(verifierUrl).hostname;
 
   const vpDoc = {
@@ -56,7 +61,11 @@ export async function signVPResponse(
     resolver ?? null,
   );
 
-  return (signed as Record<string, unknown>).proof as HolderProof;
+  const signedDoc = signed as Record<string, unknown>;
+  return {
+    proof: signedDoc.proof as HolderProof,
+    '@context': signedDoc['@context'] as (string | Record<string, unknown>)[],
+  };
 }
 
 export { vpResponseContext };

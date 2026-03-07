@@ -1,7 +1,6 @@
 import type { VPRequest } from '../types/request.js';
 import type { VerifiablePresentation } from '../types/response.js';
 import { verifyPresentationStructure, type VerificationResult } from './structural-verifier.js';
-import { vpResponseContext } from '../signer/vp-signer.js';
 import { verifyPresentation } from '@1matrix/credential-sdk/vc';
 
 // ---------------------------------------------------------------------------
@@ -81,24 +80,11 @@ export async function verifyVPResponse(
   }
 
   // --- 2. Crypto ---
-  // Reconstruct the VP-like document with the same context used during signing
-  const vpDoc = {
-    '@context': [
-      'https://www.w3.org/2018/credentials/v1',
-      vpResponseContext,
-    ],
-    type: presentation.type,
-    holder: presentation.holder,
-    verifier: presentation.verifier,
-    requestId: presentation.requestId,
-    requestNonce: presentation.requestNonce,
-    ...(presentation.verifierCredentials?.length
-      ? { verifierCredentials: presentation.verifierCredentials }
-      : {}),
-    verifiableCredential: presentation.verifiableCredential,
-    presentationSubmission: presentation.presentationSubmission,
-    proof: presentation.proof,
-  };
+  // Use the VP's own @context — it's what was signed.
+  // Do NOT hardcode vpResponseContext; the signed doc may include
+  // additional suite contexts added by credential-sdk.
+  const { proof, ...vpWithoutProof } = presentation;
+  const vpDoc = { ...vpWithoutProof, proof };
 
   let crypto: VerifyVPResponseResult['crypto'];
   try {

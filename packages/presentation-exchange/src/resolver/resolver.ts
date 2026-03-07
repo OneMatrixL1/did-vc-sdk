@@ -146,20 +146,18 @@ export async function resolvePresentation(
     presentationSubmission: submission,
   };
 
-  let sign: (payload: UnsignedPresentation) => Promise<HolderProof>;
-
   if (options.signPresentation) {
-    sign = options.signPresentation;
-  } else if (options.keyDoc) {
-    const { keyDoc, didResolver } = options;
-    sign = (payload) => signVPResponse(payload, keyDoc, request.nonce, request.verifierUrl, didResolver);
-  } else {
-    throw new Error('ResolveOptions requires either "signPresentation" or "keyDoc"');
+    const proof = await options.signPresentation(unsigned);
+    return { ...unsigned, proof };
   }
 
-  const proof = await sign(unsigned);
+  if (options.keyDoc) {
+    const { keyDoc, didResolver } = options;
+    const result = await signVPResponse(unsigned, keyDoc, request.nonce, request.verifierUrl, didResolver);
+    return { ...unsigned, '@context': result['@context'], proof: result.proof };
+  }
 
-  return { ...unsigned, proof };
+  throw new Error('ResolveOptions requires either "signPresentation" or "keyDoc"');
 }
 
 // ---------------------------------------------------------------------------

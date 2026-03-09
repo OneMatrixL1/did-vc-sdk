@@ -33,3 +33,5 @@ out/
 *.log
 .claude/commands/openspec
 openspec
+/.claude
+/packages/credential-sdk/.claude

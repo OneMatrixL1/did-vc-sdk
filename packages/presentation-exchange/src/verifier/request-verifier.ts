@@ -1,9 +1,27 @@
 import type { VPRequest } from '../types/request.js';
 import type { VerificationResult } from './structural-verifier.js';
+import { verifyPresentation } from '@1matrix/credential-sdk/vc';
+import { vpRequestContext } from '../utils/vp-request-context.js';
 
 export interface VerifyRequestOptions {
   /** Override current time for testing (default: new Date()) */
   now?: Date;
+  /** DID resolver for cryptographic proof verification. */
+  resolver?: {
+    supports(id: string): boolean;
+    resolve(id: string, opts?: unknown): Promise<unknown>;
+  };
+}
+
+export interface VerifyVPRequestResult {
+  /** `true` if both structural and cryptographic verification passed. */
+  verified: boolean;
+  /** Result of structural validation. */
+  structural: VerificationResult;
+  /** Result of cryptographic proof verification (null if no proof present). */
+  crypto: { verified: boolean; error?: Error } | null;
+  /** All error messages. */
+  errors: string[];
 }
 
 /**
@@ -11,8 +29,7 @@ export interface VerifyRequestOptions {
  *
  * Checks required fields, expiration, verifier credential structure,
  * and optional proof envelope.
- * Does NOT verify cryptographic proofs — use credential-sdk's
- * `verifyCredential()` for that.
+ * Does NOT verify cryptographic proofs — use {@link verifyVPRequestFull} for that.
  */
 export function verifyVPRequest(
   request: VPRequest,
@@ -124,4 +141,96 @@ function validateRequestProof(request: VPRequest, errors: string[]): void {
       );
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Full verification (structural + crypto)
+// ---------------------------------------------------------------------------
+
+/**
+ * Full verification of a signed VPRequest: structural + cryptographic.
+ *
+ * 1. Structural validation (required fields, expiration, proof envelope).
+ * 2. Cryptographic proof verification — reconstructs the VP-like envelope
+ *    that `buildSigned` created and verifies the signature via credential-sdk.
+ *
+ * If the request has no proof, crypto is skipped and only structural is checked.
+ *
+ * @param request  The VPRequest to verify.
+ * @param options  Optional resolver and time override.
+ */
+export async function verifyVPRequestFull(
+  request: VPRequest,
+  options?: VerifyRequestOptions,
+): Promise<VerifyVPRequestResult> {
+  const errors: string[] = [];
+
+  // --- 1. Structural ---
+  const structural = verifyVPRequest(request, options);
+  if (!structural.valid) {
+    return {
+      verified: false,
+      structural,
+      crypto: null,
+      errors: structural.errors,
+    };
+  }
+
+  // --- 2. Crypto (only if proof is present) ---
+  if (!request.proof) {
+    return { verified: true, structural, crypto: null, errors: [] };
+  }
+
+  const { proof, ...unsigned } = request;
+  const domain = proof.domain;
+  const challenge = proof.challenge;
+
+  // Reconstruct the same VP-like envelope that buildSigned created
+  const vpToVerify = {
+    '@context': [
+      'https://www.w3.org/2018/credentials/v1',
+      vpRequestContext,
+    ],
+    ...unsigned,
+    type: ['VerifiablePresentation'],
+    holder: unsigned.verifier,
+    proof,
+  };
+
+  let crypto: VerifyVPRequestResult['crypto'];
+  try {
+    // Use dynamic import to avoid pulling jsonld-signatures into the main bundle
+    // for consumers that only need structural validation.
+    const jsigs = (await import('jsonld-signatures')).default;
+    const { AssertionProofPurpose } = jsigs.purposes;
+    const purpose = new AssertionProofPurpose({ domain, challenge });
+
+    const result = (await verifyPresentation(vpToVerify, {
+      challenge,
+      domain,
+      presentationPurpose: purpose,
+      resolver: options?.resolver ?? null,
+    })) as Record<string, unknown>;
+
+    const verified = result.verified as boolean;
+    crypto = { verified };
+
+    if (!verified && result.error) {
+      crypto.error = result.error instanceof Error
+        ? result.error
+        : new Error(String(result.error));
+      errors.push(crypto.error.message);
+    }
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    crypto = { verified: false, error };
+    errors.push(error.message);
+  }
+
+  return {
+    verified: structural.valid && (crypto?.verified ?? false),
+    structural,
+    crypto,
+    errors,
+  };
 }

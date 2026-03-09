@@ -51,9 +51,9 @@ export type { ExtractedFields } from './resolver/index.js';
 
 // Verifier
 export { verifyPresentationStructure } from './verifier/index.js';
-export { verifyVPRequest } from './verifier/index.js';
+export { verifyVPRequest, verifyVPRequestFull } from './verifier/index.js';
 export { verifyVPResponse } from './verifier/index.js';
-export type { VerificationResult, VerifyRequestOptions, VerifyVPResponseOptions, VerifyVPResponseResult } from './verifier/index.js';
+export type { VerificationResult, VerifyRequestOptions, VerifyVPRequestResult, VerifyVPResponseOptions, VerifyVPResponseResult } from './verifier/index.js';
 
 // Signer
 export { signVPResponse } from './signer/index.js';
@@ -66,3 +66,4 @@ export { resolveJsonPath } from './utils/jsonpath.js';
 export { resolveLocalized } from './utils/localization.js';
 export { createKeyDoc } from './utils/keydoc.js';
 export type { KeySystem } from './utils/keydoc.js';
+export { vpRequestContext } from './utils/vp-request-context.js';

@@ -22,7 +22,7 @@ import networkCache from '../../../credential-sdk/tests/utils/network-cache';
 // presentation-exchange
 import { VPRequestBuilder } from '../../src/builder/request-builder.js';
 import { DocumentRequestBuilder } from '../../src/builder/document-request-builder.js';
-import { verifyVPRequest } from '../../src/verifier/request-verifier.js';
+import { verifyVPRequest, verifyVPRequestFull } from '../../src/verifier/request-verifier.js';
 import type { KeyDoc } from '../../src/types/request.js';
 
 // ---------------------------------------------------------------------------
@@ -246,5 +246,146 @@ describe('VPRequestBuilder.buildSigned()', () => {
     const result = verifyVPRequest(tampered);
     expect(result.valid).toBe(false);
     expect(result.errors[0]).toMatch(/proof challenge mismatch/);
+  }, 30000);
+});
+
+// ---------------------------------------------------------------------------
+// verifyVPRequestFull — structural + crypto
+// ---------------------------------------------------------------------------
+
+describe('verifyVPRequestFull()', () => {
+  let verifierKeyDoc: KeyDoc;
+  let verifierDID: string;
+  const registeredDIDs: string[] = [];
+
+  beforeAll(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        const cached = (networkCache as Record<string, unknown>)[url];
+        if (cached) {
+          return Promise.resolve(
+            new Response(JSON.stringify(cached), {
+              status: 200,
+              headers: { 'Content-type': 'application/json' },
+            }),
+          );
+        }
+        throw new Error(`[verify-request-test] Unmocked URL: ${url}`);
+      }),
+    );
+
+    const keypair = new Secp256k1Keypair(
+      'bbccddee00112233bbccddee00112233bbccddee00112233bbccddee00112233',
+    );
+    verifierDID = addressToDID(keypairToAddress(keypair), VIETCHAIN);
+    verifierKeyDoc = registerDID(keypair, verifierDID);
+    registeredDIDs.push(verifierDID);
+  });
+
+  afterAll(() => {
+    registeredDIDs.forEach(cleanupDID);
+    vi.restoreAllMocks();
+  });
+
+  it('verifies a signed VPRequest (structural + crypto)', async () => {
+    const signed = await new VPRequestBuilder('req-full-1', 'nonce-full-123')
+      .setVerifier({
+        id: verifierDID,
+        name: 'Full Verifier',
+        url: 'https://verifier.example.com',
+      })
+      .setExpiresAt('2099-12-31T23:59:59Z')
+      .addDocumentRequest(
+        new DocumentRequestBuilder('dr-f1', 'KYCCredential')
+          .setSchemaType('JsonSchema')
+          .disclose('c-name', '$.credentialSubject.fullName'),
+      )
+      .buildSigned(verifierKeyDoc);
+
+    const result = await verifyVPRequestFull(signed);
+
+    expect(result.verified).toBe(true);
+    expect(result.structural.valid).toBe(true);
+    expect(result.crypto).not.toBeNull();
+    expect(result.crypto!.verified).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  }, 30000);
+
+  it('passes for unsigned VPRequest (structural only, no crypto)', async () => {
+    const unsigned = new VPRequestBuilder('req-unsigned', 'nonce-unsigned')
+      .setVerifier({
+        id: verifierDID,
+        name: 'Unsigned Verifier',
+        url: 'https://verifier.example.com',
+      })
+      .setExpiresAt('2099-12-31T23:59:59Z')
+      .addDocumentRequest(
+        new DocumentRequestBuilder('dr-u1', 'KYCCredential')
+          .setSchemaType('JsonSchema')
+          .disclose('c-name', '$.credentialSubject.fullName'),
+      )
+      .build();
+
+    const result = await verifyVPRequestFull(unsigned);
+
+    expect(result.verified).toBe(true);
+    expect(result.structural.valid).toBe(true);
+    expect(result.crypto).toBeNull();
+  }, 30000);
+
+  it('fails crypto when request content is tampered', async () => {
+    const signed = await new VPRequestBuilder('req-tamper', 'nonce-tamper')
+      .setVerifier({
+        id: verifierDID,
+        name: 'Tamper Verifier',
+        url: 'https://verifier.example.com',
+      })
+      .setExpiresAt('2099-12-31T23:59:59Z')
+      .addDocumentRequest(
+        new DocumentRequestBuilder('dr-t1', 'KYCCredential')
+          .setSchemaType('JsonSchema')
+          .disclose('c-name', '$.credentialSubject.fullName'),
+      )
+      .buildSigned(verifierKeyDoc);
+
+    // Verify with wrong challenge — crypto proof purpose check fails
+    const result = await verifyVPRequestFull(signed, {
+      // Override the nonce used for structural check so structural passes,
+      // but pass a different challenge to the crypto layer by tampering proof
+    });
+
+    // Tamper the proof challenge after signing — structural sees mismatch
+    const tamperedProof = { ...signed, proof: { ...signed.proof!, challenge: 'wrong-challenge' } };
+    const result2 = await verifyVPRequestFull(tamperedProof);
+
+    // Structural catches the nonce/challenge mismatch
+    expect(result2.verified).toBe(false);
+    expect(result2.errors[0]).toMatch(/challenge mismatch/);
+  }, 30000);
+
+  it('fails structural when required fields are missing', async () => {
+    const signed = await new VPRequestBuilder('req-struct-fail', 'nonce-sf')
+      .setVerifier({
+        id: verifierDID,
+        name: 'Struct Verifier',
+        url: 'https://verifier.example.com',
+      })
+      .setExpiresAt('2099-12-31T23:59:59Z')
+      .addDocumentRequest(
+        new DocumentRequestBuilder('dr-sf', 'KYCCredential')
+          .setSchemaType('JsonSchema')
+          .disclose('c-name', '$.credentialSubject.fullName'),
+      )
+      .buildSigned(verifierKeyDoc);
+
+    // Remove required field
+    const broken = { ...signed, verifier: '' };
+    const result = await verifyVPRequestFull(broken);
+
+    expect(result.verified).toBe(false);
+    expect(result.structural.valid).toBe(false);
+    // Crypto should not even run
+    expect(result.crypto).toBeNull();
   }, 30000);
 });

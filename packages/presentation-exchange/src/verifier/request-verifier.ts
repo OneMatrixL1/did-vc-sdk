@@ -203,8 +203,6 @@ export async function verifyVPRequestFull(
 
   let crypto: VerifyVPRequestResult['crypto'];
   try {
-    // Use dynamic import to avoid pulling jsonld-signatures into the main bundle
-    // for consumers that only need structural validation.
     // @ts-ignore -- no .d.ts for jsonld-signatures
     const jsigs = (await import('jsonld-signatures')).default;
     const { AssertionProofPurpose } = jsigs.purposes;

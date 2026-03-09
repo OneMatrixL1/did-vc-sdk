@@ -153,8 +153,7 @@ export async function resolvePresentation(
 
   if (options.keyDoc) {
     const { keyDoc, didResolver } = options;
-    const result = await signVPResponse(unsigned, keyDoc, request.nonce, request.verifierUrl, didResolver);
-    return { ...unsigned, '@context': result['@context'], proof: result.proof };
+    return await signVPResponse(unsigned, keyDoc, request.nonce, request.verifierUrl, didResolver);
   }
 
   throw new Error('ResolveOptions requires either "signPresentation" or "keyDoc"');

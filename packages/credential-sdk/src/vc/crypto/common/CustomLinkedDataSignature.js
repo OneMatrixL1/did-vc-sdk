@@ -4,6 +4,7 @@ import base64url from 'base64url';
 import jsonld from 'jsonld';
 import { possibleVerificationMethodRefs } from '../../../types/did/document/verification-method-ref';
 import { createJws } from '../../jws';
+import secContext from '../../contexts/security_context';
 
 const MULTIBASE_BASE58BTC_HEADER = 'z';
 
@@ -43,19 +44,22 @@ export default class CustomLinkedDataSignature extends jsigs.suites
       throw new Error('No "verificationMethod" found in proof.');
     }
 
-    // Note: `expansionMap` is intentionally not passed; we can safely drop
-    // properties here and must allow for it
+    // Use our own secContext directly instead of jsigs.SECURITY_CONTEXT_URL.
+    // jsonld-signatures' extendContextLoader intercepts the security v2 URL
+    // and returns a built-in context that is missing EcdsaSecp256k1RecoveryMethod2020
+    // and blockchainAccountId. By passing our context inline, we bypass that.
+    const ctx = secContext['@context'];
     const result = await jsonld.frame(
       verificationMethod,
       {
-        '@context': jsigs.SECURITY_CONTEXT_URL,
+        '@context': ctx,
         '@embed': '@always',
         id: possibleVerificationMethodRefs(verificationMethod),
       },
       {
         documentLoader,
         compactToRelative: false,
-        expandContext: jsigs.SECURITY_CONTEXT_URL,
+        expandContext: ctx,
       },
     );
 

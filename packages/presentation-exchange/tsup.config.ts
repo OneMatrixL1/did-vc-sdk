@@ -7,5 +7,12 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   splitting: false,
-  external: ['@1matrix/credential-sdk'],
+  noExternal: [],
+  external: [
+    '@1matrix/credential-sdk',
+    // Keep Node.js CJS deps external so downstream bundlers (Vite) can
+    // polyfill `require('crypto')` etc. for browser/iOS targets.
+    'jsonld-signatures',
+    'rdf-canonize',
+  ],
 });

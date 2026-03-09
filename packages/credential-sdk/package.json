@@ -58,6 +58,7 @@
       "default": "./dist/esm/vc/index.js"
     },
     "./ethr-did": {
+      "types": "./dist/types/modules/ethr-did/index.d.ts",
       "import": "./dist/esm/modules/ethr-did/index.js",
       "default": "./dist/esm/modules/ethr-did/index.js"
     },

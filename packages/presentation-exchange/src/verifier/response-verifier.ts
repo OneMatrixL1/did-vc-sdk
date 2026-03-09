@@ -2,6 +2,8 @@ import type { VPRequest } from '../types/request.js';
 import type { VerifiablePresentation } from '../types/response.js';
 import { verifyPresentationStructure, type VerificationResult } from './structural-verifier.js';
 import { verifyPresentation } from '@1matrix/credential-sdk/vc';
+// @ts-ignore -- JS module, no .d.ts
+import { isEthrDID, generateDefaultDocument } from '@1matrix/credential-sdk/ethr-did';
 
 // ---------------------------------------------------------------------------
 // Options & result types
@@ -86,12 +88,14 @@ export async function verifyVPResponse(
   const { proof, ...vpWithoutProof } = presentation;
   const vpDoc = { ...vpWithoutProof, proof };
 
+  const resolver = options?.resolver ?? defaultEthrResolver();
+
   let crypto: VerifyVPResponseResult['crypto'];
   try {
     const result = (await verifyPresentation(vpDoc, {
       challenge: request.nonce,
       domain: presentation.proof.domain,
-      resolver: options?.resolver ?? null,
+      resolver,
       compactProof: true,
     })) as Record<string, unknown>;
 
@@ -119,5 +123,35 @@ export async function verifyVPResponse(
     structural,
     crypto,
     errors,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Default resolver for did:ethr — uses generateDefaultDocument (zero RPC)
+// ---------------------------------------------------------------------------
+
+function defaultEthrResolver() {
+  return {
+    supports: (id: string) => typeof id === 'string' && id.startsWith('did:ethr:'),
+    resolve: (id: string) => {
+      const did = id.split('#')[0]!;
+      if (!isEthrDID(did)) {
+        return Promise.reject(new Error(`Unsupported DID: ${did}`));
+      }
+      const doc = generateDefaultDocument(did) as {
+        verificationMethod: Array<{ id: string; [k: string]: unknown }>;
+        [k: string]: unknown;
+      };
+      if (!id.includes('#')) {
+        return Promise.resolve(doc);
+      }
+      const vm = doc.verificationMethod.find(
+        (m: { id: string }) => m.id === id,
+      );
+      if (!vm) {
+        return Promise.reject(new Error(`Verification method not found: ${id}`));
+      }
+      return Promise.resolve({ '@context': 'https://w3id.org/security/v2', ...vm });
+    },
   };
 }

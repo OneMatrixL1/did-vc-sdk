@@ -72,6 +72,20 @@ function registerDID(keypair: InstanceType<typeof Secp256k1Keypair>, did: string
   };
 }
 
+/** Resolver backed by networkCache (for tests using EcdsaSecp256k1VerificationKey2019) */
+const cacheResolver = {
+  supports: (id: string) => {
+    const key = id.split('#')[0]!;
+    return !!(networkCache as Record<string, unknown>)[key];
+  },
+  resolve: (id: string) => {
+    const cache = networkCache as Record<string, unknown>;
+    const cached = cache[id] ?? cache[id.split('#')[0]!];
+    if (cached) return Promise.resolve(cached);
+    return Promise.reject(new Error(`Not in cache: ${id}`));
+  },
+};
+
 function cleanupDID(did: string): void {
   const cache = networkCache as Record<string, unknown>;
   Object.keys(cache).forEach((key) => {
@@ -303,7 +317,7 @@ describe('verifyVPRequestFull()', () => {
       )
       .buildSigned(verifierKeyDoc);
 
-    const result = await verifyVPRequestFull(signed);
+    const result = await verifyVPRequestFull(signed, { resolver: cacheResolver });
 
     expect(result.verified).toBe(true);
     expect(result.structural.valid).toBe(true);

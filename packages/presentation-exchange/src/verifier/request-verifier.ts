@@ -220,16 +220,17 @@ export async function verifyVPRequestFull(
     const verified = result.verified as boolean;
     crypto = { verified };
 
-    if (!verified && result.error) {
-      crypto.error = result.error instanceof Error
-        ? result.error
-        : new Error(String(result.error));
-      errors.push(crypto.error.message);
+    if (!verified) {
+      const msgs = extractErrorMessages(result.error ?? result);
+      errors.push(...msgs);
+      if (msgs.length > 0) {
+        crypto.error = new Error(msgs.join('; '));
+      }
     }
   } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
-    crypto = { verified: false, error };
-    errors.push(error.message);
+    const msgs = extractErrorMessages(err);
+    crypto = { verified: false, error: new Error(msgs.join('; ') || String(err)) };
+    errors.push(...msgs.length > 0 ? msgs : [String(err)]);
   }
 
   return {
@@ -238,6 +239,40 @@ export async function verifyVPRequestFull(
     crypto,
     errors,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Error extraction — unwrap nested VerificationError.errors
+// ---------------------------------------------------------------------------
+
+function extractErrorMessages(err: unknown): string[] {
+  if (!err) return [];
+  const msgs: string[] = [];
+  if (err instanceof Error) {
+    // VerificationError from jsonld-signatures has .errors array
+    const nested = (err as { errors?: unknown[] }).errors;
+    if (Array.isArray(nested)) {
+      for (const e of nested) msgs.push(...extractErrorMessages(e));
+    } else if (err.message && err.message !== 'Verification error(s).') {
+      msgs.push(err.message);
+    }
+  }
+  // verifyPresentation result may have presentationResult.results[].error
+  if (typeof err === 'object' && err !== null) {
+    const obj = err as Record<string, unknown>;
+    if (obj.presentationResult && typeof obj.presentationResult === 'object') {
+      const pr = obj.presentationResult as Record<string, unknown>;
+      if (pr.error) msgs.push(...extractErrorMessages(pr.error));
+      if (Array.isArray(pr.results)) {
+        for (const r of pr.results) {
+          if (r && typeof r === 'object' && (r as Record<string, unknown>).error) {
+            msgs.push(...extractErrorMessages((r as Record<string, unknown>).error));
+          }
+        }
+      }
+    }
+  }
+  return msgs.length > 0 ? msgs : (err instanceof Error && err.message ? [err.message] : []);
 }
 
 // ---------------------------------------------------------------------------

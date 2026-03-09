@@ -92,7 +92,6 @@ export async function verifyVPResponse(
       challenge: request.nonce,
       domain: presentation.proof.domain,
       resolver: options?.resolver ?? null,
-      unsignedPresentation: false,
       compactProof: true,
     })) as Record<string, unknown>;
 

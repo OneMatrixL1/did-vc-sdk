@@ -3,7 +3,7 @@ import mockFetch from './mocks/fetch';
 
 import DIDJWKResolver from '../src/resolver/did/did-jwk-resolver';
 import { verifyCredential } from '../src/vc/credentials';
-import { verifyPresentation } from '../src/vc/presentations';
+import { verifyPresentationCredentials } from '../src/vc/presentations';
 
 mockFetch();
 
@@ -31,9 +31,8 @@ describe('Static JWT-VC verification', () => {
     expect(result.verified).toBe(true);
   });
   test('Sphereon ID credential in presentation', async () => {
-    const result = await verifyPresentation(getSamplePres([SPHEREON_ID_JWT_CREDENTIAL]), {
+    const result = await verifyPresentationCredentials(getSamplePres([SPHEREON_ID_JWT_CREDENTIAL]), {
       resolver,
-      unsignedPresentation: true,
     });
     expect(result.verified).toBe(true);
   });

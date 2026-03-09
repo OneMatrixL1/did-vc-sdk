@@ -12,7 +12,7 @@ import {
 } from '../src/rdf-and-cd';
 import {
   issueCredential,
-  verifyPresentation,
+  verifyPresentationCredentials,
   verifyCredential,
 } from '../src/vc';
 import { createPresentation } from './utils/create-presentation';
@@ -469,9 +469,8 @@ async function verifyC(credential) {
 }
 
 async function verifyP(presentation) {
-  return verifyPresentation(presentation, {
+  return verifyPresentationCredentials(presentation, {
     documentLoader,
-    unsignedPresentation: true,
   });
 }
 

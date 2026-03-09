@@ -195,7 +195,6 @@ describe('VPRequestBuilder.buildSigned()', () => {
       challenge: signed.nonce,
       domain: new URL(signed.verifierUrl).hostname,
       presentationPurpose: verifyPurpose,
-      unsignedPresentation: false,
     }) as { verified: boolean };
 
     expect(result.verified).toBe(true);

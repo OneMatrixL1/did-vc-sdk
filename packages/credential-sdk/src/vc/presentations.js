@@ -111,7 +111,6 @@ export async function verifyPresentationCredentials(
  * @property {string} [domain] - proof domain (optional)
  * @property {string} [controller] - controller (optional)
  * @property {DIDResolver} [resolver] - Resolver to resolve the issuer DID (optional)
- * @property {Boolean} [unsignedPresentation] - Whether to verify the proof or not
  * @property {Boolean} [compactProof] - Whether to compact the JSON-LD or not.
  * @property {object} [presentationPurpose] - A purpose other than the default AuthenticationProofPurpose
  * @property {object} [documentLoader] - A document loader, can be null and use the default
@@ -149,7 +148,6 @@ export async function verifyPresentation(presentation, options = {}) {
     challenge,
     domain,
     resolver,
-    unsignedPresentation = false,
     presentationPurpose,
     controller,
     suite = [],
@@ -171,25 +169,16 @@ export async function verifyPresentation(presentation, options = {}) {
     ],
   };
 
-  // TODO: verify proof then credentials
-  const { verified, credentialResults } = await verifyPresentationCredentials(
-    presentation,
-    verificationOptions,
-  );
   try {
-    // Skip proof validation for unsigned
-    if (unsignedPresentation) {
-      return { verified, results: [presentation], credentialResults };
-    }
-
-    // Get proof purpose
+    // Step 1: Verify VP proof (holder's signature) FIRST — before credential
+    // verification which may mutate the presentation object via JSON-LD
+    // expansion, invalidating the document hash.
     if (!presentationPurpose && !challenge) {
       throw new Error(
         'A "challenge" param is required for AuthenticationProofPurpose.',
       );
     }
 
-    // Set purpose and verify
     const purpose = presentationPurpose
       || new AuthenticationProofPurpose({ controller, domain, challenge });
     const presentationResult = await jsigs.verify(presentation, {
@@ -197,7 +186,7 @@ export async function verifyPresentation(presentation, options = {}) {
       ...verificationOptions,
     });
 
-    // Verify didOwnerProof if present
+    // Step 2: Verify didOwnerProof if present
     if (presentationResult.verified && presentation.didOwnerProof) {
       try {
         await verifyDIDOwnerProof(presentation.didOwnerProof, presentation.holder);
@@ -209,11 +198,17 @@ export async function verifyPresentation(presentation, options = {}) {
       }
     }
 
+    // Step 3: Verify embedded credentials
+    const { verified: credentialsVerified, credentialResults } = await verifyPresentationCredentials(
+      presentation,
+      verificationOptions,
+    );
+
     // Return results
     return {
       presentationResult,
       credentialResults,
-      verified: verified && presentationResult.verified,
+      verified: credentialsVerified && presentationResult.verified,
       error: presentationResult.error,
     };
   } catch (error) {

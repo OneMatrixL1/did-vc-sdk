@@ -241,7 +241,6 @@ export function checkCredential(credential, isJWT) {
  * @property {string} [domain] - proof domain (optional)
  * @property {string} [controller] - controller (optional)
  * @property {Resolver} [resolver] - Resolver to resolve the `DID`s/`StatusList`s/`Blob`s/Revocation registries (optional)
- * @property {boolean} [unsignedPresentation] - Whether to verify the proof or not
  * @property {boolean} [compactProof] - Whether to compact the JSON-LD or not.
  * @property {boolean} [skipRevocationCheck=false] - Disables revocation check.
  * **Warning, setting `skipRevocationCheck` to `true` can allow false positives when verifying revocable credentials.**

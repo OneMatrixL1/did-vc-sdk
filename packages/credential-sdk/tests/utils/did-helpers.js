@@ -1,7 +1,7 @@
 import b58 from 'bs58';
 import { randomAsHex } from '../../src/utils';
 import { Secp256k1Keypair } from '../../src/keypairs';
-import { verifyCredential, verifyPresentation } from '../../src/vc';
+import { verifyCredential, verifyPresentationCredentials } from '../../src/vc';
 import { documentLoader, addDocument, registered } from './cached-document-loader';
 
 export function registerDid(did, keypair) {
@@ -43,9 +43,8 @@ export async function verifyC(credential) {
 }
 
 export async function verifyP(presentation) {
-  return verifyPresentation(presentation, {
+  return verifyPresentationCredentials(presentation, {
     documentLoader,
-    unsignedPresentation: true,
   });
 }
 

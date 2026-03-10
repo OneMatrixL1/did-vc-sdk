@@ -121,7 +121,12 @@ function resolveTLVPositional(
 
         const valBuf = buf.slice(nextOffset, nextOffset + valueHeaderSize + valueLen);
         const strings = extractStrings(valBuf);
-        return strings[subIndex] ?? undefined;
+        if (strings.length > 0) {
+          return strings[subIndex] ?? undefined;
+        }
+        // No string found at this match — continue scanning for next occurrence
+        offset = nextOffset;
+        continue;
       }
       offset++;
     }

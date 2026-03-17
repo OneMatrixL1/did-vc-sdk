@@ -358,7 +358,7 @@ class EthrDIDModule extends AbstractDIDModule {
       const receipt = await txResponse.wait(confirmations);
 
       return {
-        txHash: receipt.transactionHash,
+        txHash: receipt.hash,
         blockNumber: receipt.blockNumber,
         success: true,
         ...receipt,
@@ -878,6 +878,7 @@ class EthrDIDModule extends AbstractDIDModule {
         checksummedNewOwner,
         uncompressedPubkey,
         signature,
+        { gasLimit: 500000 },
       );
 
       const receipt = await waitForTransaction(tx.hash, provider);

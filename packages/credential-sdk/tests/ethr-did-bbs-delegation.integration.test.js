@@ -88,7 +88,7 @@ describe('BBS Delegation Lifecycle Integration Test', () => {
   /**
    * Helper function to fund a test account with gas
    */
-  async function fundTestAccount(recipientAddress, amountInEther = '0.1') {
+  async function fundTestAccount(recipientAddress, amountInEther = '0.001') {
     const founderPrivateKey = founderKeypair.privateKey();
     const founderPrivateKeyHex = `0x${Array.from(founderPrivateKey)
       .map((byte) => byte.toString(16).padStart(2, '0'))
@@ -177,7 +177,7 @@ describe('BBS Delegation Lifecycle Integration Test', () => {
     test('Step 1: Create primary DID with Secp256k1 keypair', async () => {
       // Fund the owner account
       const ownerAddress = keypairToAddress(ownerKeypair);
-      await fundTestAccount(ownerAddress, '0.2');
+      await fundTestAccount(ownerAddress, '0.0005');
 
       // Create the DID
       ownerDID = await module.createNewDID(ownerKeypair);
@@ -216,7 +216,7 @@ describe('BBS Delegation Lifecycle Integration Test', () => {
         86400, // 1 day validity
       );
 
-      expect(receipt.transactionHash).toBeDefined();
+      expect(receipt.hash).toBeDefined();
       expect(receipt.status).toBe(1); // Transaction success
 
       // Verify BBS key appears in DID document
@@ -309,7 +309,7 @@ describe('BBS Delegation Lifecycle Integration Test', () => {
         ownerKeypair,
       );
 
-      expect(receipt.transactionHash).toBeDefined();
+      expect(receipt.hash).toBeDefined();
       expect(receipt.status).toBe(1); // Transaction success
 
       // Verify BBS key no longer appears in DID document

@@ -61,7 +61,7 @@ describe('EthrDID Integration Tests', () => {
   let provider;
 
   // Helper function to fund a test account with minimal gas
-  async function fundTestAccount(recipientAddress, amountInEther = '0.1') {
+  async function fundTestAccount(recipientAddress, amountInEther = '0.001') {
     const founderPrivateKey = founderKeypair.privateKey();
     const founderPrivateKeyHex = `0x${Array.from(founderPrivateKey)
       .map((byte) => byte.toString(16).padStart(2, '0'))
@@ -119,7 +119,7 @@ describe('EthrDID Integration Tests', () => {
       // Create and fund a test account
       const testKeypair = Secp256k1Keypair.random();
       const testAddress = keypairToAddress(testKeypair);
-      await fundTestAccount(testAddress, '0.05');
+      await fundTestAccount(testAddress, '0.0001');
 
       const did = await module.createNewDID(testKeypair);
 
@@ -130,7 +130,7 @@ describe('EthrDID Integration Tests', () => {
         testKeypair,
       );
 
-      expect(receipt.transactionHash).toBeDefined();
+      expect(receipt.hash).toBeDefined();
       expect(receipt.blockNumber).toBeGreaterThan(0);
       expect(receipt.status).toBe(1); // Transaction success
 
@@ -145,7 +145,7 @@ describe('EthrDID Integration Tests', () => {
       // Create and fund a test account
       const testKeypair = Secp256k1Keypair.random();
       const testAddress = keypairToAddress(testKeypair);
-      await fundTestAccount(testAddress, '0.05');
+      await fundTestAccount(testAddress, '0.0001');
 
       const delegateKeypair = Secp256k1Keypair.random();
       const did = await module.createNewDID(testKeypair);
@@ -158,7 +158,7 @@ describe('EthrDID Integration Tests', () => {
         { delegateType: 'veriKey', expiresIn: 86400 },
       );
 
-      expect(receipt.transactionHash).toBeDefined();
+      expect(receipt.hash).toBeDefined();
       expect(receipt.status).toBe(1);
 
       // Verify delegate was added
@@ -170,7 +170,7 @@ describe('EthrDID Integration Tests', () => {
       // Create and fund a test account
       const testKeypair = Secp256k1Keypair.random();
       const testAddress = keypairToAddress(testKeypair);
-      await fundTestAccount(testAddress, '0.05');
+      await fundTestAccount(testAddress, '0.0001');
 
       const delegateKeypair = Secp256k1Keypair.random();
       const did = await module.createNewDID(testKeypair);
@@ -190,7 +190,7 @@ describe('EthrDID Integration Tests', () => {
         'veriKey',
       );
 
-      expect(receipt.transactionHash).toBeDefined();
+      expect(receipt.hash).toBeDefined();
       expect(receipt.status).toBe(1);
     }, 120000); // 2 minutes for 2 transactions
   });
@@ -200,11 +200,11 @@ describe('EthrDID Integration Tests', () => {
       // Create and fund two test accounts
       const testKeypair = Secp256k1Keypair.random();
       const testAddress = keypairToAddress(testKeypair);
-      await fundTestAccount(testAddress, '0.05');
+      await fundTestAccount(testAddress, '0.0001');
 
       const newOwnerKeypair = Secp256k1Keypair.random();
       const newOwnerAddress = keypairToAddress(newOwnerKeypair);
-      await fundTestAccount(newOwnerAddress, '0.05');
+      await fundTestAccount(newOwnerAddress, '0.0001');
 
       const did = await module.createNewDID(testKeypair);
 
@@ -215,7 +215,7 @@ describe('EthrDID Integration Tests', () => {
         testKeypair,
       );
 
-      expect(receipt.transactionHash).toBeDefined();
+      expect(receipt.hash).toBeDefined();
       expect(receipt.status).toBe(1);
 
       // After transfer, old owner can no longer modify
@@ -288,7 +288,7 @@ describe('EthrDID Integration Tests', () => {
       // Create and fund a test account
       const ownerKeypair = Secp256k1Keypair.random();
       const ownerAddress = keypairToAddress(ownerKeypair);
-      await fundTestAccount(ownerAddress, '0.2');
+      await fundTestAccount(ownerAddress, '0.0005');
 
       const did = await module.createNewDID(ownerKeypair);
 
@@ -395,7 +395,7 @@ describe('EthrDID Integration Tests', () => {
       // === STEP 5: Transfer ownership, new owner can sign ===
       const newOwnerKeypair = Secp256k1Keypair.random();
       const newOwnerAddress = keypairToAddress(newOwnerKeypair);
-      await fundTestAccount(newOwnerAddress, '0.05');
+      await fundTestAccount(newOwnerAddress, '0.0001');
 
       await module.changeOwner(did, newOwnerAddress, ownerKeypair);
 
@@ -428,7 +428,7 @@ describe('EthrDID Integration Tests', () => {
       // Create and fund a test account
       const testKeypair = Secp256k1Keypair.random();
       const testAddress = keypairToAddress(testKeypair);
-      await fundTestAccount(testAddress, '0.1');
+      await fundTestAccount(testAddress, '0.0005');
 
       const did = await module.createNewDID(testKeypair);
 

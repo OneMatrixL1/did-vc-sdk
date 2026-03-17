@@ -24,8 +24,8 @@ export const DEFAULT_NETWORKS = {
   vietchain: {
     name: 'vietchain',
     description: 'VietChain Network',
-    rpcUrl: 'https://rpc.vietcha.in',
-    chainId: 84005,
+    rpcUrl: 'https://vnidchain-rpc.vbsn.vn',
+    chainId: 54000,
     registry: DEFAULT_REGISTRY_ADDRESS,
   },
 };

@@ -19,7 +19,7 @@ export const credentialIDField = '@id';
 export const credentialContextField = '@context';
 export const credentialTypeField = '@type';
 
-export const DEFAULT_REGISTRY_ADDRESS = '0x4eb3B58d215059e3CEEe90bb100E8d9e8cc5Cb81';
+export const DEFAULT_REGISTRY_ADDRESS = '0xd345aF542e3E64F9259CE983edEfb9bF54aA9fd0';
 
 export const didOwnerProofContext = {
     '@context': {

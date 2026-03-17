@@ -7,11 +7,9 @@ export default {
   testTimeout: 30000,
   testEnvironment: "./tests/test-environment",
   transform: {
-    "^.+\\.(ts|js)$": ["babel-jest", { rootMode: "upward" }],
+    "^.+\\.(ts|m?js)$": ["babel-jest", { rootMode: "upward" }],
   },
-  transformIgnorePatterns: [
-    "node_modules/(?!.*(@polkadot|@babel|multiformats|@docknetwork|@stablelib|@scure|@noble|uint8arrays))",
-  ],
+  transformIgnorePatterns: [],
   workerIdleMemoryLimit: "1G",
   verbose: true,
   globals: {

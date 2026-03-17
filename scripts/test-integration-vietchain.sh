@@ -12,8 +12,8 @@ echo ""
 
 # Set VietChain configuration
 export ETHR_NETWORK=vietchain
-export ETHR_NETWORK_RPC_URL=https://rpc.vietcha.in
-export ETHR_REGISTRY_ADDRESS=0xF0889fb2473F91c068178870ae2e1A0408059A03
+export ETHR_NETWORK_RPC_URL=https://vnidchain-rpc.vbsn.vn
+export ETHR_REGISTRY_ADDRESS=0xd345aF542e3E64F9259CE983edEfb9bF54aA9fd0
 
 # Optional: Set private key if provided as argument
 if [ -n "$1" ]; then

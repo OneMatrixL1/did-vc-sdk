@@ -45,18 +45,23 @@ export async function verifyDelegationCertificate(certificate) {
   }
 
   // 2. Reconstruct Challenge (must match signer's logic exactly)
-  // We use a fixed property order for deterministic JSON
-  const payload = JSON.stringify({
+  // ICAO 9303/ISO 9796-2 requires a deterministic payload
+  // Property order: holderDID, chipDID, timestamp
+  const payloadObj = {
     holderDID,
     chipDID,
     timestamp,
-  });
+  };
+  const payload = JSON.stringify(payloadObj);
 
   const md = forge.md.sha256.create();
   md.update(payload);
   const hashHex = md.digest().toHex();
   // We use 8 bytes (16 hex chars) for the AA challenge
   const recomputedChallenge = '0x' + hashHex.slice(0, 16);
+
+  console.log('🧪 SDK: Delegation Payload:', payload);
+  console.log('🧪 SDK: Computed Challenge:', recomputedChallenge);
 
   // 3. Extract RSA Public Key from chipDID
   const publicKey = await extractPublicKeyFromDid(chipDID);
@@ -158,8 +163,10 @@ async function verifyRSASignature(publicKey, challenge, signature) {
         return true;
       } else {
         console.warn('❌ ISO/IEC 9796-2 (SHA-1) hash mismatch');
-        console.warn('   Embedded:', embeddedHashHex);
-        console.warn('   Recomputed:', recomputedHash);
+        console.warn('   M1 (hex):', forge.util.bytesToHex(M1));
+        console.warn('   Challenge (hex):', forge.util.bytesToHex(challengeBytes));
+        console.warn('   Embedded Hash:', embeddedHashHex);
+        console.warn('   Recomputed Hash:', recomputedHash);
       }
 
       // Try SHA-256 just in case (32 bytes)

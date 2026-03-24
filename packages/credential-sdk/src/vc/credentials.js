@@ -29,12 +29,13 @@ import {
   PrivateStatusList2021Qualifier,
 } from './constants';
 
+import { verifyDelegationCertificate } from './delegation-utils.js';
 import {
   getSuiteFromKeyDoc,
   expandJSONLD,
-  getKeyFromDIDDocument,
   processIfKvac,
   verifyDIDOwnerProof,
+  getKeyFromDIDDocument,
 } from './helpers';
 import { ensureValidDatetime } from '../utils';
 import { attachDIDOwnerProof } from './did-owner-proof-utils';
@@ -427,6 +428,36 @@ export async function verifyCredential(
     documentLoader: docLoader,
     compactProof,
   });
+
+  // Verify delegation chain if present in any proof
+  if (result.verified) {
+    const proofs = Array.isArray(credential.proof) ? credential.proof : [credential.proof];
+    for (const p of proofs) {
+      if (p && p.delegationCertificate) {
+        try {
+          const isDelegationValid = await verifyDelegationCertificate(p.delegationCertificate);
+          if (!isDelegationValid) {
+            result.verified = false;
+            result.error = new Error('Delegation certificate signature verification failed');
+            break;
+          }
+
+          // Check if the holder in the cert matches the signer (verificationMethod)
+          const verificationMethod = p.verificationMethod || '';
+          const signerDID = verificationMethod.split('#')[0];
+          if (p.delegationCertificate.holderDID !== signerDID) {
+            result.verified = false;
+            result.error = new Error('Delegation certificate holder DID mismatch');
+            break;
+          }
+        } catch (err) {
+          result.verified = false;
+          result.error = err;
+          break;
+        }
+      }
+    }
+  }
 
   // Verify didOwnerProof if present
   if (result.verified && credential.didOwnerProof) {

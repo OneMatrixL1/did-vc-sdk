@@ -1,4 +1,5 @@
 import { SODVerifier } from '../../icao/sod-verifier.js';
+import { verifyDelegationCertificate } from '../delegation-utils.js';
 
 /**
  * Proof suite for ICAO 9303 SOD (Security Object for Document).
@@ -21,6 +22,14 @@ export default class ICAO9303SODSignature {
 
       if (!result.passiveAuthSuccess) {
         throw new Error(`SOD verification failed: ${result.error || 'Signature or DG hash mismatch'}`);
+      }
+
+      // Verify delegationCertificate if present
+      if (proof.delegationCertificate) {
+        const isDelegationValid = await verifyDelegationCertificate(proof.delegationCertificate);
+        if (!isDelegationValid) {
+          throw new Error('Delegation certificate signature verification failed');
+        }
       }
 
       return { verified: true };

@@ -1,6 +1,7 @@
 import VerifiableCredential from '../../vc/verifiable-credential.js';
 import { SODVerifier } from '../sod-verifier.js';
 import { VN_CCCD_2024 } from '../icao-profile/index.js';
+import { DelegationCertificate } from '../delegation.js';
 
 /**
  * Creates a CCCD (Căn Cước Công Dân) Verifiable Credential from SOD data.
@@ -9,12 +10,14 @@ import { VN_CCCD_2024 } from '../icao-profile/index.js';
  * @param {string} sodBase64 - Base64 encoded SOD data
  * @param {Record<string, string>} rawDataGroups - Base64 encoded DG data keyed by DG name
  * @param {string} [cscaCertBase64] - Optional Base64 encoded CSCA root certificate
+ * @param {DelegationCertificate} [delegationCertificate] - Optional delegation certificate
  * @returns {Promise<VerifiableCredential>}
  */
 export async function issueCredential(
   sodBase64: string,
   rawDataGroups: Record<string, string>,
   cscaCertBase64?: string,
+  delegationCertificate?: DelegationCertificate,
 ): Promise<VerifiableCredential> {
   const verificationResult = await SODVerifier.verify(sodBase64, rawDataGroups, cscaCertBase64);
 
@@ -51,6 +54,7 @@ export async function issueCredential(
     created: new Date().toISOString(),
     sod: sodBase64,
     dsCertificate: verificationResult.dsCertificate,
+    ...(delegationCertificate ? { delegationCertificate } : {}),
   };
 
   return vc;

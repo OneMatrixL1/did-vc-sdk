@@ -27,7 +27,16 @@
                 "dsCertificate": "cccd:dsCertificate",
                 "icaoVersion": "cccd:icaoVersion",
                 "proofVersion": "cccd:proofVersion",
-                "dgProfile": "cccd:dgProfile"
+                "dgProfile": "cccd:dgProfile",
+                "delegationCertificate": {
+                    "@id": "cccd:delegationCertificate",
+                    "@context": {
+                        "holderDID": { "@id": "cccd:holderDID", "@type": "@id" },
+                        "chipDID": { "@id": "cccd:chipDID", "@type": "@id" },
+                        "timestamp": "http://purl.org/dc/terms/created",
+                        "aaSignature": "cccd:aaSignature"
+                    }
+                }
             }
         }
     }

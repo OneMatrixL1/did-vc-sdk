@@ -1,6 +1,9 @@
 import cachedUris from './contexts.js';
 import Resolver from "../resolver/generic/resolver"; // eslint-disable-line
 import jsonFetch from '../utils/json-fetch';
+import VBSNDIDModule from '../modules/vbsn-did/module';
+
+const vbsnModule = new VBSNDIDModule();
 
 function parseEmbeddedDataURI(embedded) {
   // Strip new lines
@@ -52,6 +55,9 @@ function documentLoader(resolver = null) {
     } else if (resolver?.supports(uriString)) {
       // Try to resolve a DID and throw if cannot resolve
       document = await resolver.resolve(uriString);
+    } else if (vbsnModule.supports(uriString)) {
+      // Built-in did:vbsn resolution (no blockchain needed)
+      document = await vbsnModule.resolve(uriString);
     } else {
       // Strip ending slash from uri to determine cache key
       const cacheKey = uriString.endsWith('/')

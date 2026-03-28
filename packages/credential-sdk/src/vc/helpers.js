@@ -220,7 +220,7 @@ export async function verifyDIDOwnerProof(history, identityDID) {
     return;
   }
 
-  if (identityDID && identityDID.startsWith('did:ethr:')) {
+  if (identityDID && (identityDID.startsWith('did:ethr:') || identityDID.startsWith('did:vbsn:'))) {
     const parsed = parseDID(identityDID);
     let identity = parsed.address;
     if (parsed.isDualAddress) {

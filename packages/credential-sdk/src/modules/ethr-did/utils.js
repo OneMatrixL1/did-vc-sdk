@@ -421,6 +421,37 @@ export function isDualAddressEthrDID(did) {
 }
 
 /**
+ * Create an optimistic DID resolver for did:ethr and did:vbsn.
+ * Resolves DIDs offline using generateDefaultDocument — no RPC needed.
+ *
+ * @param {object} [options] - Options forwarded to generateDefaultDocument
+ * @param {number} [options.chainId=1] - Chain ID for blockchainAccountId
+ * @returns {{ supports(id: string): boolean, resolve(id: string): Promise<object> }}
+ */
+export function createOptimisticResolver(options = {}) {
+  return {
+    supports(id) {
+      return isEthrDID(id.split('#')[0]);
+    },
+    resolve(id) {
+      const did = id.split('#')[0];
+      if (!isEthrDID(did)) {
+        return Promise.reject(new Error(`Unsupported DID: ${did}`));
+      }
+      const doc = generateDefaultDocument(did, options);
+      if (!id.includes('#')) {
+        return Promise.resolve(doc);
+      }
+      const vm = doc.verificationMethod.find((m) => m.id === id);
+      if (!vm) {
+        return Promise.reject(new Error(`Verification method not found: ${id}`));
+      }
+      return Promise.resolve({ '@context': 'https://w3id.org/security/v2', ...vm });
+    },
+  };
+}
+
+/**
  * Generate a default ethr DID document without blockchain fetch.
  * This is what ethr-did-resolver returns when there's no on-chain data.
  *

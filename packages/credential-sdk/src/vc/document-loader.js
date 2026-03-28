@@ -1,6 +1,9 @@
 import cachedUris from './contexts.js';
 import Resolver from "../resolver/generic/resolver"; // eslint-disable-line
 import jsonFetch from '../utils/json-fetch';
+import { createOptimisticResolver } from '../modules/ethr-did/utils';
+
+const optimisticResolver = createOptimisticResolver();
 
 function parseEmbeddedDataURI(embedded) {
   // Strip new lines
@@ -62,6 +65,9 @@ function documentLoader(resolver = null) {
       const cachedData = cachedUris.get(cacheKey);
       if (cachedData) {
         document = cachedData;
+      } else if (optimisticResolver.supports(uriString)) {
+        // Optimistic resolution for did:ethr / did:vbsn (no RPC needed)
+        document = await optimisticResolver.resolve(uriString);
       } else {
         const doc = await jsonFetch(uriString);
         cachedUris.set(cacheKey, doc);

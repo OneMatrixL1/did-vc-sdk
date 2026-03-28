@@ -41,11 +41,14 @@ export default class VBSNDIDModule extends AbstractDIDModule {
         // For did:vbsn, we reconstruct the document based on the DID string
         // This is useful for self-resolving DIDs where the info is encoded in the DID
 
+        // Extract address from did:vbsn:0xADDRESS
+        const address = baseDid.replace('did:vbsn:', '');
+
         // Default document for vbsn DIDs
         const didDocument = {
             '@context': [
                 'https://www.w3.org/ns/did/v1',
-                'https://w3id.org/security/v2'
+                'https://w3id.org/security/suites/secp256k1recovery-2020/v2'
             ],
             id: baseDid,
             verificationMethod: [
@@ -53,6 +56,7 @@ export default class VBSNDIDModule extends AbstractDIDModule {
                     id: `${baseDid}#controller`,
                     type: 'EcdsaSecp256k1RecoveryMethod2020',
                     controller: baseDid,
+                    blockchainAccountId: `eip155:1:${address}`,
                 }
             ],
             authentication: [`${baseDid}#controller`],

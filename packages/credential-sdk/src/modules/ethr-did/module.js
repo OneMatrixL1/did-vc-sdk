@@ -132,8 +132,8 @@ class EthrDIDModule extends AbstractDIDModule {
       return false;
     }
 
-    // Check if it's an ethr DID (may include fragment #key-id)
-    if (!id.startsWith('did:ethr:')) {
+    // Check if it's an ethr or vbsn DID (may include fragment #key-id)
+    if (!id.startsWith('did:ethr:') && !id.startsWith('did:vbsn:')) {
       return false;
     }
 

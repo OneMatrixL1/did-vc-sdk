@@ -241,9 +241,9 @@ export function parseDID(did) {
     throw new Error('DID must be a string');
   }
 
-  // Try dual-address format first: did:ethr:[network:]0xSecp:0xBBS
+  // Try dual-address format first: did:(ethr|vbsn):[network:]0xSecp:0xBBS
   const dualMatch = did.match(
-    /^did:ethr:(?:([a-z0-9-]+):)?(0x[0-9a-fA-F]{40}):(0x[0-9a-fA-F]{40})$/,
+    /^did:(?:ethr|vbsn):(?:([a-z0-9-]+):)?(0x[0-9a-fA-F]{40}):(0x[0-9a-fA-F]{40})$/,
   );
 
   if (dualMatch) {
@@ -269,8 +269,8 @@ export function parseDID(did) {
     };
   }
 
-  // Fall back to single-address format: did:ethr:[network:]0xAddress
-  const singleMatch = did.match(/^did:ethr:(?:([a-z0-9-]+):)?(0x[0-9a-fA-F]{40})$/);
+  // Fall back to single-address format: did:(ethr|vbsn):[network:]0xAddress
+  const singleMatch = did.match(/^did:(?:ethr|vbsn):(?:([a-z0-9-]+):)?(0x[0-9a-fA-F]{40})$/);
 
   if (!singleMatch) {
     throw new Error(`Invalid ethr DID format: ${did}`);
@@ -404,8 +404,8 @@ export function isEthrDID(did) {
   if (!did || typeof did !== 'string') {
     return false;
   }
-  // Match single OR dual address format
-  return /^did:ethr:(?:[a-z0-9-]+:)?0x[0-9a-fA-F]{40}(?::0x[0-9a-fA-F]{40})?$/.test(did);
+  // Match single OR dual address format for both did:ethr and did:vbsn
+  return /^did:(?:ethr|vbsn):(?:[a-z0-9-]+:)?0x[0-9a-fA-F]{40}(?::0x[0-9a-fA-F]{40})?$/.test(did);
 }
 
 /**
@@ -417,7 +417,7 @@ export function isDualAddressEthrDID(did) {
   if (!did || typeof did !== 'string') {
     return false;
   }
-  return /^did:ethr:(?:[a-z0-9-]+:)?0x[0-9a-fA-F]{40}:0x[0-9a-fA-F]{40}$/.test(did);
+  return /^did:(?:ethr|vbsn):(?:[a-z0-9-]+:)?0x[0-9a-fA-F]{40}:0x[0-9a-fA-F]{40}$/.test(did);
 }
 
 /**

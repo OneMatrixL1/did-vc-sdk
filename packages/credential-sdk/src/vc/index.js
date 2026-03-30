@@ -42,3 +42,6 @@ export * from './jws';
 export * from './presentations';
 export * from './revocation';
 export * from './crypto';
+
+// Re-export initializeWasm so consumers use the same WASM instance as the SDK
+export { initializeWasm } from '@docknetwork/crypto-wasm-ts';

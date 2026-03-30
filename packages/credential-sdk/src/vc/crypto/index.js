@@ -26,3 +26,10 @@ export { default as JsonWebSignature2020 } from './JsonWebSignature2020';
 export { default as CustomLinkedDataSignature } from './common/CustomLinkedDataSignature';
 export { default as ICAO9303SODSignature } from './ICAO9303SODSignature';
 export * from './constants';
+
+// Re-export crypto-wasm-ts so consumers use the same WASM instance
+export {
+  BBSSecretKey,
+  BBSSignatureParams,
+  BBS_SIGNATURE_PARAMS_LABEL_BYTES,
+} from '@docknetwork/crypto-wasm-ts';

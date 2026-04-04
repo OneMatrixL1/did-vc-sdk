@@ -1001,21 +1001,77 @@ describe('ZKP Selective Disclosure', () => {
   // 13. Attack Vectors — Security Cases
   // -------------------------------------------------------------------------
 
+  function requestWith(conditions: Record<string, unknown>[]): VPRequest {
+    return {
+      ...stubRequest,
+      rules: { type: 'DocumentRequest' as const, docRequestID: 'd', docType: ['X'], schemaType: 's', conditions },
+    };
+  }
+
   describe('13. Attack Vectors — Security Cases', () => {
-    it('LIMITATION: Merkle proof without dependsOn passes tree-math check (verifier must enforce chain)', async () => {
+    it('REJECTS empty proofs when request demands ZKP conditions', async () => {
+      const req = requestWith([
+        { type: 'DocumentCondition', conditionID: 'c-sod', operator: 'zkp', circuitId: 'sod-validate', proofSystem: 'ultra_honk' },
+      ]);
+
+      const r = await verifyZKPProofs(req, stubVP([stubCred([])]), testPoseidon2, mockZKPProvider());
+
+      expect(r.verified).toBe(false);
+
+      expect(r.proofResults.some(p => p.error?.includes('no matching verified proof'))).toBe(true);
+    });
+
+    it('REJECTS when attacker omits one of multiple required ZKP conditions', async () => {
+      const req = requestWith([
+        { type: 'DocumentCondition', conditionID: 'c-sod', operator: 'zkp', circuitId: 'sod-validate', proofSystem: 'ultra_honk' },
+        { type: 'DocumentCondition', conditionID: 'c-age', operator: 'zkp', circuitId: 'date-lessthanorequal', proofSystem: 'ultra_honk' },
+      ]);
+
+      const provider = mockZKPProvider();
+
+      const onlySod = zkpProof({ conditionID: 'c-sod', circuitId: 'sod-validate' });
+
+      const r = await verifyZKPProofs(req, stubVP([stubCred([onlySod])]), testPoseidon2, provider);
+
+      expect(r.verified).toBe(false);
+
+      expect(r.proofResults.some(p => p.conditionID === 'c-age' && !p.verified)).toBe(true);
+    });
+
+    it('REJECTS circuit substitution when conditionID matches request', async () => {
+      const req = requestWith([
+        { type: 'DocumentCondition', conditionID: 'c-age', operator: 'zkp', circuitId: 'date-lessthanorequal', proofSystem: 'ultra_honk' },
+      ]);
+
+      const provider = mockZKPProvider();
+
+      const wrongCircuit = zkpProof({ conditionID: 'c-age', circuitId: 'trivial-always-true' });
+
+      const r = await verifyZKPProofs(req, stubVP([stubCred([wrongCircuit])]), testPoseidon2, provider);
+
+      expect(r.verified).toBe(false);
+
+      expect(r.proofResults[0]!.error).toContain('Circuit mismatch');
+    });
+
+    it('REJECTS Merkle proof for wrong fieldIndex when request specifies field', async () => {
+      const req = requestWith([
+        { type: 'DocumentCondition', conditionID: 'cond-dob', operator: 'disclose', field: 'dateOfBirth', merkleDisclosure: { commitmentRef: 'c-chain' } },
+      ]);
+
+      const wrongField = merkleProof('fullName', { conditionID: 'cond-dob' });
+
+      const r = await verifyZKPProofs(req, stubVP([stubCred([wrongField])]), testPoseidon2);
+
+      expect(r.verified).toBe(false);
+
+      expect(r.proofResults[0]!.error).toContain('fieldIndex mismatch');
+    });
+
+    it('Merkle proof without dependsOn passes tree-math (no request conditions)', async () => {
       const proof = merkleProof('fullName');
 
       const r = await verifyZKPProofs(stubRequest, stubVP([stubCred([proof])]), testPoseidon2);
-
-      expect(r.verified).toBe(true);
-    });
-
-    it('delegates circuit validation to provider — SDK does not enforce circuitId match against request', async () => {
-      const provider = mockZKPProvider(() => true);
-
-      const proof = zkpProof({ circuitId: 'trivial-always-true' });
-
-      const r = await verifyZKPProofs(stubRequest, stubVP([stubCred([proof])]), testPoseidon2, provider);
 
       expect(r.verified).toBe(true);
     });

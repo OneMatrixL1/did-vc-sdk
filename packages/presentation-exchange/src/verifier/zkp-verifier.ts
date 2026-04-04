@@ -9,12 +9,13 @@
  *      must == referenced proof's publicOutputs[outputKey]
  */
 
-import type { VPRequest, DocumentRequestNode, ZKPCondition } from '../types/request.js';
+import type { VPRequest, DocumentRequestNode, ZKPCondition, DiscloseCondition } from '../types/request.js';
 import type { VerifiablePresentation, PresentedCredential } from '../types/response.js';
 import type { ZKPProof, CredentialProof } from '../types/credential.js';
 import type { MerkleDisclosureProof } from '../types/merkle.js';
 import type { ZKPProvider, Poseidon2Hasher } from '../types/zkp-provider.js';
 import { extractConditions } from '../resolver/field-extractor.js';
+import { fieldIdToLeafIndex, isDg13Field } from '../resolvers/zkp-field-mapping.js';
 
 const MERKLE_DEPTH = 5;
 
@@ -42,7 +43,9 @@ export async function verifyZKPProofs(
 ): Promise<ZKPVerificationResult> {
   const results: ZKPProofResult[] = [];
 
-  const requestedConditions = collectRequestedConditions(request.rules);
+  const { zkpConditions, discloseConditions } = collectAllRequestedConditions(request.rules);
+
+  const satisfiedConditions = new Set<string>();
 
   for (const cred of presentation.verifiableCredential) {
     const proofs = normalizeProofs(cred);
@@ -53,12 +56,14 @@ export async function verifyZKPProofs(
       if (proof.type === 'ZKPProof') {
         const zkp = proof as ZKPProof;
 
-        const result = await verifyZKPProofSingle(zkp, outputsMap, requestedConditions, zkpProvider);
+        const result = await verifyZKPProofSingle(zkp, outputsMap, zkpConditions, zkpProvider);
 
         results.push(result);
 
         if (result.verified) {
           outputsMap.set(zkp.conditionID, zkp.publicOutputs);
+
+          satisfiedConditions.add(zkp.conditionID);
         }
 
         continue;
@@ -67,10 +72,36 @@ export async function verifyZKPProofs(
       if (proof.type === 'MerkleDisclosureProof') {
         const merkle = proof as MerkleDisclosureProof;
 
-        const result = verifyMerkleProofSingle(merkle, outputsMap, poseidon2);
+        const result = verifyMerkleProofSingle(merkle, outputsMap, discloseConditions, poseidon2);
 
         results.push(result);
+
+        if (result.verified) {
+          satisfiedConditions.add(merkle.conditionID);
+        }
       }
+    }
+  }
+
+  for (const [condId] of zkpConditions) {
+    if (!satisfiedConditions.has(condId)) {
+      results.push({
+        conditionID: condId,
+        type: 'ZKPProof',
+        verified: false,
+        error: `Required ZKP condition "${condId}" has no matching verified proof`,
+      });
+    }
+  }
+
+  for (const [condId, cond] of discloseConditions) {
+    if (cond.merkleDisclosure && !satisfiedConditions.has(condId)) {
+      results.push({
+        conditionID: condId,
+        type: 'MerkleDisclosureProof',
+        verified: false,
+        error: `Required Merkle disclosure "${condId}" has no matching verified proof`,
+      });
     }
   }
 
@@ -154,8 +185,24 @@ async function verifyZKPProofSingle(
 function verifyMerkleProofSingle(
   proof: MerkleDisclosureProof,
   outputsMap: Map<string, Record<string, unknown>>,
+  discloseConditions: Map<string, DiscloseCondition>,
   poseidon2: Poseidon2Hasher,
 ): ZKPProofResult {
+  const requestedDisclose = discloseConditions.get(proof.conditionID);
+
+  if (requestedDisclose && isDg13Field(requestedDisclose.field)) {
+    const expectedIndex = fieldIdToLeafIndex(requestedDisclose.field);
+
+    if (proof.fieldIndex !== expectedIndex) {
+      return {
+        conditionID: proof.conditionID,
+        type: 'MerkleDisclosureProof',
+        verified: false,
+        error: `fieldIndex mismatch: request requires field "${requestedDisclose.field}" (index ${expectedIndex}) but proof has index ${proof.fieldIndex}`,
+      };
+    }
+  }
+
   const valid = verifyMerkleInclusion(proof, poseidon2);
 
   if (!valid) {
@@ -321,8 +368,13 @@ function verifyFieldValue(proof: MerkleDisclosureProof): boolean {
   }
 }
 
-function collectRequestedConditions(node: DocumentRequestNode): Map<string, ZKPCondition> {
-  const map = new Map<string, ZKPCondition>();
+function collectAllRequestedConditions(node: DocumentRequestNode): {
+  zkpConditions: Map<string, ZKPCondition>;
+  discloseConditions: Map<string, DiscloseCondition>;
+} {
+  const zkpConditions = new Map<string, ZKPCondition>();
+
+  const discloseConditions = new Map<string, DiscloseCondition>();
 
   function walk(n: DocumentRequestNode): void {
     if (n.type === 'Logical') {
@@ -331,16 +383,20 @@ function collectRequestedConditions(node: DocumentRequestNode): Map<string, ZKPC
       return;
     }
 
-    const { zkp } = extractConditions(n.conditions);
+    const { zkp, disclose } = extractConditions(n.conditions);
 
     for (const cond of zkp) {
-      map.set(cond.conditionID, cond);
+      zkpConditions.set(cond.conditionID, cond);
+    }
+
+    for (const cond of disclose) {
+      discloseConditions.set(cond.conditionID, cond);
     }
   }
 
   walk(node);
 
-  return map;
+  return { zkpConditions, discloseConditions };
 }
 
 function normalizeProofs(cred: PresentedCredential): CredentialProof[] {

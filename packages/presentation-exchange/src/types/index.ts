@@ -12,6 +12,7 @@ export type {
   DocumentConditionNode,
   LogicalConditionNode,
   DiscloseCondition,
+  MerkleDisclosureRef,
   ZKPCondition,
   ProofSystem,
   KeyDoc,
@@ -25,6 +26,7 @@ export type {
   CredentialProof,
   DataIntegrityProof,
   ZKPProof,
+  MerkleDisclosureProof,
 } from './response.js';
 
 export type { MatchableCredential } from './credential.js';
@@ -39,3 +41,16 @@ export type {
 } from './matching.js';
 
 export type { SchemaResolver, SchemaResolverMap, DeriveOptions } from './schema-resolver.js';
+
+export type {
+  MerkleWitnessData,
+  MerkleFieldData,
+} from './merkle.js';
+
+export type {
+  ZKPProvider,
+  ZKPProveParams,
+  ZKPProveResult,
+  ZKPVerifyParams,
+  Poseidon2Hasher,
+} from './zkp-provider.js';

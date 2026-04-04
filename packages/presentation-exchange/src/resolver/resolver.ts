@@ -8,8 +8,11 @@ import type {
 } from '../types/response.js';
 import type { CredentialSelection } from '../types/matching.js';
 import type { SchemaResolverMap } from '../types/schema-resolver.js';
+import type { MerkleWitnessData } from '../types/merkle.js';
+import type { ZKPProvider } from '../types/zkp-provider.js';
 import { defaultResolvers } from '../resolvers/index.js';
 import { createBBSResolver, isBBSProof } from '../resolvers/bbs-resolver.js';
+import { isZKPResolver } from '../resolvers/zkp-icao-schema-resolver.js';
 import { extractConditions } from './field-extractor.js';
 import { signVPResponse, vpResponseContext } from '../signer/vp-signer.js';
 
@@ -58,6 +61,10 @@ export interface ResolveOptions {
   keyDoc?: KeyDoc;
   /** Optional DID resolver forwarded to credential-sdk when using `keyDoc`. */
   didResolver?: object;
+  /** Callback to provide pre-computed Merkle witness data for a docRequestID. */
+  merkleWitness?: (docRequestID: string) => MerkleWitnessData | undefined;
+  /** ZKP provider for generating proofs (predicates, trust chain). */
+  zkpProvider?: ZKPProvider;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +111,7 @@ export async function resolvePresentation(
 
   const resolvers = { ...defaultResolvers, ...options.resolvers };
 
-  const presentedList = await Promise.all(items.map(({ docReq, cred }) => {
+  const presentedList = await Promise.all(items.map(({ docRequestID, docReq, cred }) => {
     if (docReq.disclosureMode === 'full') {
       return Promise.resolve(cred);
     }
@@ -117,20 +124,50 @@ export async function resolvePresentation(
       );
     }
 
+    const { disclose, zkp } = extractConditions(docReq.conditions);
+
+    const isZKPMode = docReq.disclosureMode === 'zkp-only'
+      || disclose.some((d) => d.merkleDisclosure)
+      || zkp.length > 0;
+
+    if (isZKPMode && isZKPResolver(resolver)) {
+      const merkleWitness = options.merkleWitness?.(docRequestID);
+
+      if (!merkleWitness) {
+        throw new Error(
+          `ZKP/Merkle conditions require merkleWitness for docRequestID "${docRequestID}"`,
+        );
+      }
+
+      return resolver.deriveCredentialWithZKP(
+        cred,
+        disclose,
+        zkp,
+        merkleWitness,
+        {
+          nonce: request.nonce,
+          verifierId: request.verifier,
+          zkpProvider: options.zkpProvider,
+        },
+      );
+    }
+
     if (isBBSProof(cred)) {
       resolver = createBBSResolver(resolver);
     }
 
-    const { disclose } = extractConditions(docReq.conditions);
     const disclosedFields = disclose.map((d) => d.field);
+
     return resolver.deriveCredential(cred, disclosedFields, { nonce: request.nonce });
   }));
 
   const presentedCredentials: PresentedCredential[] = [];
+
   const submission: SubmissionEntry[] = [];
 
   for (let i = 0; i < items.length; i++) {
     presentedCredentials.push(presentedList[i]!);
+
     submission.push({ docRequestID: items[i]!.docRequestID, credentialIndex: i });
   }
 

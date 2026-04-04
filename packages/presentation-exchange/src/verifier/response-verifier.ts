@@ -1,8 +1,10 @@
 import type { VPRequest } from '../types/request.js';
 import type { VerifiablePresentation } from '../types/response.js';
+import type { ZKPProvider, Poseidon2Hasher } from '../types/zkp-provider.js';
 import { verifyPresentationStructure, type VerificationResult } from './structural-verifier.js';
+import { verifyZKPProofs, type ZKPVerificationResult } from './zkp-verifier.js';
 import { verifyPresentation } from '@1matrix/credential-sdk/vc';
-// @ts-ignore -- JS module, no .d.ts
+// @ts-expect-error -- JS module, no .d.ts
 import { createOptimisticResolver } from '@1matrix/credential-sdk/ethr-did';
 
 // ---------------------------------------------------------------------------
@@ -25,6 +27,10 @@ export interface VerifyVPResponseOptions {
     supports(id: string): boolean;
     resolve(id: string, opts?: unknown): Promise<unknown>;
   };
+  /** Poseidon2 hasher for Merkle disclosure verification. */
+  poseidon2?: Poseidon2Hasher;
+  /** ZKP provider for proof verification (predicates, trust chain). */
+  zkpProvider?: ZKPProvider;
 }
 
 /**
@@ -34,7 +40,7 @@ export interface VerifyVPResponseOptions {
  * - `errors` aggregates all error messages from both stages.
  */
 export interface VerifyVPResponseResult {
-  /** `true` if both structural and cryptographic verification passed. */
+  /** `true` if structural, cryptographic, and ZKP verification all passed. */
   verified: boolean;
   /** Result of structural validation (nonce, domain, submissions, credential types). */
   structural: VerificationResult;
@@ -45,7 +51,9 @@ export interface VerifyVPResponseResult {
     credentialResults?: unknown[];
     error?: Error;
   };
-  /** All error messages from both structural and crypto verification. */
+  /** Result of ZKP and Merkle disclosure verification (present when proofs exist). */
+  zkp?: ZKPVerificationResult;
+  /** All error messages from structural, crypto, and ZKP verification. */
   errors: string[];
 }
 
@@ -85,8 +93,7 @@ export async function verifyVPResponse(
   // Use the VP's own @context — it's what was signed.
   // Do NOT hardcode vpResponseContext; the signed doc may include
   // additional suite contexts added by credential-sdk.
-  const { proof, ...vpWithoutProof } = presentation;
-  const vpDoc = { ...vpWithoutProof, proof };
+  const vpDoc = { ...presentation };
 
   const resolver = options?.resolver ?? createOptimisticResolver();
 
@@ -118,10 +125,55 @@ export async function verifyVPResponse(
     errors.push(error.message);
   }
 
+  let zkp: ZKPVerificationResult | undefined;
+
+  const hasZKPProofs = presentation.verifiableCredential.some((cred) => {
+    const proofs = cred.proof
+      ? (Array.isArray(cred.proof) ? cred.proof : [cred.proof])
+      : [];
+
+    return proofs.some(
+      (p) => p.type === 'MerkleDisclosureProof' || p.type === 'ZKPProof',
+    );
+  });
+
+  if (hasZKPProofs) {
+    if (!options?.poseidon2) {
+      errors.push(
+        'Presentation contains ZKP/Merkle proofs but no Poseidon2 hasher was provided for verification',
+      );
+
+      return {
+        verified: false,
+        structural,
+        crypto,
+        errors,
+      };
+    }
+
+    zkp = await verifyZKPProofs(
+      request,
+      presentation,
+      options.poseidon2,
+      options.zkpProvider,
+    );
+
+    if (!zkp.verified) {
+      for (const r of zkp.proofResults) {
+        if (!r.verified && r.error) {
+          errors.push(`ZKP[${r.conditionID}]: ${r.error}`);
+        }
+      }
+    }
+  }
+
+  const zkpOk = zkp ? zkp.verified : true;
+
   return {
-    verified: structural.valid && crypto.verified,
+    verified: structural.valid && crypto.verified && zkpOk,
     structural,
     crypto,
+    zkp,
     errors,
   };
 }

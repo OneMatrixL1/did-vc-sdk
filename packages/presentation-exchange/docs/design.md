@@ -122,7 +122,6 @@ Each `CandidateCredential` filters by:
 1. **docType** — credential must have at least one matching type
 2. **issuer** — if specified, issuer DID must be in the allowed list
 3. **fields** — JSONPath resolution of each `DiscloseCondition`
-4. **ZKP inputs** — all `privateInputs` paths must resolve in the credential
 
 ---
 

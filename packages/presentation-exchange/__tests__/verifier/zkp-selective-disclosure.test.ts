@@ -380,25 +380,39 @@ describe('ZKP Selective Disclosure', () => {
 
       expect(fieldIdToLeafIndex('ethnicity')).toBe(5);
 
+      expect(fieldIdToLeafIndex('religion')).toBe(6);
+
       expect(fieldIdToLeafIndex('hometown')).toBe(7);
 
       expect(fieldIdToLeafIndex('permanentAddress')).toBe(8);
+
+      expect(fieldIdToLeafIndex('identifyingMarks')).toBe(9);
 
       expect(fieldIdToLeafIndex('issueDate')).toBe(10);
 
       expect(fieldIdToLeafIndex('expiryDate')).toBe(11);
 
-      expect(fieldIdToLeafIndex('fatherName')).toBe(12);
+      expect(fieldIdToLeafIndex('parentsInfo')).toBe(12);
 
-      expect(fieldIdToLeafIndex('motherName')).toBe(12);
+      expect(fieldIdToLeafIndex('spouse')).toBe(13);
+
+      expect(fieldIdToLeafIndex('oldIdNumber')).toBe(14);
+
+      expect(fieldIdToLeafIndex('personalIdCode')).toBe(15);
     });
 
     it('aliases resolve to same index', () => {
       expect(fieldIdToLeafIndex('idNumber')).toBe(0);
 
       expect(fieldIdToLeafIndex('address')).toBe(8);
+    });
 
-      expect(fieldIdToLeafIndex('age')).toBe(2);
+    it('rejects removed aliases that would leak data', () => {
+      expect(() => fieldIdToLeafIndex('age')).toThrow();
+
+      expect(() => fieldIdToLeafIndex('fatherName')).toThrow();
+
+      expect(() => fieldIdToLeafIndex('motherName')).toThrow();
     });
 
     it('rejects unknown fields', () => {
@@ -1006,12 +1020,14 @@ describe('ZKP Selective Disclosure', () => {
       expect(r.verified).toBe(true);
     });
 
-    it('LIMITATION: fieldValue is not checked against leafPreimage.data (display-only field)', async () => {
+    it('REJECTS fieldValue that does not match leafPreimage.data', async () => {
       const proof = merkleProof('fullName', { fieldValue: 'COMPLETELY FAKE NAME' });
 
       const r = await verifyZKPProofs(stubRequest, stubVP([stubCred([proof])]), testPoseidon2);
 
-      expect(r.verified).toBe(true);
+      expect(r.verified).toBe(false);
+
+      expect(r.proofResults[0]!.error).toContain('fieldValue does not match');
     });
 
     it('REJECTS dependsOn pointing to an unverified (failed) proof', async () => {

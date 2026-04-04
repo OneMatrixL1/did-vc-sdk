@@ -5,15 +5,16 @@
  * Every MerkleDisclosureProof is verified with Poseidon2 tree walk.
  * Dependencies between proofs are checked via dependsOn:
  *   dependsOn: { "outputKey": "conditionID" }
- *   → proof.publicInputs[outputKey] or proof.commitment
- *     must == referenced proof's publicOutputs[outputKey]
+ *   -> proof.publicInputs[outputKey] or proof.commitment
+ *      must == referenced proof's publicOutputs[outputKey]
  */
 
-import type { VPRequest } from '../types/request.js';
+import type { VPRequest, DocumentRequestNode, ZKPCondition } from '../types/request.js';
 import type { VerifiablePresentation, PresentedCredential } from '../types/response.js';
 import type { ZKPProof, CredentialProof } from '../types/credential.js';
 import type { MerkleDisclosureProof } from '../types/merkle.js';
 import type { ZKPProvider, Poseidon2Hasher } from '../types/zkp-provider.js';
+import { extractConditions } from '../resolver/field-extractor.js';
 
 const MERKLE_DEPTH = 5;
 
@@ -34,12 +35,14 @@ export interface ZKPVerificationResult {
 }
 
 export async function verifyZKPProofs(
-  _request: VPRequest,
+  request: VPRequest,
   presentation: VerifiablePresentation,
   poseidon2: Poseidon2Hasher,
   zkpProvider?: ZKPProvider,
 ): Promise<ZKPVerificationResult> {
   const results: ZKPProofResult[] = [];
+
+  const requestedConditions = collectRequestedConditions(request.rules);
 
   for (const cred of presentation.verifiableCredential) {
     const proofs = normalizeProofs(cred);
@@ -50,7 +53,7 @@ export async function verifyZKPProofs(
       if (proof.type === 'ZKPProof') {
         const zkp = proof as ZKPProof;
 
-        const result = await verifyZKPProofSingle(zkp, outputsMap, zkpProvider);
+        const result = await verifyZKPProofSingle(zkp, outputsMap, requestedConditions, zkpProvider);
 
         results.push(result);
 
@@ -80,6 +83,7 @@ export async function verifyZKPProofs(
 async function verifyZKPProofSingle(
   proof: ZKPProof,
   outputsMap: Map<string, Record<string, unknown>>,
+  requestedConditions: Map<string, ZKPCondition>,
   zkpProvider?: ZKPProvider,
 ): Promise<ZKPProofResult> {
   if (!zkpProvider) {
@@ -91,12 +95,34 @@ async function verifyZKPProofSingle(
     };
   }
 
-  const proofValid = await zkpProvider.verify({
-    circuitId: proof.circuitId,
-    proofValue: proof.proofValue,
-    publicInputs: proof.publicInputs,
-    publicOutputs: proof.publicOutputs,
-  });
+  const requested = requestedConditions.get(proof.conditionID);
+
+  if (requested && requested.circuitId !== proof.circuitId) {
+    return {
+      conditionID: proof.conditionID,
+      type: 'ZKPProof',
+      verified: false,
+      error: `Circuit mismatch: request requires "${requested.circuitId}" but proof uses "${proof.circuitId}"`,
+    };
+  }
+
+  let proofValid: boolean;
+
+  try {
+    proofValid = await zkpProvider.verify({
+      circuitId: proof.circuitId,
+      proofValue: proof.proofValue,
+      publicInputs: proof.publicInputs,
+      publicOutputs: proof.publicOutputs,
+    });
+  } catch (err) {
+    return {
+      conditionID: proof.conditionID,
+      type: 'ZKPProof',
+      verified: false,
+      error: `ZKP provider threw: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 
   if (!proofValid) {
     return {
@@ -138,6 +164,15 @@ function verifyMerkleProofSingle(
       type: 'MerkleDisclosureProof',
       verified: false,
       error: 'Merkle inclusion proof invalid',
+    };
+  }
+
+  if (!verifyFieldValue(proof)) {
+    return {
+      conditionID: proof.conditionID,
+      type: 'MerkleDisclosureProof',
+      verified: false,
+      error: 'fieldValue does not match leafPreimage.data',
     };
   }
 
@@ -254,6 +289,58 @@ function verifyMerkleInclusionInner(
   const expectedCommitment = BigInt(proof.commitment);
 
   return reconstructedCommitment === expectedCommitment;
+}
+
+function verifyFieldValue(proof: MerkleDisclosureProof): boolean {
+  try {
+    const { data, length } = proof.leafPreimage;
+
+    const rawBytes: number[] = [];
+
+    for (const packed of data) {
+      const val = BigInt(packed);
+
+      const bytes: number[] = [];
+
+      let v = val;
+
+      while (v > 0n) {
+        bytes.unshift(Number(v & 0xFFn));
+
+        v >>= 8n;
+      }
+
+      rawBytes.push(...bytes);
+    }
+
+    const decoded = new TextDecoder().decode(new Uint8Array(rawBytes.slice(0, length)));
+
+    return decoded === proof.fieldValue;
+  } catch {
+    return false;
+  }
+}
+
+function collectRequestedConditions(node: DocumentRequestNode): Map<string, ZKPCondition> {
+  const map = new Map<string, ZKPCondition>();
+
+  function walk(n: DocumentRequestNode): void {
+    if (n.type === 'Logical') {
+      for (const child of n.values) walk(child);
+
+      return;
+    }
+
+    const { zkp } = extractConditions(n.conditions);
+
+    for (const cond of zkp) {
+      map.set(cond.conditionID, cond);
+    }
+  }
+
+  walk(node);
+
+  return map;
 }
 
 function normalizeProofs(cred: PresentedCredential): CredentialProof[] {

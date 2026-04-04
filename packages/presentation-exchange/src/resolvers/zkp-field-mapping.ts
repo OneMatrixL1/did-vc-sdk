@@ -5,10 +5,11 @@
  * is the DG13 TLV INTEGER tag value. The VN-CCCD-2024 profile's `at` property
  * matches this tag_id exactly.
  *
- * IMPORTANT: fatherName and motherName share tag 13 (leaf index 12).
- * The Merkle tree treats the entire parentsInfo field as a single leaf.
- * Selective disclosure of fatherName or motherName reveals the full
- * parentsInfo value — subfield isolation is not possible at the circuit level.
+ * Only 1:1 byte-equivalent aliases are allowed. Aliases that would leak
+ * unintended data are excluded:
+ *   - "age" → would disclose full DOB (use ZKP predicate instead)
+ *   - "fatherName"/"motherName" → tag 13 is combined parentsInfo leaf
+ *     (use "parentsInfo" to disclose the full combined value intentionally)
  */
 
 import type { MerkleWitnessData } from '../types/merkle.js';
@@ -18,7 +19,6 @@ const FIELD_TAG_MAP: Record<string, number> = {
   idNumber: 1,
   fullName: 2,
   dateOfBirth: 3,
-  age: 3,
   gender: 4,
   nationality: 5,
   ethnicity: 6,
@@ -30,8 +30,6 @@ const FIELD_TAG_MAP: Record<string, number> = {
   issueDate: 11,
   expiryDate: 12,
   parentsInfo: 13,
-  fatherName: 13,
-  motherName: 13,
   spouse: 14,
   oldIdNumber: 15,
   personalIdCode: 16,

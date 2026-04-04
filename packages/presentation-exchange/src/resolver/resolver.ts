@@ -130,6 +130,12 @@ export async function resolvePresentation(
       || disclose.some((d) => d.merkleDisclosure)
       || zkp.length > 0;
 
+    if (isZKPMode && !isZKPResolver(resolver)) {
+      throw new Error(
+        `docRequestID "${docRequestID}" requires ZKP/Merkle but resolver "${docReq.schemaType}" is not ZKP-capable`,
+      );
+    }
+
     if (isZKPMode && isZKPResolver(resolver)) {
       const merkleWitness = options.merkleWitness?.(docRequestID);
 

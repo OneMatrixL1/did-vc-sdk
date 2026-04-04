@@ -1,8 +1,9 @@
-import type { VPRequest } from '../types/request.js';
+import type { VPRequest, DocumentRequestNode } from '../types/request.js';
 import type { VerifiablePresentation } from '../types/response.js';
 import type { ZKPProvider, Poseidon2Hasher } from '../types/zkp-provider.js';
 import { verifyPresentationStructure, type VerificationResult } from './structural-verifier.js';
 import { verifyZKPProofs, type ZKPVerificationResult } from './zkp-verifier.js';
+import { extractConditions } from '../resolver/field-extractor.js';
 import { verifyPresentation } from '@1matrix/credential-sdk/vc';
 // @ts-expect-error -- JS module, no .d.ts
 import { createOptimisticResolver } from '@1matrix/credential-sdk/ethr-did';
@@ -127,7 +128,9 @@ export async function verifyVPResponse(
 
   let zkp: ZKPVerificationResult | undefined;
 
-  const hasZKPProofs = presentation.verifiableCredential.some((cred) => {
+  const requestRequiresZKP = checkRequestRequiresZKP(request.rules);
+
+  const vpContainsZKP = presentation.verifiableCredential.some((cred) => {
     const proofs = cred.proof
       ? (Array.isArray(cred.proof) ? cred.proof : [cred.proof])
       : [];
@@ -137,7 +140,7 @@ export async function verifyVPResponse(
     );
   });
 
-  if (hasZKPProofs) {
+  if (requestRequiresZKP || vpContainsZKP) {
     if (!options?.poseidon2) {
       errors.push(
         'Presentation contains ZKP/Merkle proofs but no Poseidon2 hasher was provided for verification',
@@ -176,5 +179,15 @@ export async function verifyVPResponse(
     zkp,
     errors,
   };
+}
+
+function checkRequestRequiresZKP(node: DocumentRequestNode): boolean {
+  if (node.type === 'Logical') {
+    return node.values.some((child) => checkRequestRequiresZKP(child));
+  }
+
+  const { zkp, disclose } = extractConditions(node.conditions);
+
+  return zkp.length > 0 || disclose.some((d) => d.merkleDisclosure);
 }
 

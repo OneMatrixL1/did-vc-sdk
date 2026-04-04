@@ -60,6 +60,10 @@ export function createZKPICAOSchemaResolver(
 
       const subject: Record<string, unknown> = {};
 
+      if (credential.credentialSubject.id !== undefined) {
+        subject.id = credential.credentialSubject.id;
+      }
+
       const provider = options.zkpProvider ?? zkpProvider;
 
       for (const cond of zkpConditions) {

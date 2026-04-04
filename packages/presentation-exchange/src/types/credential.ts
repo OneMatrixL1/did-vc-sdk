@@ -1,8 +1,12 @@
 // ---------------------------------------------------------------------------
-// Proof system & credential proof types (shared leaf — no type-file imports)
+// Proof system & credential proof types
 // ---------------------------------------------------------------------------
 
-export type ProofSystem = 'groth16' | 'plonk' | 'fflonk' | 'halo2' | 'stark' | (string & {});
+import type { MerkleDisclosureProof } from './merkle.js';
+
+export type { MerkleDisclosureProof } from './merkle.js';
+
+export type ProofSystem = 'groth16' | 'plonk' | 'fflonk' | 'halo2' | 'ultra_honk' | 'stark' | (string & {});
 
 export interface DataIntegrityProof {
   type: 'DataIntegrityProof';
@@ -21,9 +25,10 @@ export interface ZKPProof {
   publicInputs: Record<string, unknown>;
   publicOutputs: Record<string, unknown>;
   proofValue: string;
+  dependsOn?: Record<string, string>;
 }
 
-export type CredentialProof = DataIntegrityProof | ZKPProof;
+export type CredentialProof = DataIntegrityProof | ZKPProof | MerkleDisclosureProof;
 
 // ---------------------------------------------------------------------------
 // Presented credential (may have derived proof)
@@ -44,11 +49,6 @@ export interface PresentedCredential {
 // Matchable credential (structural supertype for matching against a VPRequest)
 // ---------------------------------------------------------------------------
 
-/**
- * Structural supertype for credentials that can be matched against a VPRequest.
- * Compatible with the app's existing VerifiableCredential from vc.types.ts
- * without requiring an import or conversion.
- */
 export interface MatchableCredential {
   type: readonly string[] | string[];
   issuer: string | { id: string; name?: string };
@@ -57,7 +57,6 @@ export interface MatchableCredential {
   [key: string]: unknown;
 }
 
-/** Extract issuer ID string from a MatchableCredential */
 export function getCredentialIssuerId(cred: MatchableCredential): string {
   return typeof cred.issuer === 'string' ? cred.issuer : cred.issuer.id;
 }

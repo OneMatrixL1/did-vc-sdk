@@ -58,7 +58,7 @@ const icaoCredential = {
     dg2: dg2Base64,
   },
   proof: {
-    type: 'ICAO9303SODSignature',
+    type: 'DataIntegrityProof',
     dgProfile: 'VN-CCCD-2024',
     proofPurpose: 'assertionMethod',
     created: '2026-01-01T00:00:00Z',
@@ -202,7 +202,7 @@ describe('matchCredentials with built-in resolvers', () => {
     expect(match.candidates[0].disclosedFields).toContain('fullName');
   });
 
-  it('resolves ICAO ZKP privateInputs via field IDs', () => {
+  it('matches ZKP conditions as satisfiable', () => {
     const request = {
       type: 'DocumentRequest' as const,
       docRequestID: 'dr-cccd',
@@ -221,7 +221,6 @@ describe('matchCredentials with built-in resolvers', () => {
           operator: 'zkp' as const,
           circuitId: 'age-gte',
           proofSystem: 'groth16' as const,
-          privateInputs: { dateOfBirth: 'dateOfBirth' },
           publicInputs: { minAge: 18, currentDate: '2026-03-05' },
         },
       ],
@@ -272,10 +271,10 @@ describe('CCCD full flow: create → fulfill → verify', () => {
     .addDocumentRequest(
       new DocumentRequestBuilder('dr-cccd', 'CCCDCredential')
         .setSchemaType('ICAO9303SOD')
-        .disclose('c-name', 'fullName', { purpose: 'Họ và tên' })
-        .disclose('c-dob', 'dateOfBirth', { purpose: 'Ngày sinh' })
-        .disclose('c-address', 'permanentAddress', { purpose: 'Địa chỉ thường trú' })
-        .disclose('c-photo', 'photo', { purpose: 'Ảnh chân dung', optional: true }),
+        .disclose('c-name', 'fullName', { purpose: 'Full name' })
+        .disclose('c-dob', 'dateOfBirth', { purpose: 'Date of birth' })
+        .disclose('c-address', 'permanentAddress', { purpose: 'Permanent address' })
+        .disclose('c-photo', 'photo', { purpose: 'Portrait photo', optional: true }),
     )
     .build();
 

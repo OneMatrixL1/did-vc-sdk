@@ -41,7 +41,6 @@ export const schoolEnrollmentRequest: VPRequest = {
             circuitId: 'numeric-range',
             proofSystem: 'groth16',
             purpose: 'Prove parent is 18+',
-            privateInputs: { value: '$.credentialSubject.dateOfBirth' },
             publicInputs: { max: 20080209, inputFormat: 'dd/mm/yyyy' },
           },
         ],

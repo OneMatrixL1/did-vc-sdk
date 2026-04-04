@@ -83,7 +83,7 @@ import {
 
 const request = new VPRequestBuilder('vcb-kyc-001')
   .setVersion('1.0')
-  .setName('Xác minh danh tính mở tài khoản')
+  .setName('Identity verification for account opening')
   .setVerifier({
     id: 'did:web:vietcombank.com.vn',
     name: 'Vietcombank',
@@ -93,35 +93,32 @@ const request = new VPRequestBuilder('vcb-kyc-001')
   .addDocumentRequest(
     new DocumentRequestBuilder('dr-cccd', 'CCCDCredential')
       .setIssuer('did:web:cccd.gov.vn')
-      .setPurpose('Xác minh danh tính để mở tài khoản ngân hàng')
+      .setPurpose('Identity verification for bank account opening')
 
       // Request specific fields
       .disclose('c-name', '$.credentialSubject.dg13', {
-        purpose: 'Họ và tên',
+        purpose: 'Full name',
       })
       .disclose('c-dob', '$.credentialSubject.dg1', {
-        purpose: 'Ngày sinh',
+        purpose: 'Date of birth',
       })
       .disclose('c-address', '$.credentialSubject.dg13', {
-        purpose: 'Địa chỉ thường trú',
+        purpose: 'Permanent address',
       })
       .disclose('c-photo', '$.credentialSubject.dg2', {
-        purpose: 'Ảnh chân dung',
+        purpose: 'Portrait photo',
         optional: true,
       })
 
-      // ZKP: prove age ≥ 18 without revealing exact DOB
+      // ZKP: prove age >= 18 without revealing exact DOB
       .zkp('zkp-age-18', {
         circuitId: 'age-gte',
         proofSystem: 'groth16',
-        privateInputs: {
-          dateOfBirth: '$.credentialSubject.dg1',
-        },
         publicInputs: {
           minAge: 18,
           currentDate: '2026-03-05',
         },
-        purpose: 'Chứng minh đủ 18 tuổi',
+        purpose: 'Prove age is 18 or older',
       })
       .build(),
   )
@@ -134,7 +131,7 @@ The built request object:
 {
   "id": "vcb-kyc-001",
   "version": "1.0",
-  "name": "Xác minh danh tính mở tài khoản",
+  "name": "Identity verification for account opening",
   "nonce": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "verifier": {
     "id": "did:web:vietcombank.com.vn",
@@ -154,21 +151,21 @@ The built request object:
         "conditionID": "c-name",
         "field": "$.credentialSubject.dg13",
         "operator": "disclose",
-        "purpose": "Họ và tên"
+        "purpose": "Full name"
       },
       {
         "type": "DocumentCondition",
         "conditionID": "c-dob",
         "field": "$.credentialSubject.dg1",
         "operator": "disclose",
-        "purpose": "Ngày sinh"
+        "purpose": "Date of birth"
       },
       {
         "type": "DocumentCondition",
         "conditionID": "c-address",
         "field": "$.credentialSubject.dg13",
         "operator": "disclose",
-        "purpose": "Địa chỉ thường trú"
+        "purpose": "Permanent address"
       },
       {
         "type": "DocumentCondition",
@@ -176,7 +173,7 @@ The built request object:
         "field": "$.credentialSubject.dg2",
         "operator": "disclose",
         "optional": true,
-        "purpose": "Ảnh chân dung"
+        "purpose": "Portrait photo"
       },
       {
         "type": "DocumentCondition",
@@ -184,9 +181,8 @@ The built request object:
         "operator": "zkp",
         "circuitId": "age-gte",
         "proofSystem": "groth16",
-        "privateInputs": { "dateOfBirth": "$.credentialSubject.dg1" },
         "publicInputs": { "minAge": 18, "currentDate": "2026-03-05" },
-        "purpose": "Chứng minh đủ 18 tuổi"
+        "purpose": "Prove age is 18 or older"
       }
     ]
   }
@@ -374,7 +370,7 @@ A more complex request using AND/OR logic:
 ```typescript
 const request = new VPRequestBuilder('vcb-loan-001')
   .setVersion('1.0')
-  .setName('Xác minh hồ sơ vay vốn')
+  .setName('Loan application verification')
   .setVerifier({
     id: 'did:web:vietcombank.com.vn',
     name: 'Vietcombank',
@@ -413,7 +409,7 @@ const request = new VPRequestBuilder('vcb-loan-001')
 
 ```mermaid
 graph TD
-    Root["VPRequest: Xác minh hồ sơ vay vốn"]
+    Root["VPRequest: Loan application verification"]
     Root --> AND["AND"]
 
     AND --> DR1["DocumentRequest: dr-id<br/>CCCDCredential<br/>disclose: name, dob"]

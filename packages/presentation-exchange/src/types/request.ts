@@ -1,7 +1,7 @@
 import type { LocalizableString } from './localization.js';
-import type { PresentedCredential } from './response.js';
+import type { PresentedCredential, ProofSystem } from './response.js';
 
-export type ProofSystem = 'groth16' | 'plonk' | 'halo2' | 'bulletproofs';
+export type { ProofSystem } from './response.js';
 
 // ---------------------------------------------------------------------------
 // Verifier info
@@ -32,6 +32,10 @@ export interface VerifierRequestProof {
   jws?: string;
 }
 
+export interface MerkleDisclosureRef {
+  commitmentRef: string;
+}
+
 export interface DiscloseCondition {
   type: 'DocumentCondition';
   conditionID: string;
@@ -39,6 +43,7 @@ export interface DiscloseCondition {
   operator: 'disclose';
   optional?: boolean;
   purpose?: LocalizableString;
+  merkleDisclosure?: MerkleDisclosureRef;
 }
 
 export interface ZKPCondition {
@@ -49,8 +54,7 @@ export interface ZKPCondition {
   proofSystem: ProofSystem;
   purpose?: LocalizableString;
   circuitHash?: string;
-  privateInputs: Record<string, string>;
-  publicInputs: Record<string, unknown>;
+  publicInputs?: Record<string, unknown>;
   dependsOn?: Record<string, string>;
 }
 
@@ -69,7 +73,7 @@ export type DocumentConditionNode =
 // Rules tree (recursive)
 // ---------------------------------------------------------------------------
 
-export type DisclosureMode = 'selective' | 'full';
+export type DisclosureMode = 'selective' | 'full' | 'zkp-only';
 
 export interface DocumentRequest {
   type: 'DocumentRequest';

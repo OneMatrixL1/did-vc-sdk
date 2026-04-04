@@ -29,7 +29,6 @@ describe('School Enrollment E2E', () => {
           .zkp('c2', {
             circuitId: 'numeric-range',
             proofSystem: 'groth16',
-            privateInputs: { value: '$.credentialSubject.dateOfBirth' },
             publicInputs: { max: 20080209, inputFormat: 'dd/mm/yyyy' },
             purpose: 'Prove parent is 18+',
           }),

@@ -63,7 +63,11 @@ export class DocumentRequestBuilder {
   disclose(
     conditionID: string,
     field: string,
-    opts?: { optional?: boolean; purpose?: LocalizableString },
+    opts?: {
+      optional?: boolean;
+      purpose?: LocalizableString;
+      merkleDisclosure?: { commitmentRef: string };
+    },
   ): this {
     const cond: DiscloseCondition = {
       type: 'DocumentCondition',
@@ -72,8 +76,23 @@ export class DocumentRequestBuilder {
       operator: 'disclose',
       ...opts,
     };
+
     this.conditions.push(cond);
+
     return this;
+  }
+
+  /** Add a Merkle-backed disclose condition (DG13 field-level selective disclosure) */
+  merkleDisclose(
+    conditionID: string,
+    field: string,
+    commitmentRef: string,
+    opts?: { optional?: boolean; purpose?: LocalizableString },
+  ): this {
+    return this.disclose(conditionID, field, {
+      ...opts,
+      merkleDisclosure: { commitmentRef },
+    });
   }
 
   /** Add a ZKP condition */
@@ -82,8 +101,7 @@ export class DocumentRequestBuilder {
     opts: {
       circuitId: string;
       proofSystem: ProofSystem;
-      privateInputs: Record<string, string>;
-      publicInputs: Record<string, unknown>;
+      publicInputs?: Record<string, unknown>;
       purpose?: LocalizableString;
       circuitHash?: string;
       dependsOn?: Record<string, string>;
@@ -95,7 +113,9 @@ export class DocumentRequestBuilder {
       operator: 'zkp',
       ...opts,
     };
+
     this.conditions.push(cond);
+
     return this;
   }
 

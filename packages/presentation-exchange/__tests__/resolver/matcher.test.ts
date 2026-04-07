@@ -55,7 +55,7 @@ describe('matchCredentials', () => {
     expect(parentMatch.candidates).toHaveLength(0);
   });
 
-  it('marks incomplete credential as not fully qualified', () => {
+  it('marks incomplete credential as not fully qualified for child request', () => {
     const result = matchCredentials(
       schoolEnrollmentRequest.rules,
       [incompleteCredential],
@@ -63,13 +63,15 @@ describe('matchCredentials', () => {
 
     const logical = result as LogicalRuleMatch;
 
-    // Parent request: has ZKP on dateOfBirth, missing field
+    // Parent request: has ZKP condition c2 — ZKPs are always satisfiable at match time
+    // (private inputs are not part of the request; satisfiability is checked at prove time)
     const parentMatch = logical.values[0] as DocumentRequestMatch;
     expect(parentMatch.candidates).toHaveLength(1);
-    expect(parentMatch.candidates[0].fullyQualified).toBe(false);
-    expect(parentMatch.candidates[0].unsatisfiableZKPs).toContain('c2');
+    expect(parentMatch.candidates[0].fullyQualified).toBe(true);
+    expect(parentMatch.candidates[0].satisfiableZKPs).toContain('c2');
+    expect(parentMatch.candidates[0].unsatisfiableZKPs).toHaveLength(0);
 
-    // Child request: missing dateOfBirth disclose field
+    // Child request: missing dateOfBirth disclose field → not qualified
     const childMatch = logical.values[1] as DocumentRequestMatch;
     expect(childMatch.candidates).toHaveLength(1);
     expect(childMatch.candidates[0].fullyQualified).toBe(false);

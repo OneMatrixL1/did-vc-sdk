@@ -80,18 +80,8 @@ function checkFieldCoverage(
     }
   }
 
-  const satisfiableZKPs: string[] = [];
+  const satisfiableZKPs: string[] = zkp.map((zc) => zc.conditionID);
   const unsatisfiableZKPs: string[] = [];
-  for (const zc of zkp) {
-    const allInputsResolvable = Object.values(zc.privateInputs).every(
-      (path) => resolver.resolveField(credential, path).found,
-    );
-    if (allInputsResolvable) {
-      satisfiableZKPs.push(zc.conditionID);
-    } else {
-      unsatisfiableZKPs.push(zc.conditionID);
-    }
-  }
 
   return {
     disclosedFields, missingFields, satisfiableZKPs, unsatisfiableZKPs,

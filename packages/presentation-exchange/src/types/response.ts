@@ -1,16 +1,16 @@
-// Re-export credential proof types for backward compatibility
 export type {
   ProofSystem,
   DataIntegrityProof,
   ZKPProof,
   CredentialProof,
   PresentedCredential,
+  MerkleDisclosureProof,
 } from './credential.js';
 
 import type { PresentedCredential } from './credential.js';
 
 // ---------------------------------------------------------------------------
-// Supporting types (defined before they are referenced)
+// Supporting types
 // ---------------------------------------------------------------------------
 
 export interface SubmissionEntry {

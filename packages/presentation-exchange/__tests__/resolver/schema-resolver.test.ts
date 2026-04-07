@@ -202,7 +202,7 @@ describe('matchCredentials with built-in resolvers', () => {
     expect(match.candidates[0].disclosedFields).toContain('fullName');
   });
 
-  it('resolves ICAO ZKP privateInputs via field IDs', () => {
+  it('matches ZKP conditions as satisfiable', () => {
     const request = {
       type: 'DocumentRequest' as const,
       docRequestID: 'dr-cccd',
@@ -221,7 +221,6 @@ describe('matchCredentials with built-in resolvers', () => {
           operator: 'zkp' as const,
           circuitId: 'age-gte',
           proofSystem: 'groth16' as const,
-          privateInputs: { dateOfBirth: 'dateOfBirth' },
           publicInputs: { minAge: 18, currentDate: '2026-03-05' },
         },
       ],

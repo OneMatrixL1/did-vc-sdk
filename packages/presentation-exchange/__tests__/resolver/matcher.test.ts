@@ -63,21 +63,18 @@ describe('matchCredentials', () => {
 
     const logical = result as LogicalRuleMatch;
 
-    // Parent request: has ZKP condition c2 — ZKPs are always satisfiable at match time
-    // (private inputs are not part of the request; satisfiability is checked at prove time)
+    // Parent request: has predicate condition c2 — predicates are always satisfiable at match time
     const parentMatch = logical.values[0] as DocumentRequestMatch;
     expect(parentMatch.candidates).toHaveLength(1);
     expect(parentMatch.candidates[0].fullyQualified).toBe(true);
-    expect(parentMatch.candidates[0].satisfiableZKPs).toContain('c2');
-    expect(parentMatch.candidates[0].unsatisfiableZKPs).toHaveLength(0);
+    expect(parentMatch.candidates[0].satisfiablePredicates).toContain('c2');
+    expect(parentMatch.candidates[0].unsatisfiablePredicates).toHaveLength(0);
 
     // Child request: missing dateOfBirth disclose field → not qualified
     const childMatch = logical.values[1] as DocumentRequestMatch;
     expect(childMatch.candidates).toHaveLength(1);
     expect(childMatch.candidates[0].fullyQualified).toBe(false);
-    expect(childMatch.candidates[0].missingFields).toContain(
-      '$.credentialSubject.dateOfBirth',
-    );
+    expect(childMatch.candidates[0].missingFields).toContain('dateOfBirth');
   });
 
   it('handles OR rules correctly', () => {
@@ -89,14 +86,14 @@ describe('matchCredentials', () => {
           type: 'DocumentRequest' as const,
           docRequestID: 'natid',
           docType: ['CCCDCredential'],
-          schemaType: 'JsonSchema',
+          schemaType: 'ICAO9303SOD',
           conditions: [],
         },
         {
           type: 'DocumentRequest' as const,
           docRequestID: 'passport',
           docType: ['PassportCredential'],
-          schemaType: 'JsonSchema',
+          schemaType: 'ICAO9303SOD',
           conditions: [],
         },
       ],
@@ -119,7 +116,7 @@ describe('matchCredentials', () => {
       type: 'DocumentRequest' as const,
       docRequestID: 'gov-id',
       docType: ['CCCDCredential'],
-      schemaType: 'JsonSchema',
+      schemaType: 'ICAO9303SOD',
       issuer: 'did:web:other-issuer.vn',
       conditions: [],
     };
@@ -139,9 +136,7 @@ describe('matchCredentials', () => {
     const logical = result as LogicalRuleMatch;
     const parentMatch = logical.values[0] as DocumentRequestMatch;
 
-    expect(parentMatch.candidates[0].disclosedFields).toContain(
-      '$.credentialSubject.fullName',
-    );
-    expect(parentMatch.candidates[0].satisfiableZKPs).toContain('c2');
+    expect(parentMatch.candidates[0].disclosedFields).toContain('fullName');
+    expect(parentMatch.candidates[0].satisfiablePredicates).toContain('c2');
   });
 });

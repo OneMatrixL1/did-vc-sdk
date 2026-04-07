@@ -1,47 +1,31 @@
 import type { VPRequest, DocumentRequestNode } from '../types/request.js';
 import type { VerifiablePresentation } from '../types/response.js';
-import type { ZKPProvider, Poseidon2Hasher } from '../types/zkp-provider.js';
+import type { ZKPProvider } from '../types/zkp-provider.js';
+import type { SchemaProofSystem, ProofSystemMap, ProofVerificationResult } from '../types/proof-system.js';
 import { verifyPresentationStructure, type VerificationResult } from './structural-verifier.js';
-import { verifyZKPProofs, type ZKPVerificationResult } from './zkp-verifier.js';
+import { defaultProofSystems } from '../proof-system/index.js';
 import { extractConditions } from '../resolver/field-extractor.js';
 import { verifyPresentation } from '@1matrix/credential-sdk/vc';
-// @ts-expect-error -- JS module, no .d.ts
 import { createOptimisticResolver } from '@1matrix/credential-sdk/ethr-did';
 
 // ---------------------------------------------------------------------------
 // Options & result types
 // ---------------------------------------------------------------------------
 
-/**
- * Options for {@link verifyVPResponse}.
- *
- * @example
- * // With a DID resolver (needed after key rotation or for non-default keys)
- * await verifyVPResponse(request, vp, { resolver: ethrRegistryResolver });
- *
- * // Without resolver (uses optimistic resolution — works when DID address = controller)
- * await verifyVPResponse(request, vp);
- */
 export interface VerifyVPResponseOptions {
   /** DID resolver used to fetch the holder's DID document for signature verification. */
   resolver?: {
     supports(id: string): boolean;
     resolve(id: string, opts?: unknown): Promise<unknown>;
   };
-  /** Poseidon2 hasher for Merkle disclosure verification. */
-  poseidon2?: Poseidon2Hasher;
-  /** ZKP provider for proof verification (predicates, trust chain). */
+  /** ZKP provider for proof verification. */
   zkpProvider?: ZKPProvider;
+  /** Extra or overriding proof systems. */
+  proofSystems?: ProofSystemMap;
 }
 
-/**
- * Combined result of structural + cryptographic VP verification.
- *
- * - `verified` is `true` only when both checks pass.
- * - `errors` aggregates all error messages from both stages.
- */
 export interface VerifyVPResponseResult {
-  /** `true` if structural, cryptographic, and ZKP verification all passed. */
+  /** `true` if structural, cryptographic, and proof system verification all passed. */
   verified: boolean;
   /** Result of structural validation (nonce, domain, submissions, credential types). */
   structural: VerificationResult;
@@ -52,9 +36,11 @@ export interface VerifyVPResponseResult {
     credentialResults?: unknown[];
     error?: Error;
   };
-  /** Result of ZKP and Merkle disclosure verification (present when proofs exist). */
-  zkp?: ZKPVerificationResult;
-  /** All error messages from structural, crypto, and ZKP verification. */
+  /** Results from proof system verification (per credential). */
+  proofSystemResults?: ProofVerificationResult[];
+  /** Disclosed fields from ZKP proofs, keyed by docRequestID. */
+  documents: Record<string, Record<string, string>>;
+  /** All error messages. */
   errors: string[];
 }
 
@@ -62,40 +48,23 @@ export interface VerifyVPResponseResult {
 // verifyVPResponse
 // ---------------------------------------------------------------------------
 
-/**
- * Full verification of a VP response against the original VPRequest.
- *
- * 1. Structural validation (nonce, domain, submissions, credential types).
- * 2. Cryptographic verification via credential-sdk's `verifyPresentation`.
- *
- * @param request       The original VPRequest that was sent to the holder.
- * @param presentation  The holder's VP response.
- * @param options       Optional resolver for DID resolution.
- */
 export async function verifyVPResponse(
   request: VPRequest,
   presentation: VerifiablePresentation,
   options?: VerifyVPResponseOptions,
 ): Promise<VerifyVPResponseResult> {
   const errors: string[] = [];
+  const documents: Record<string, Record<string, string>> = {};
+  const systems = { ...defaultProofSystems, ...options?.proofSystems };
 
   // --- 1. Structural ---
   const structural = verifyPresentationStructure(request, presentation);
   if (!structural.valid) {
-    return {
-      verified: false,
-      structural,
-      crypto: { verified: false },
-      errors: structural.errors,
-    };
+    return { verified: false, structural, crypto: { verified: false }, documents, errors: structural.errors };
   }
 
   // --- 2. Crypto ---
-  // Use the VP's own @context — it's what was signed.
-  // Do NOT hardcode vpResponseContext; the signed doc may include
-  // additional suite contexts added by credential-sdk.
   const vpDoc = { ...presentation };
-
   const resolver = options?.resolver ?? createOptimisticResolver();
 
   let crypto: VerifyVPResponseResult['crypto'];
@@ -115,9 +84,7 @@ export async function verifyVPResponse(
     };
 
     if (!verified && result.error) {
-      crypto.error = result.error instanceof Error
-        ? result.error
-        : new Error(String(result.error));
+      crypto.error = result.error instanceof Error ? result.error : new Error(String(result.error));
       errors.push(crypto.error.message);
     }
   } catch (err) {
@@ -126,67 +93,70 @@ export async function verifyVPResponse(
     errors.push(error.message);
   }
 
-  let zkp: ZKPVerificationResult | undefined;
+  // --- 3. Proof system verification ---
+  const docRequests = collectDocumentRequests(request.rules);
+  const proofSystemResults: ProofVerificationResult[] = [];
+  let proofSystemOk = true;
 
-  const requestRequiresZKP = checkRequestRequiresZKP(request.rules);
+  for (const entry of presentation.presentationSubmission) {
+    const docReq = docRequests.get(entry.docRequestID);
+    if (!docReq) continue;
 
-  const vpContainsZKP = presentation.verifiableCredential.some((cred) => {
-    const proofs = cred.proof
-      ? (Array.isArray(cred.proof) ? cred.proof : [cred.proof])
-      : [];
+    const system = systems[docReq.schemaType];
+    if (!system) continue;
 
-    return proofs.some(
-      (p) => p.type === 'MerkleDisclosureProof' || p.type === 'ZKPProof',
-    );
-  });
+    const cred = presentation.verifiableCredential[entry.credentialIndex];
+    if (!cred) continue;
 
-  if (requestRequiresZKP || vpContainsZKP) {
-    if (!options?.poseidon2) {
-      errors.push(
-        'Presentation contains ZKP/Merkle proofs but no Poseidon2 hasher was provided for verification',
-      );
+    const { disclose, predicates } = extractConditions(docReq.conditions);
 
-      return {
-        verified: false,
-        structural,
-        crypto,
-        errors,
-      };
+    if (!options?.zkpProvider && (disclose.length > 0 || predicates.length > 0)) {
+      errors.push(`ZKPProvider required for verification of "${entry.docRequestID}"`);
+      proofSystemOk = false;
+      continue;
     }
 
-    zkp = await verifyZKPProofs(
-      request,
-      presentation,
-      options.poseidon2,
-      options.zkpProvider,
-    );
+    const result = await system.verify(cred, { disclose, predicates }, {
+      zkpProvider: options!.zkpProvider!,
+    });
 
-    if (!zkp.verified) {
-      for (const r of zkp.proofResults) {
-        if (!r.verified && r.error) {
-          errors.push(`ZKP[${r.conditionID}]: ${r.error}`);
-        }
-      }
+    proofSystemResults.push(result);
+
+    if (!result.verified) {
+      proofSystemOk = false;
+      errors.push(...result.errors);
     }
+
+    documents[entry.docRequestID] = result.disclosedFields;
   }
 
-  const zkpOk = zkp ? zkp.verified : true;
-
   return {
-    verified: structural.valid && crypto.verified && zkpOk,
+    verified: structural.valid && crypto.verified && proofSystemOk,
     structural,
     crypto,
-    zkp,
+    proofSystemResults,
+    documents,
     errors,
   };
 }
 
-function checkRequestRequiresZKP(node: DocumentRequestNode): boolean {
-  if (node.type === 'Logical') {
-    return node.values.some((child) => checkRequestRequiresZKP(child));
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function collectDocumentRequests(
+  node: DocumentRequestNode,
+): Map<string, import('../types/request.js').DocumentRequest> {
+  const map = new Map<string, import('../types/request.js').DocumentRequest>();
+
+  function walk(n: DocumentRequestNode): void {
+    if (n.type === 'Logical') {
+      for (const child of n.values) walk(child);
+    } else {
+      map.set(n.docRequestID, n);
+    }
   }
 
-  const { zkp, disclose } = extractConditions(node.conditions);
-
-  return zkp.length > 0 || disclose.some((d) => d.merkleDisclosure);
+  walk(node);
+  return map;
 }

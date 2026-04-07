@@ -2,9 +2,9 @@
 // Proof system & credential proof types
 // ---------------------------------------------------------------------------
 
-import type { MerkleDisclosureProof } from './merkle.js';
+import type { ICAO9303ZKPProofBundle } from './icao-proof-bundle.js';
 
-export type { MerkleDisclosureProof } from './merkle.js';
+export type { ICAO9303ZKPProofBundle } from './icao-proof-bundle.js';
 
 export type ProofSystem = 'groth16' | 'plonk' | 'fflonk' | 'halo2' | 'ultra_honk' | 'stark' | (string & {});
 
@@ -17,18 +17,7 @@ export interface DataIntegrityProof {
   [key: string]: unknown;
 }
 
-export interface ZKPProof {
-  type: 'ZKPProof';
-  conditionID: string;
-  circuitId: string;
-  proofSystem: ProofSystem;
-  publicInputs: Record<string, unknown>;
-  publicOutputs: Record<string, unknown>;
-  proofValue: string;
-  dependsOn?: Record<string, string>;
-}
-
-export type CredentialProof = DataIntegrityProof | ZKPProof | MerkleDisclosureProof;
+export type CredentialProof = DataIntegrityProof | ICAO9303ZKPProofBundle;
 
 // ---------------------------------------------------------------------------
 // Presented credential (may have derived proof)

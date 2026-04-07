@@ -12,7 +12,7 @@ import {
 
 describe('disclosureMode: full', () => {
   const fullRequest = new DocumentRequestBuilder('natid', 'CCCDCredential')
-    .setSchemaType('JsonSchema')
+    .setSchemaType('ICAO9303SOD')
     .setDisclosureMode('full')
     .build();
 
@@ -38,7 +38,7 @@ describe('disclosureMode: full', () => {
       .setVerifier({ id: 'did:web:example', name: 'Example', url: 'https://example.com' })
       .addDocumentRequest(
         new DocumentRequestBuilder('natid', 'CCCDCredential')
-          .setSchemaType('JsonSchema')
+          .setSchemaType('ICAO9303SOD')
           .setDisclosureMode('full'),
       )
       .build();
@@ -55,7 +55,7 @@ describe('disclosureMode: full', () => {
           proofPurpose: 'authentication',
           challenge: 'nonce-full',
           domain: 'example.com',
-          proofValue: 'mock',
+          proofValue: 'z' + 'A'.repeat(85),
         }),
       },
     );

@@ -4,7 +4,7 @@
  * Circuits are bundled in this package (circuits/*.json + circuits/*.vk).
  * Each circuit backend is initialized lazily on first use.
  *
- * Requires @aztec/bb.js and @noir-lang/noir_js as peer dependencies.
+ * Uses @aztec/bb.js and @noir-lang/noir_js as direct dependencies.
  */
 
 import { loadCircuit, type CircuitArtifact } from './circuits.js';
@@ -50,9 +50,7 @@ interface BackendEntry {
 }
 
 export async function createWasmZKPProvider(config?: WasmProviderConfig): Promise<ZKPProvider & { destroy(): void }> {
-  // @ts-expect-error -- peer dependency, resolved at runtime
   const { UltraHonkBackend } = await import('@aztec/bb.js');
-  // @ts-expect-error -- peer dependency, resolved at runtime
   const { Noir } = await import('@noir-lang/noir_js');
 
   const threads = config?.threads ?? 2;

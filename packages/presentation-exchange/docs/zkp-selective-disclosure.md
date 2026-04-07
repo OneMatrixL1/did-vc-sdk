@@ -103,3 +103,45 @@ The verifier checks that `commitment` values match across linked proofs, prevent
 | `src/resolvers/zkp-icao-schema-resolver.ts` | `ZKPSchemaResolver`, `createZKPICAOSchemaResolver()` |
 | `src/verifier/zkp-verifier.ts` | `verifyZKPProofs()`, `verifyMerkleInclusion()` |
 | `packages/zkp-provider/` | Production WASM provider + bundled Noir circuits |
+
+
+```
+const request = new VPRequestBuilder('enrollment')
+    .addDocumentRequest(
+      new DocumentRequestBuilder('parent', 'CCCDCredential')
+        .setSchemaType('ICAO9303SOD')
+        .program("program-output-1-var", new ICAO9303ZKPData) -> Will generate a new proof for VP
+        .zkp("firstname-reveal-dg13-var", "dg13-profile-disclose")
+        .zkp("zk-sod-verification-1", {
+          circuitId: "sod-verification",
+          privateInputs: {
+            // Example
+            eContent: "$proof.["ICAO9303SOD"].data", // JSON path to W3C VC
+            signature: ""
+          },
+          publicInputs: {
+            // Example
+          }
+        })
+        .run('sod-validate').as('sod')
+        .run('icao-merklelize', { dataGroup: 'dg13' }).as('dg13')
+        .disclose('c1', 'dg13.fullName')
+        .build()
+    )
+    .addDocumentRequest(
+      new DocumentRequestBuilder('child', 'CCCDCredential')
+        .setSchemaType('ICAO9303SOD')
+        .run('sod-validate').as('sod')
+        .run('icao-merklelize', { dataGroup: 'dg13' }).as('dg13')
+        .disclose('c2', 'dg13.fullName')
+        .zkp('c3', {
+          circuitId: 'field-equals',
+          fieldId: 'dg13.fatherName',
+          publicInputs: {
+            ref: 'parent.dg13.fullName',          // ← cross-doc variable
+          },
+        })
+        .build()
+    )
+    .build();
+```

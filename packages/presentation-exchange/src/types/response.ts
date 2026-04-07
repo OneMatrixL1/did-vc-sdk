@@ -1,10 +1,9 @@
 export type {
   ProofSystem,
   DataIntegrityProof,
-  ZKPProof,
   CredentialProof,
   PresentedCredential,
-  MerkleDisclosureProof,
+  ICAO9303ZKPProofBundle,
 } from './credential.js';
 
 import type { PresentedCredential } from './credential.js';

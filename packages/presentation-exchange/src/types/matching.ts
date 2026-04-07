@@ -13,11 +13,11 @@ export interface CandidateCredential {
   disclosedFields: string[];
   /** Which disclose field paths are missing (non-optional) */
   missingFields: string[];
-  /** ZKP condition IDs whose private inputs resolve */
-  satisfiableZKPs: string[];
-  /** ZKP condition IDs whose private inputs are missing */
-  unsatisfiableZKPs: string[];
-  /** Overall: all required disclose fields present + all ZKP private inputs resolve */
+  /** Predicate condition IDs that are satisfiable */
+  satisfiablePredicates: string[];
+  /** Predicate condition IDs that are unsatisfiable */
+  unsatisfiablePredicates: string[];
+  /** Overall: all required disclose fields present + all predicates satisfiable */
   fullyQualified: boolean;
 }
 

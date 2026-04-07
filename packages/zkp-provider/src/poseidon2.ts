@@ -2,9 +2,7 @@
  * Production Poseidon2 hasher using @aztec/bb.js BarretenbergSync.
  *
  * Matches the Poseidon2 inside Noir circuits (BN254 curve).
- * Used by presentation-exchange verifier for MerkleDisclosureProof verification.
- *
- * Requires @aztec/bb.js as a peer dependency.
+ * Used by the ICAO proof system for Merkle tree construction.
  */
 
 const BN254_PRIME = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
@@ -14,7 +12,6 @@ export interface Poseidon2Hasher {
 }
 
 export async function createPoseidon2Hasher(): Promise<Poseidon2Hasher> {
-  // @ts-expect-error -- peer dependency, resolved at runtime
   const bbjs = await import('@aztec/bb.js');
   const { BarretenbergSync, Fr } = bbjs;
 
@@ -31,7 +28,19 @@ export async function createPoseidon2Hasher(): Promise<Poseidon2Hasher> {
         }
         fields.push(new Fr(val));
       }
-      return bb.poseidon2Hash(fields).toBigInt();
+      const result = bb.poseidon2Hash(fields);
+      // Handle different bb.js versions — toBigInt() or toBuffer()
+      if (typeof result.toBigInt === 'function') {
+        return result.toBigInt();
+      }
+      if (typeof result.toBuffer === 'function') {
+        const buf: Uint8Array = result.toBuffer();
+        let val = 0n;
+        for (const b of buf) val = val * 256n + BigInt(b);
+        return val;
+      }
+      // Fr may be directly convertible
+      return BigInt(result.toString());
     },
   };
 }

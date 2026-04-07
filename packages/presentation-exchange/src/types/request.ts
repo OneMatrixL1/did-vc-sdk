@@ -1,7 +1,9 @@
 import type { LocalizableString } from './localization.js';
 import type { PresentedCredential, ProofSystem } from './response.js';
+import type { PredicateCondition } from './condition.js';
 
 export type { ProofSystem } from './response.js';
+export type { PredicateCondition, PredicateOperator, PredicateParams } from './condition.js';
 
 // ---------------------------------------------------------------------------
 // Verifier info
@@ -32,10 +34,6 @@ export interface VerifierRequestProof {
   jws?: string;
 }
 
-export interface MerkleDisclosureRef {
-  commitmentRef: string;
-}
-
 export interface DiscloseCondition {
   type: 'DocumentCondition';
   conditionID: string;
@@ -43,31 +41,18 @@ export interface DiscloseCondition {
   operator: 'disclose';
   optional?: boolean;
   purpose?: LocalizableString;
-  merkleDisclosure?: MerkleDisclosureRef;
-}
-
-export interface ZKPCondition {
-  type: 'DocumentCondition';
-  conditionID: string;
-  operator: 'zkp';
-  circuitId: string;
-  proofSystem: ProofSystem;
-  purpose?: LocalizableString;
-  circuitHash?: string;
-  publicInputs?: Record<string, unknown>;
-  dependsOn?: Record<string, string>;
 }
 
 export interface LogicalConditionNode {
   type: 'Logical';
   operator: 'AND' | 'OR';
-  values: (LogicalConditionNode | DiscloseCondition | ZKPCondition)[];
+  values: (LogicalConditionNode | DiscloseCondition | PredicateCondition)[];
 }
 
 export type DocumentConditionNode =
   | LogicalConditionNode
   | DiscloseCondition
-  | ZKPCondition;
+  | PredicateCondition;
 
 // ---------------------------------------------------------------------------
 // Rules tree (recursive)

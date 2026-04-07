@@ -26,7 +26,11 @@ export interface CircuitArtifact {
 
 const CIRCUIT_FILE_MAP: Record<string, string> = {
   'sod-validate': 'sod_validate_circuit',
+  'sod-verify': 'sod_verify_circuit',
+  'dg-map': 'dg_map_circuit',
   'dg13-merklelize': 'dg13_merklelize_circuit',
+  'dg13-field-reveal': 'dg13_field_reveal_circuit',
+  'field-equals': 'field_equals_circuit',
   'date-greaterthan': 'date_greaterthan_predicate_circuit',
   'date-lessthan': 'date_lessthan_predicate_circuit',
   'date-greaterthanorequal': 'date_greaterthanorequal_predicate_circuit',

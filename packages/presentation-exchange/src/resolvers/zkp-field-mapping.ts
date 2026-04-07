@@ -12,8 +12,6 @@
  *     (use "parentsInfo" to disclose the full combined value intentionally)
  */
 
-import type { MerkleWitnessData } from '../types/merkle.js';
-
 const FIELD_TAG_MAP: Record<string, number> = {
   documentNumber: 1,
   idNumber: 1,
@@ -35,8 +33,6 @@ const FIELD_TAG_MAP: Record<string, number> = {
   personalIdCode: 16,
 };
 
-const MERKLE_DEPTH = 5;
-
 export function fieldIdToTagId(fieldId: string): number {
   const tagId = FIELD_TAG_MAP[fieldId];
   if (tagId === undefined) {
@@ -47,33 +43,6 @@ export function fieldIdToTagId(fieldId: string): number {
 
 export function fieldIdToLeafIndex(fieldId: string): number {
   return fieldIdToTagId(fieldId) - 1;
-}
-
-export function extractSiblingsForLeaf(
-  leafIndex: number,
-  witness: MerkleWitnessData,
-): string[] {
-  if (leafIndex < 0 || leafIndex >= witness.leaves.length) {
-    throw new Error(`Leaf index ${leafIndex} out of range [0, ${witness.leaves.length})`);
-  }
-
-  const allLevels = [witness.leaves, ...witness.levels];
-  const siblings: string[] = [];
-  let idx = leafIndex;
-
-  for (let level = 0; level < MERKLE_DEPTH; level++) {
-    const siblingIdx = idx ^ 1;
-    const levelData = allLevels[level];
-    if (!levelData || siblingIdx >= levelData.length) {
-      throw new Error(
-        `Merkle tree structure invalid at level ${level}, sibling index ${siblingIdx}`,
-      );
-    }
-    siblings.push(levelData[siblingIdx]!);
-    idx >>= 1;
-  }
-
-  return siblings;
 }
 
 export function isDg13Field(fieldId: string): boolean {

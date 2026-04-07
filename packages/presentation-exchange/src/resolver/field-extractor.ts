@@ -1,12 +1,13 @@
 import type {
   DocumentConditionNode,
   DiscloseCondition,
-  ZKPCondition,
 } from '../types/request.js';
+import type { PredicateCondition } from '../types/condition.js';
+import { isPredicateCondition } from '../types/condition.js';
 
-export interface ExtractedFields {
+export interface ExtractedConditions {
   disclose: DiscloseCondition[];
-  zkp: ZKPCondition[];
+  predicates: PredicateCondition[];
 }
 
 /**
@@ -15,8 +16,8 @@ export interface ExtractedFields {
  */
 export function extractConditions(
   conditions: DocumentConditionNode[],
-): ExtractedFields {
-  const result: ExtractedFields = { disclose: [], zkp: [] };
+): ExtractedConditions {
+  const result: ExtractedConditions = { disclose: [], predicates: [] };
   for (const cond of conditions) {
     walkCondition(cond, result);
   }
@@ -25,7 +26,7 @@ export function extractConditions(
 
 function walkCondition(
   node: DocumentConditionNode,
-  acc: ExtractedFields,
+  acc: ExtractedConditions,
 ): void {
   if (node.type === 'Logical') {
     for (const child of node.values) {
@@ -34,10 +35,9 @@ function walkCondition(
     return;
   }
 
-  // Leaf condition
   if (node.operator === 'disclose') {
     acc.disclose.push(node as DiscloseCondition);
-  } else if (node.operator === 'zkp') {
-    acc.zkp.push(node as ZKPCondition);
+  } else if (isPredicateCondition(node)) {
+    acc.predicates.push(node);
   }
 }

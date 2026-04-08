@@ -91,6 +91,7 @@ export async function resolvePresentation(
 
     return system.prove(cred, { disclose, predicates }, {
       nonce: request.nonce,
+      holder: options.holder,
       verifierId: request.verifier,
       zkpProvider: options.zkpProvider!,
       credentialData: options.credentialData?.(docRequestID, docReq.schemaType),

@@ -358,6 +358,9 @@ describe('Attack: tampered eContent', () => {
  * Helper: build a real VP credential through the ICAO pipeline, then
  * tamper with the bundle before verification to test the verifier's checks.
  */
+const TEST_NONCE = 'attack-test-nonce';
+const TEST_HOLDER = 'did:key:z6MkAttackTest';
+
 async function buildRealBundle() {
   const cccd = motherCCCD;
   const conditions = {
@@ -369,10 +372,11 @@ async function buildRealBundle() {
   };
   const cred = await proofSystem.prove(cccd.credential, conditions, {
     zkpProvider,
+    nonce: TEST_NONCE,
+    holder: TEST_HOLDER,
     credentialData: {
       sodInputs: cccd.sodInputs,
       dg13Inputs: cccd.dg13CircuitInputs,
-      salt: cccd.salt,
     },
   });
   const bundle = cred.proof as ICAO9303ZKPProofBundle;
@@ -391,7 +395,7 @@ describe('Attack: parameter forgery at verifier level', () => {
     const result = await proofSystem.verify(
       { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: tampered },
       conditions,
-      { zkpProvider },
+      { zkpProvider, nonce: TEST_NONCE, holder: TEST_HOLDER },
     );
     expect(result.verified).toBe(false);
     expect(result.errors.some(e => e.includes('expected circuitId "dg13-field-reveal"'))).toBe(true);
@@ -408,7 +412,7 @@ describe('Attack: parameter forgery at verifier level', () => {
     const result = await proofSystem.verify(
       { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: tampered },
       conditions,
-      { zkpProvider },
+      { zkpProvider, nonce: TEST_NONCE, holder: TEST_HOLDER },
     );
     expect(result.verified).toBe(false);
     expect(result.errors.some(e => e.includes('tag_id mismatch'))).toBe(true);
@@ -430,9 +434,35 @@ describe('Attack: parameter forgery at verifier level', () => {
     const result = await proofSystem.verify(
       { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: tampered },
       conditions,
-      { zkpProvider },
+      { zkpProvider, nonce: TEST_NONCE, holder: TEST_HOLDER },
     );
     expect(result.verified).toBe(false);
     expect(result.errors.some(e => e.includes('does not match any requested condition'))).toBe(true);
+  }, 120000);
+
+  it('rejects relay — valid proofs presented with different holder', async () => {
+    const { bundle, conditions } = await buildRealBundle();
+
+    // Attacker takes victim's bundle and presents with their own DID
+    const result = await proofSystem.verify(
+      { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: bundle },
+      conditions,
+      { zkpProvider, nonce: TEST_NONCE, holder: 'did:key:z6MkAttacker' },
+    );
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => e.includes('Salt mismatch'))).toBe(true);
+  }, 120000);
+
+  it('rejects replay — valid proofs replayed with different nonce', async () => {
+    const { bundle, conditions } = await buildRealBundle();
+
+    // Attacker replays proofs to a different verifier session
+    const result = await proofSystem.verify(
+      { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: bundle },
+      conditions,
+      { zkpProvider, nonce: 'different-nonce', holder: TEST_HOLDER },
+    );
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => e.includes('Salt mismatch'))).toBe(true);
   }, 120000);
 });

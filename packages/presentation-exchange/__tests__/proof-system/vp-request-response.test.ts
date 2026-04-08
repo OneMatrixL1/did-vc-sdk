@@ -71,7 +71,6 @@ describe('VP Request -> VP Response', () => {
         credentialData: () => ({
           sodInputs: cccd.sodInputs,
           dg13Inputs: cccd.dg13CircuitInputs,
-          salt: cccd.salt,
           dscCertificate: cccd.dscCertificate,
         }),
         signPresentation: async () => ({
@@ -137,7 +136,7 @@ describe('VP Request -> VP Response', () => {
         ],
         predicates: [],
       },
-      { zkpProvider, verifyDSC },
+      { zkpProvider, verifyDSC, nonce: 'nonce-abc123', holder: 'did:key:z6MkHolder' },
     );
 
     expect(verifyResult.verified).toBe(true);

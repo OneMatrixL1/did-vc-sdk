@@ -118,7 +118,6 @@ describe('Generate sample data', () => {
         credentialData: () => ({
           sodInputs: cccd.sodInputs,
           dg13Inputs: cccd.dg13CircuitInputs,
-          salt: cccd.salt,
           dscCertificate: cccd.dscCertificate,
         }),
         signPresentation: async () => ({

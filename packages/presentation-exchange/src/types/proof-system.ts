@@ -9,6 +9,7 @@ import type { ZKPProvider } from './zkp-provider.js';
 
 export interface ProveContext {
   nonce?: string;
+  holder?: string;
   verifierId?: string;
   zkpProvider: ZKPProvider;
   /** Schema-specific credential data (e.g. ICAO raw bytes). */
@@ -35,6 +36,14 @@ export interface VerifyContext {
    * If not provided, CSCA→DSC verification is skipped (unsafe — testing only).
    */
   verifyDSC?: (dscCertificate: string) => Promise<DSCVerificationResult>;
+
+  /**
+   * Request nonce + holder DID for salt binding verification.
+   * If provided, the verifier checks that all proof salts match deriveSalt(nonce, holder).
+   * If omitted, salt binding is not enforced (unsafe — testing only).
+   */
+  nonce?: string;
+  holder?: string;
 }
 
 // ---------------------------------------------------------------------------

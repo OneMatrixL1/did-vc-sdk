@@ -65,7 +65,6 @@ export interface DG13CircuitInputs {
 export interface ICAOCredentialData {
   sodInputs: SODCircuitInputs;
   dg13Inputs: DG13CircuitInputs;
-  salt: bigint;
   /** DSC certificate in base64 DER. Included in the proof bundle for CSCA trust verification. */
   dscCertificate?: string;
 }
@@ -80,14 +79,27 @@ export type MerkleTreeBuilder = (
   hasher: Poseidon2Hasher,
 ) => { root: bigint; commitment: bigint; leaves: bigint[]; getSiblings(i: number): bigint[] };
 
+/**
+ * Derive a deterministic salt from (nonce, holder).
+ * Binds ZKP proofs to both the session and the presenter, preventing replay/relay.
+ */
+export type DeriveSalt = (nonce: string, holder: string) => bigint;
+
 export interface ICAO9303ProofSystemOptions {
   poseidon2?: Poseidon2Hasher;
   buildMerkleTree?: MerkleTreeBuilder;
+  /**
+   * Salt derivation function. If not provided, uses a default
+   * poseidon2-based derivation (requires poseidon2 option).
+   */
+  deriveSalt?: DeriveSalt;
 }
 
 export function createICAO9303ProofSystem(
   opts?: ICAO9303ProofSystemOptions,
 ): SchemaProofSystem {
+  const saltDeriver = opts?.deriveSalt ?? defaultDeriveSalt(opts?.poseidon2);
+
   return {
     schemaType: 'ICAO9303SOD',
 
@@ -113,6 +125,10 @@ export function createICAO9303ProofSystem(
         throw new Error('ICAO proof system requires credentialData with sodInputs and dg13Inputs');
       }
 
+      if (!context.nonce || !context.holder) {
+        throw new Error('ICAO proof system requires nonce and holder in ProveContext for salt derivation');
+      }
+
       const poseidon2 = opts?.poseidon2;
       if (!poseidon2) {
         throw new Error('ICAO proof system requires poseidon2 hasher for proving');
@@ -123,12 +139,13 @@ export function createICAO9303ProofSystem(
         throw new Error('ICAO proof system requires buildMerkleTree for proving');
       }
 
+      const salt = saltDeriver(context.nonce, context.holder);
       const pipeline = buildICAOPipeline(conditions, poseidon2, treeBuild);
 
       const state = await executePipeline(pipeline, {
         sodInputs: data.sodInputs,
         dg13Inputs: data.dg13Inputs,
-        salt: data.salt,
+        salt,
       }, context.zkpProvider);
 
       return packageAsCredential(credential, state, conditions, data.dscCertificate);
@@ -140,8 +157,36 @@ export function createICAO9303ProofSystem(
         return { verified: false, disclosedFields: {}, errors: ['Expected ICAO9303ZKPProofBundle'] };
       }
 
-      return verifyICAOBundle(proof, conditions, context.zkpProvider, context.verifyDSC);
+      const expectedSalt = (context.nonce && context.holder)
+        ? saltDeriver(context.nonce, context.holder)
+        : undefined;
+      return verifyICAOBundle(proof, conditions, context.zkpProvider, context.verifyDSC, expectedSalt);
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Salt derivation — binds ZKP proofs to session (nonce) + presenter (holder)
+// ---------------------------------------------------------------------------
+
+function defaultDeriveSalt(poseidon2?: Poseidon2Hasher): DeriveSalt {
+  return (nonce: string, holder: string) => {
+    if (!poseidon2) {
+      throw new Error('deriveSalt requires poseidon2 hasher (or provide a custom deriveSalt)');
+    }
+    // Pack nonce and holder strings into field elements (31-byte chunks)
+    const combined = new TextEncoder().encode(nonce + ':' + holder);
+    const fields: bigint[] = [];
+    for (let i = 0; i < combined.length; i += 31) {
+      let felt = 0n;
+      for (let j = 0; j < 31 && i + j < combined.length; j++) {
+        felt = felt * 256n + BigInt(combined[i + j]!);
+      }
+      fields.push(felt);
+    }
+    // Pad to at least 2 elements
+    while (fields.length < 2) fields.push(0n);
+    return poseidon2.hash(fields, fields.length);
   };
 }
 
@@ -470,6 +515,7 @@ async function verifyICAOBundle(
   conditions: { disclose: DiscloseCondition[]; predicates: PredicateCondition[] },
   zkpProvider: ZKPProvider,
   verifyDSC?: (dscCertificate: string) => Promise<DSCVerificationResult>,
+  expectedSalt?: bigint,
 ): Promise<ProofVerificationResult> {
   const errors: string[] = [];
   const disclosedFields: Record<string, string> = {};
@@ -486,6 +532,17 @@ async function verifyICAOBundle(
     if (!valid) {
       const label = entry.conditionID ? `${entry.circuitId}[${entry.conditionID}]` : entry.circuitId;
       errors.push(`Proof invalid: ${label}`);
+    }
+  }
+
+  // --- 1b. Verify salt binding (session + presenter) ---
+  if (expectedSalt !== undefined) {
+    const expectedSaltHex = toHex(expectedSalt);
+    for (const entry of proofs) {
+      if (entry.publicInputs.salt !== undefined && entry.publicInputs.salt !== expectedSaltHex) {
+        const label = entry.conditionID ? `${entry.circuitId}[${entry.conditionID}]` : entry.circuitId;
+        errors.push(`Salt mismatch in "${label}": expected ${expectedSaltHex}, got ${entry.publicInputs.salt}`);
+      }
     }
   }
 

@@ -26,7 +26,6 @@ export type {
   PresentedCredential,
   CredentialProof,
   DataIntegrityProof,
-  ICAO9303ZKPProofBundle,
 } from './response.js';
 
 export type { MatchableCredential } from './credential.js';
@@ -48,12 +47,13 @@ export type {
   ProveContext,
   VerifyContext,
   ProofVerificationResult,
+  DSCVerificationResult,
 } from './proof-system.js';
 
 export type {
   ICAO9303ZKPProofBundle as ICAOProofBundle,
-  ICAOFieldReveal,
-  ICAOPredicateProof,
+  ICAO9303ZKPProofBundle,
+  ZKPProofEntry,
 } from './icao-proof-bundle.js';
 export { isICAOProofBundle } from './icao-proof-bundle.js';
 export { isPredicateCondition } from './condition.js';

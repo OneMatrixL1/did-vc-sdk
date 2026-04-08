@@ -1,52 +1,48 @@
 // ---------------------------------------------------------------------------
+// ZKP Proof Bundle — generic array of typed proof entries
+// ---------------------------------------------------------------------------
+
+/**
+ * A single ZKP proof entry. Self-describing via `circuitId`.
+ *
+ * zkp-provider verifies each entry independently (pure math).
+ * presentation-exchange checks the binding chain between entries (domain logic).
+ */
+export interface ZKPProofEntry {
+  circuitId: string;
+  proofValue: string;
+  publicInputs: Record<string, unknown>;
+  publicOutputs: Record<string, unknown>;
+
+  /** Links this proof to a request condition. Absent for chain proofs (sod-verify, dg-map, dg13-merklelize). */
+  conditionID?: string;
+}
+
+// ---------------------------------------------------------------------------
 // ICAO 9303 ZKP Proof Bundle
 // ---------------------------------------------------------------------------
 
 /**
- * Structured proof bundle for ICAO credentials (CCCD, Passport).
+ * Proof bundle for ICAO credentials (CCCD, Passport).
  *
- * Proof chain:
- *   sodVerify → dgMap → dg13 → fieldReveals / predicates
+ * Contains an ordered array of ZKP proofs. The binding chain:
+ *   sod-verify.econtent_binding → dg-map.input.econtent_binding
+ *   dg-map.dg_binding          → dg13-merklelize.binding
+ *   dg13.commitment            → field-reveal/predicate.input.commitment
  *
- * The verifier checks binding linkage:
- * - dg13.output_0 (binding) must equal dgMap.output_0 (dg_binding)
- * - fieldReveals/predicates reference dg13.output_2 (commitment)
+ * zkp-provider: verify each entry independently.
+ * presentation-exchange: verify the chain linking between entries.
  */
 export interface ICAO9303ZKPProofBundle {
   type: 'ICAO9303ZKPProofBundle';
+  proofs: ZKPProofEntry[];
 
-  sodVerify: ICAOProofStep;
-  dgMap: ICAOProofStep;
-  dg13: ICAOProofStep;
-
-  fieldReveals: ICAOFieldReveal[];
-  predicates: ICAOPredicateProof[];
-}
-
-export interface ICAOProofStep {
-  proofValue: string;
-  publicInputs: Record<string, unknown>;
-  publicOutputs: Record<string, unknown>;
-}
-
-export interface ICAOFieldReveal {
-  conditionID: string;
-  field: string;
-  fieldValue: string;
-  proofValue: string;
-  publicInputs: Record<string, unknown>;
-  publicOutputs: Record<string, unknown>;
-}
-
-export interface ICAOPredicateProof {
-  conditionID: string;
-  operator: string;
-  field: string;
-  params: Record<string, unknown>;
-  result: unknown;
-  proofValue: string;
-  publicInputs: Record<string, unknown>;
-  publicOutputs: Record<string, unknown>;
+  /**
+   * DSC (Document Signer Certificate) in base64 DER.
+   * The verifier checks that this certificate is signed by a trusted CSCA
+   * and that its public key matches `pubkey_x`/`pubkey_y` in the sod-verify proof.
+   */
+  dscCertificate?: string;
 }
 
 // ---------------------------------------------------------------------------

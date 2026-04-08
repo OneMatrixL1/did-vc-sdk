@@ -11,8 +11,8 @@
 import type { MatchableCredential, PresentedCredential } from '../types/credential.js';
 import type { DiscloseCondition } from '../types/request.js';
 import type { PredicateCondition } from '../types/condition.js';
-import type { SchemaProofSystem, ProveContext, VerifyContext, ProofVerificationResult } from '../types/proof-system.js';
-import type { ICAO9303ZKPProofBundle, ICAOFieldReveal, ICAOPredicateProof } from '../types/icao-proof-bundle.js';
+import type { SchemaProofSystem, ProveContext, VerifyContext, ProofVerificationResult, DSCVerificationResult } from '../types/proof-system.js';
+import type { ICAO9303ZKPProofBundle, ZKPProofEntry } from '../types/icao-proof-bundle.js';
 import { isICAOProofBundle } from '../types/icao-proof-bundle.js';
 import type { ZKPProvider } from '../types/zkp-provider.js';
 import type { Poseidon2Hasher } from '../types/zkp-provider.js';
@@ -66,6 +66,8 @@ export interface ICAOCredentialData {
   sodInputs: SODCircuitInputs;
   dg13Inputs: DG13CircuitInputs;
   salt: bigint;
+  /** DSC certificate in base64 DER. Included in the proof bundle for CSCA trust verification. */
+  dscCertificate?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +131,7 @@ export function createICAO9303ProofSystem(
         salt: data.salt,
       }, context.zkpProvider);
 
-      return packageAsCredential(credential, state, conditions);
+      return packageAsCredential(credential, state, conditions, data.dscCertificate);
     },
 
     async verify(credential, conditions, context) {
@@ -138,7 +140,7 @@ export function createICAO9303ProofSystem(
         return { verified: false, disclosedFields: {}, errors: ['Expected ICAO9303ZKPProofBundle'] };
       }
 
-      return verifyICAOBundle(proof, conditions, context.zkpProvider);
+      return verifyICAOBundle(proof, conditions, context.zkpProvider, context.verifyDSC);
     },
   };
 }
@@ -203,7 +205,7 @@ function buildICAOPipeline(
         };
       },
       processOutputs(state, result) {
-        state.bag.set('econtentBinding', result.publicOutputs.output_0);
+        state.bag.set('econtentBinding', result.publicOutputs.econtent_binding);
       },
       satisfies: [],
     },
@@ -230,7 +232,7 @@ function buildICAOPipeline(
         };
       },
       processOutputs(state, result) {
-        state.bag.set('dgBinding', result.publicOutputs.output_0);
+        state.bag.set('dgBinding', result.publicOutputs.dg_binding);
       },
       satisfies: [],
     },
@@ -256,9 +258,9 @@ function buildICAOPipeline(
         };
       },
       processOutputs(state, result) {
-        state.bag.set('binding', result.publicOutputs.output_0);
-        state.bag.set('identity', result.publicOutputs.output_1);
-        state.bag.set('commitment', result.publicOutputs.output_2);
+        state.bag.set('binding', result.publicOutputs.binding);
+        state.bag.set('identity', result.publicOutputs.identity);
+        state.bag.set('commitment', result.publicOutputs.commitment);
       },
       satisfies: [],
     },
@@ -388,55 +390,54 @@ function packageAsCredential(
   credential: MatchableCredential,
   state: PipelineState,
   conditions: { disclose: DiscloseCondition[]; predicates: PredicateCondition[] },
+  dscCertificate?: string,
 ): PresentedCredential {
-  const sodVerifyProof = state.proofs.find((p) => p.label === 'sod-verify')!;
-  const dgMapProof = state.proofs.find((p) => p.label === 'dg-map')!;
-  const dg13Proof = state.proofs.find((p) => p.label === 'dg13-merklelize')!;
+  const proofs: ZKPProofEntry[] = [];
+  const subject: Record<string, unknown> = {};  // intentionally empty — values come from verified proofs
 
-  const fieldReveals: ICAOFieldReveal[] = [];
-  const subject: Record<string, unknown> = {};
-
-  for (const d of conditions.disclose) {
-    const proof = state.proofs.find((p) => p.satisfies.includes(d.conditionID));
-    if (!proof) continue;
-
-    // Circuit returns [length, data[0..3]] — field value is in the public outputs
-    const fieldValue = String(proof.publicOutputs.output_0 ?? '');
-    fieldReveals.push({
-      conditionID: d.conditionID,
-      field: d.field,
-      fieldValue,
-      proofValue: proof.proofValue,
-      publicInputs: proof.publicInputs,
-      publicOutputs: proof.publicOutputs,
+  // Pipeline chain proofs (sod-verify, dg-map, dg13-merklelize)
+  for (const label of ['sod-verify', 'dg-map', 'dg13-merklelize']) {
+    const p = state.proofs.find((pr) => pr.label === label)!;
+    proofs.push({
+      circuitId: p.circuitId!,
+      proofValue: p.proofValue,
+      publicInputs: p.publicInputs,
+      publicOutputs: p.publicOutputs,
     });
-    subject[d.field] = fieldValue;
   }
 
-  const predicates: ICAOPredicateProof[] = [];
+  // Field reveals
+  for (const d of conditions.disclose) {
+    const p = state.proofs.find((pr) => pr.satisfies.includes(d.conditionID));
+    if (!p) continue;
+
+    proofs.push({
+      circuitId: 'dg13-field-reveal',
+      proofValue: p.proofValue,
+      publicInputs: p.publicInputs,
+      publicOutputs: p.publicOutputs,
+      conditionID: d.conditionID,
+    });
+  }
+
+  // Predicates
   for (const p of conditions.predicates) {
     const proof = state.proofs.find((pr) => pr.satisfies.includes(p.conditionID));
     if (!proof) continue;
 
-    predicates.push({
-      conditionID: p.conditionID,
-      operator: p.operator,
-      field: p.field,
-      params: p.params as Record<string, unknown>,
-      result: proof.publicOutputs.result ?? true,
+    proofs.push({
+      circuitId: PREDICATE_CIRCUIT_MAP[p.operator]!,
       proofValue: proof.proofValue,
       publicInputs: proof.publicInputs,
       publicOutputs: proof.publicOutputs,
+      conditionID: p.conditionID,
     });
   }
 
   const bundle: ICAO9303ZKPProofBundle = {
     type: 'ICAO9303ZKPProofBundle',
-    sodVerify: { proofValue: sodVerifyProof.proofValue, publicInputs: sodVerifyProof.publicInputs, publicOutputs: sodVerifyProof.publicOutputs },
-    dgMap: { proofValue: dgMapProof.proofValue, publicInputs: dgMapProof.publicInputs, publicOutputs: dgMapProof.publicOutputs },
-    dg13: { proofValue: dg13Proof.proofValue, publicInputs: dg13Proof.publicInputs, publicOutputs: dg13Proof.publicOutputs },
-    fieldReveals,
-    predicates,
+    proofs,
+    ...(dscCertificate ? { dscCertificate } : {}),
   };
 
   if (credential.credentialSubject.id !== undefined) {
@@ -468,101 +469,100 @@ async function verifyICAOBundle(
   bundle: ICAO9303ZKPProofBundle,
   conditions: { disclose: DiscloseCondition[]; predicates: PredicateCondition[] },
   zkpProvider: ZKPProvider,
+  verifyDSC?: (dscCertificate: string) => Promise<DSCVerificationResult>,
 ): Promise<ProofVerificationResult> {
   const errors: string[] = [];
   const disclosedFields: Record<string, string> = {};
+  const { proofs } = bundle;
 
-  // 1. Verify SOD signature
-  const sodValid = await zkpProvider.verify({
-    circuitId: 'sod-verify',
-    proofValue: bundle.sodVerify.proofValue,
-    publicInputs: bundle.sodVerify.publicInputs,
-    publicOutputs: bundle.sodVerify.publicOutputs,
-  });
-  if (!sodValid) errors.push('SOD verify proof invalid');
-
-  // 2. Verify DG map + chain to SOD
-  const dgMapValid = await zkpProvider.verify({
-    circuitId: 'dg-map',
-    proofValue: bundle.dgMap.proofValue,
-    publicInputs: bundle.dgMap.publicInputs,
-    publicOutputs: bundle.dgMap.publicOutputs,
-  });
-  if (!dgMapValid) errors.push('DG map proof invalid');
-
-  // 3. Verify DG13 merklelize
-  const dg13Valid = await zkpProvider.verify({
-    circuitId: 'dg13-merklelize',
-    proofValue: bundle.dg13.proofValue,
-    publicInputs: bundle.dg13.publicInputs,
-    publicOutputs: bundle.dg13.publicOutputs,
-  });
-  if (!dg13Valid) errors.push('DG13 merklelize proof invalid');
-
-  // Chain: dg13.output_0 (binding) must equal dgMap.output_0 (dg_binding)
-  if (bundle.dg13.publicOutputs.output_0 !== bundle.dgMap.publicOutputs.output_0) {
-    errors.push('DG13 binding does not match DG map output');
+  // --- 1. Verify every proof individually (zkp-provider level) ---
+  for (const entry of proofs) {
+    const valid = await zkpProvider.verify({
+      circuitId: entry.circuitId,
+      proofValue: entry.proofValue,
+      publicInputs: entry.publicInputs,
+      publicOutputs: entry.publicOutputs,
+    });
+    if (!valid) {
+      const label = entry.conditionID ? `${entry.circuitId}[${entry.conditionID}]` : entry.circuitId;
+      errors.push(`Proof invalid: ${label}`);
+    }
   }
 
-  const commitment = bundle.dg13.publicOutputs.output_2;
+  // --- 2. Verify binding chain (presentation-exchange level) ---
+  const sodVerify = proofs.find((p) => p.circuitId === 'sod-verify');
+  const dgMap = proofs.find((p) => p.circuitId === 'dg-map');
+  const dg13 = proofs.find((p) => p.circuitId === 'dg13-merklelize');
 
-  // 4. Verify field reveals + chain to commitment
-  for (const fr of bundle.fieldReveals) {
-    if (fr.publicInputs.commitment !== commitment) {
-      errors.push(`Field reveal "${fr.field}" commitment mismatch`);
-      continue;
-    }
+  if (!sodVerify) errors.push('Missing sod-verify proof');
+  if (!dgMap) errors.push('Missing dg-map proof');
+  if (!dg13) errors.push('Missing dg13-merklelize proof');
 
-    const valid = await zkpProvider.verify({
-      circuitId: 'dg13-field-reveal',
-      proofValue: fr.proofValue,
-      publicInputs: fr.publicInputs,
-      publicOutputs: fr.publicOutputs,
-    });
+  // If any chain proof is missing, the entire chain is unanchored — nothing can be trusted
+  if (!sodVerify || !dgMap || !dg13) {
+    return { verified: false, disclosedFields: {}, errors };
+  }
 
-    if (!valid) {
-      errors.push(`Field reveal "${fr.field}" proof invalid`);
+  // --- 2b. Verify DSC trust anchor (CSCA → DSC → pubkey match) ---
+  if (verifyDSC) {
+    if (!bundle.dscCertificate) {
+      errors.push('Missing dscCertificate in proof bundle');
     } else {
-      disclosedFields[fr.field] = fr.fieldValue;
+      const dscResult = await verifyDSC(bundle.dscCertificate);
+      if (!dscResult.trusted) {
+        errors.push('DSC certificate is not signed by a trusted CSCA');
+      }
+      // Compare DSC pubkey with sod-verify publicInputs
+      const sodPubX = sodVerify.publicInputs.pubkey_x as string[];
+      const sodPubY = sodVerify.publicInputs.pubkey_y as string[];
+      if (!arraysEqual(dscResult.publicKey.x, sodPubX.map(Number))
+        || !arraysEqual(dscResult.publicKey.y, sodPubY.map(Number))) {
+        errors.push('DSC public key does not match sod-verify pubkey_x/pubkey_y');
+      }
     }
   }
 
-  // 5. Verify predicates + chain to commitment
-  for (const pred of bundle.predicates) {
-    if (pred.publicInputs.commitment !== commitment) {
-      errors.push(`Predicate "${pred.conditionID}" commitment mismatch`);
+  // dg-map must reference sod-verify's output
+  if (dgMap.publicInputs.econtent_binding !== sodVerify.publicOutputs.econtent_binding) {
+    errors.push('dg-map econtent_binding does not match sod-verify output');
+  }
+
+  // dg13 binding must equal dg-map output (same DG13 hash)
+  if (dg13.publicOutputs.binding !== dgMap.publicOutputs.dg_binding) {
+    errors.push('dg13 binding does not match dg-map output');
+  }
+
+  const commitment = dg13.publicOutputs.commitment;
+
+  // Build conditionID lookup maps
+  const discloseByID = new Map(conditions.disclose.map((d) => [d.conditionID, d]));
+  const predicateByID = new Map(conditions.predicates.map((p) => [p.conditionID, p]));
+
+  // --- 3. Verify condition-linked proofs chain to commitment ---
+  const conditionProofs = proofs.filter((p) => p.conditionID !== undefined);
+  for (const entry of conditionProofs) {
+    if (commitment !== undefined && entry.publicInputs.commitment !== commitment) {
+      errors.push(`Proof "${entry.conditionID}" commitment mismatch`);
       continue;
     }
 
-    const circuitId = PREDICATE_CIRCUIT_MAP[pred.operator];
-    if (!circuitId) {
-      errors.push(`Unknown predicate operator "${pred.operator}"`);
-      continue;
-    }
-
-    const valid = await zkpProvider.verify({
-      circuitId,
-      proofValue: pred.proofValue,
-      publicInputs: pred.publicInputs,
-      publicOutputs: pred.publicOutputs,
-    });
-
-    if (!valid) {
-      errors.push(`Predicate "${pred.conditionID}" proof invalid`);
+    const disclose = discloseByID.get(entry.conditionID!);
+    if (disclose) {
+      disclosedFields[disclose.field] = decodeFieldRevealOutputs(entry.publicOutputs);
     }
   }
 
-  // 6. Check all required conditions are covered
+  // --- 4. Check all required conditions are covered ---
   for (const d of conditions.disclose) {
-    if (!bundle.fieldReveals.some((fr) => fr.conditionID === d.conditionID)) {
-      if (!d.optional) errors.push(`Missing field reveal for "${d.conditionID}"`);
+    if (!conditionProofs.some((p) => p.conditionID === d.conditionID)) {
+      if (!d.optional) errors.push(`Missing proof for "${d.conditionID}"`);
     }
   }
 
   for (const p of conditions.predicates) {
     if (p.operator === 'equals' && 'ref' in (p.params as Record<string, unknown>)) continue;
-    if (!bundle.predicates.some((pr) => pr.conditionID === p.conditionID)) {
-      if (!p.optional) errors.push(`Missing predicate proof for "${p.conditionID}"`);
+    if (!conditionProofs.some((pr) => pr.conditionID === p.conditionID)) {
+      if (!p.optional) errors.push(`Missing proof for "${p.conditionID}"`);
     }
   }
 
@@ -595,6 +595,33 @@ function extractRawDGs(credential: MatchableCredential): Record<string, string> 
     }
   }
   return rawDGs;
+}
+
+/**
+ * Decode dg13-field-reveal publicOutputs (length + data_0..data_3) into a UTF-8 string.
+ * Each data_N is a hex-encoded packed chunk. `length` is the total byte count.
+ */
+function decodeFieldRevealOutputs(outputs: Record<string, unknown>): string {
+  const length = Number(outputs.length);
+  if (!length || length <= 0) return '';
+
+  const chunks = [outputs.data_0, outputs.data_1, outputs.data_2, outputs.data_3]
+    .map((v) => String(v ?? '0x00'));
+
+  const bytes: number[] = [];
+  for (const chunk of chunks) {
+    const hex = chunk.startsWith('0x') ? chunk.slice(2) : chunk;
+    if (hex === '00' || hex === '0') continue;
+    for (let i = 0; i < hex.length; i += 2) {
+      bytes.push(parseInt(hex.slice(i, i + 2), 16));
+    }
+  }
+
+  return new TextDecoder().decode(new Uint8Array(bytes.slice(0, length)));
+}
+
+function arraysEqual(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
 function flattenPredicateParams(p: PredicateCondition): Record<string, unknown> {

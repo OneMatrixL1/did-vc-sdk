@@ -56,7 +56,7 @@ describe('Full proof chain: sod-verify -> dg-map -> dg13-merklelize -> field-rev
     });
 
     expect(sodResult.proofValue.length).toBeGreaterThan(100);
-    const econtentBinding = sodResult.publicOutputs.output_0 as string;
+    const econtentBinding = sodResult.publicOutputs.econtent_binding as string;
     expect(econtentBinding).toBeDefined();
 
     // Verify sod-verify proof
@@ -90,7 +90,7 @@ describe('Full proof chain: sod-verify -> dg-map -> dg13-merklelize -> field-rev
     });
 
     expect(dgMapResult.proofValue.length).toBeGreaterThan(100);
-    const dgBinding = dgMapResult.publicOutputs.output_0 as string;
+    const dgBinding = dgMapResult.publicOutputs.dg_binding as string;
     expect(dgBinding).toBeDefined();
 
     // Verify dg-map proof
@@ -124,9 +124,9 @@ describe('Full proof chain: sod-verify -> dg-map -> dg13-merklelize -> field-rev
 
     expect(dg13Result.proofValue.length).toBeGreaterThan(100);
 
-    // outputs: [binding, identity, commitment]
-    const dg13Binding = dg13Result.publicOutputs.output_0 as string;
-    const commitment = dg13Result.publicOutputs.output_2 as string;
+    // outputs: { binding, identity, commitment }
+    const dg13Binding = dg13Result.publicOutputs.binding as string;
+    const commitment = dg13Result.publicOutputs.commitment as string;
     expect(dg13Binding).toBeDefined();
     expect(commitment).toBeDefined();
 
@@ -154,7 +154,8 @@ describe('Full proof chain: sod-verify -> dg-map -> dg13-merklelize -> field-rev
     const genderField = fields[leafIndex]!;
 
     // Verify our JS Merkle tree commitment matches the circuit's commitment
-    expect(toHex(tree.commitment)).toBe(commitment);
+    // BigInt.toString(16) drops leading zeros; normalize both sides
+    expect(BigInt(toHex(tree.commitment))).toBe(BigInt(commitment as string));
 
     const revealResult = await zkpProvider.prove({
       circuitId: 'dg13-field-reveal',

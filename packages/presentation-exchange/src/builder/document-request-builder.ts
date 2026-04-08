@@ -7,14 +7,51 @@ import type {
 } from '../types/request.js';
 import type { PredicateCondition, PredicateOperator } from '../types/condition.js';
 
+// ---------------------------------------------------------------------------
+// Option types
+// ---------------------------------------------------------------------------
+
+interface BaseOpts {
+  /** Condition ID. Defaults to `field` when omitted. */
+  id?: string;
+  optional?: boolean;
+  purpose?: LocalizableString;
+}
+
+interface DiscloseOpts extends BaseOpts {
+  field: string;
+}
+
+interface ThresholdOpts extends BaseOpts {
+  field: string;
+  value: string;
+}
+
+interface RangeOpts extends BaseOpts {
+  field: string;
+  gte: string;
+  lte: string;
+}
+
+type EqualsOpts = BaseOpts & { field: string } & ({ value: string } | { ref: string });
+
+// ---------------------------------------------------------------------------
+// Builder
+// ---------------------------------------------------------------------------
+
 /**
  * Fluent builder for a single DocumentRequest node.
  *
- * Developers use high-level methods — the SDK maps them to circuits internally:
- *   .disclose()     → field-reveal circuit
- *   .greaterThan()  → date-greaterthan circuit
- *   .inRange()      → date-inrange circuit
- *   .equals()       → field-equals circuit
+ * All condition methods accept an object. `id` is optional — defaults to `field`.
+ *
+ * @example
+ *   new DocumentRequestBuilder('cccd', 'CCCDCredential')
+ *     .setSchemaType('ICAO9303SOD')
+ *     .disclose({ field: 'fullName' })
+ *     .disclose({ field: 'gender', id: 'c2' })
+ *     .inRange({ field: 'dateOfBirth', gte: '19900101', lte: '20061231' })
+ *     .equals({ field: 'fullName', ref: 'parent.fullName' })
+ *     .build()
  */
 export class DocumentRequestBuilder {
   private docRequestID: string;
@@ -58,75 +95,48 @@ export class DocumentRequestBuilder {
   }
 
   /** Reveal a field value to the verifier. */
-  disclose(
-    conditionID: string,
-    field: string,
-    opts?: { optional?: boolean; purpose?: LocalizableString },
-  ): this {
+  disclose(opts: DiscloseOpts): this {
     const cond: DiscloseCondition = {
       type: 'DocumentCondition',
-      conditionID,
-      field,
+      conditionID: opts.id ?? opts.field,
+      field: opts.field,
       operator: 'disclose',
-      ...opts,
+      ...(opts.optional !== undefined && { optional: opts.optional }),
+      ...(opts.purpose !== undefined && { purpose: opts.purpose }),
     };
     this.conditions.push(cond);
     return this;
   }
 
   /** Prove field value > threshold without revealing it. */
-  greaterThan(
-    conditionID: string,
-    field: string,
-    opts: { value: string; optional?: boolean; purpose?: LocalizableString },
-  ): this {
-    return this.addPredicate(conditionID, 'greaterThan', field, { value: opts.value }, opts);
+  greaterThan(opts: ThresholdOpts): this {
+    return this.addPredicate('greaterThan', opts.field, { value: opts.value }, opts);
   }
 
   /** Prove field value < threshold without revealing it. */
-  lessThan(
-    conditionID: string,
-    field: string,
-    opts: { value: string; optional?: boolean; purpose?: LocalizableString },
-  ): this {
-    return this.addPredicate(conditionID, 'lessThan', field, { value: opts.value }, opts);
+  lessThan(opts: ThresholdOpts): this {
+    return this.addPredicate('lessThan', opts.field, { value: opts.value }, opts);
   }
 
   /** Prove field value >= threshold without revealing it. */
-  greaterThanOrEqual(
-    conditionID: string,
-    field: string,
-    opts: { value: string; optional?: boolean; purpose?: LocalizableString },
-  ): this {
-    return this.addPredicate(conditionID, 'greaterThanOrEqual', field, { value: opts.value }, opts);
+  greaterThanOrEqual(opts: ThresholdOpts): this {
+    return this.addPredicate('greaterThanOrEqual', opts.field, { value: opts.value }, opts);
   }
 
   /** Prove field value <= threshold without revealing it. */
-  lessThanOrEqual(
-    conditionID: string,
-    field: string,
-    opts: { value: string; optional?: boolean; purpose?: LocalizableString },
-  ): this {
-    return this.addPredicate(conditionID, 'lessThanOrEqual', field, { value: opts.value }, opts);
+  lessThanOrEqual(opts: ThresholdOpts): this {
+    return this.addPredicate('lessThanOrEqual', opts.field, { value: opts.value }, opts);
   }
 
   /** Prove field value is within a range without revealing it. */
-  inRange(
-    conditionID: string,
-    field: string,
-    opts: { gte: string; lte: string; optional?: boolean; purpose?: LocalizableString },
-  ): this {
-    return this.addPredicate(conditionID, 'inRange', field, { gte: opts.gte, lte: opts.lte }, opts);
+  inRange(opts: RangeOpts): this {
+    return this.addPredicate('inRange', opts.field, { gte: opts.gte, lte: opts.lte }, opts);
   }
 
   /** Prove field equals a known value or a cross-doc reference without revealing it. */
-  equals(
-    conditionID: string,
-    field: string,
-    opts: ({ value: string } | { ref: string }) & { optional?: boolean; purpose?: LocalizableString },
-  ): this {
+  equals(opts: EqualsOpts): this {
     const params = 'ref' in opts ? { ref: opts.ref } : { value: opts.value };
-    return this.addPredicate(conditionID, 'equals', field, params, opts);
+    return this.addPredicate('equals', opts.field, params, opts);
   }
 
   /** Add a raw condition node (for logical groupings) */
@@ -157,20 +167,19 @@ export class DocumentRequestBuilder {
   }
 
   private addPredicate(
-    conditionID: string,
     operator: PredicateOperator,
     field: string,
     params: Record<string, unknown>,
-    opts?: { optional?: boolean; purpose?: LocalizableString },
+    opts: BaseOpts,
   ): this {
     const cond: PredicateCondition = {
       type: 'DocumentCondition',
-      conditionID,
+      conditionID: opts.id ?? field,
       operator,
       field,
       params: params as PredicateCondition['params'],
-      ...(opts?.optional !== undefined && { optional: opts.optional }),
-      ...(opts?.purpose !== undefined && { purpose: opts.purpose }),
+      ...(opts.optional !== undefined && { optional: opts.optional }),
+      ...(opts.purpose !== undefined && { purpose: opts.purpose }),
     };
     this.conditions.push(cond);
     return this;

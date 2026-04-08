@@ -4,12 +4,12 @@ import { VPRequestBuilder } from '../../src/builder/request-builder.js';
 import type { PredicateCondition } from '../../src/types/condition.js';
 import type { DiscloseCondition } from '../../src/types/request.js';
 
-describe('DocumentRequestBuilder (new API)', () => {
+describe('DocumentRequestBuilder (object API)', () => {
   it('builds a request with .disclose()', () => {
     const req = new DocumentRequestBuilder('cccd', 'CCCDCredential')
       .setSchemaType('ICAO9303SOD')
-      .disclose('c1', 'fullName')
-      .disclose('c2', 'dateOfBirth')
+      .disclose({ field: 'fullName', id: 'c1' })
+      .disclose({ field: 'dateOfBirth', id: 'c2' })
       .build();
 
     expect(req.conditions).toHaveLength(2);
@@ -19,58 +19,77 @@ describe('DocumentRequestBuilder (new API)', () => {
     expect(c1.conditionID).toBe('c1');
   });
 
+  it('defaults conditionID to field name when id omitted', () => {
+    const req = new DocumentRequestBuilder('cccd', 'CCCDCredential')
+      .setSchemaType('ICAO9303SOD')
+      .disclose({ field: 'fullName' })
+      .disclose({ field: 'gender' })
+      .build();
+
+    const c1 = req.conditions[0] as DiscloseCondition;
+    const c2 = req.conditions[1] as DiscloseCondition;
+    expect(c1.conditionID).toBe('fullName');
+    expect(c1.field).toBe('fullName');
+    expect(c2.conditionID).toBe('gender');
+    expect(c2.field).toBe('gender');
+  });
+
   it('builds a request with .greaterThan()', () => {
     const req = new DocumentRequestBuilder('cccd', 'CCCDCredential')
       .setSchemaType('ICAO9303SOD')
-      .greaterThan('c1', 'dateOfBirth', { value: '20060407' })
+      .greaterThan({ field: 'dateOfBirth', value: '20060407' })
       .build();
 
     const c1 = req.conditions[0] as PredicateCondition;
     expect(c1.operator).toBe('greaterThan');
     expect(c1.field).toBe('dateOfBirth');
+    expect(c1.conditionID).toBe('dateOfBirth');
     expect(c1.params).toEqual({ value: '20060407' });
   });
 
   it('builds a request with .inRange()', () => {
     const req = new DocumentRequestBuilder('cccd', 'CCCDCredential')
       .setSchemaType('ICAO9303SOD')
-      .inRange('c1', 'dateOfBirth', { gte: '19900101', lte: '20061231' })
+      .inRange({ field: 'dateOfBirth', gte: '19900101', lte: '20061231' })
       .build();
 
     const c1 = req.conditions[0] as PredicateCondition;
     expect(c1.operator).toBe('inRange');
+    expect(c1.conditionID).toBe('dateOfBirth');
     expect(c1.params).toEqual({ gte: '19900101', lte: '20061231' });
   });
 
   it('builds a request with .equals() using value', () => {
     const req = new DocumentRequestBuilder('cccd', 'CCCDCredential')
       .setSchemaType('ICAO9303SOD')
-      .equals('c1', 'nationality', { value: 'VN' })
+      .equals({ field: 'nationality', value: 'VN' })
       .build();
 
     const c1 = req.conditions[0] as PredicateCondition;
     expect(c1.operator).toBe('equals');
+    expect(c1.conditionID).toBe('nationality');
     expect(c1.params).toEqual({ value: 'VN' });
   });
 
   it('builds a request with .equals() using cross-doc ref', () => {
     const req = new DocumentRequestBuilder('child', 'CCCDCredential')
       .setSchemaType('ICAO9303SOD')
-      .equals('c1', 'fatherName', { ref: 'parent.fullName' })
+      .equals({ field: 'fatherName', ref: 'parent.fullName' })
       .build();
 
     const c1 = req.conditions[0] as PredicateCondition;
     expect(c1.operator).toBe('equals');
+    expect(c1.conditionID).toBe('fatherName');
     expect(c1.params).toEqual({ ref: 'parent.fullName' });
   });
 
   it('builds a mixed request with disclose + predicates', () => {
     const req = new DocumentRequestBuilder('cccd', 'CCCDCredential')
       .setSchemaType('ICAO9303SOD')
-      .disclose('c1', 'fullName')
-      .disclose('c2', 'dateOfBirth')
-      .inRange('c3', 'dateOfBirth', { gte: '19900101', lte: '20061231' })
-      .equals('c4', 'fatherName', { ref: 'parent.fullName' })
+      .disclose({ field: 'fullName' })
+      .disclose({ field: 'dateOfBirth' })
+      .inRange({ field: 'dateOfBirth', gte: '19900101', lte: '20061231', id: 'c3' })
+      .equals({ field: 'fatherName', ref: 'parent.fullName' })
       .build();
 
     expect(req.conditions).toHaveLength(4);
@@ -88,22 +107,22 @@ describe('DocumentRequestBuilder (new API)', () => {
 });
 
 describe('VPRequestBuilder (school enrollment)', () => {
-  it('builds a full enrollment request with new API', () => {
+  it('builds a full enrollment request with object API', () => {
     const request = new VPRequestBuilder('enrollment-001')
       .setName('School Enrollment')
       .setVerifier({ id: 'did:web:school.vn', name: 'School', url: 'https://school.vn' })
       .addDocumentRequest(
         new DocumentRequestBuilder('parent', 'CCCDCredential')
           .setSchemaType('ICAO9303SOD')
-          .disclose('c1', 'fullName')
-          .greaterThan('c2', 'dateOfBirth', { value: '20060407' }),
+          .disclose({ field: 'fullName' })
+          .greaterThan({ field: 'dateOfBirth', value: '20060407' }),
       )
       .addDocumentRequest(
         new DocumentRequestBuilder('child', 'CCCDCredential')
           .setSchemaType('ICAO9303SOD')
-          .disclose('c3', 'fullName')
-          .disclose('c4', 'dateOfBirth')
-          .equals('c5', 'fatherName', { ref: 'parent.fullName' }),
+          .disclose({ field: 'fullName' })
+          .disclose({ field: 'dateOfBirth' })
+          .equals({ field: 'fatherName', ref: 'parent.fullName' }),
       )
       .build();
 

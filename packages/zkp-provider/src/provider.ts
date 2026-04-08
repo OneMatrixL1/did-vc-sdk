@@ -77,7 +77,8 @@ export async function createWasmZKPProvider(config?: WasmProviderConfig): Promis
       const inputs: Record<string, unknown> = { ...params.privateInputs, ...params.publicInputs };
       const { witness, returnValue } = await noir.execute(inputs);
       const { proof } = await backend.generateProof(witness);
-      return { proofValue: uint8ArrayToBase64(proof), publicOutputs: parseReturnValue(returnValue) };
+      const publicOutputs = parseReturnValue(returnValue, params.circuitId);
+      return { proofValue: uint8ArrayToBase64(proof), publicOutputs };
     },
 
     async verify(params: ZKPVerifyParams): Promise<boolean> {
@@ -125,14 +126,28 @@ function base64ToUint8Array(b64: string): Uint8Array {
   return bytes;
 }
 
-function parseReturnValue(returnValue: unknown): Record<string, unknown> {
+// ---------------------------------------------------------------------------
+// Named output mapping — maps output_N to meaningful names per circuit
+// ---------------------------------------------------------------------------
+
+const OUTPUT_NAMES: Record<string, string[]> = {
+  'sod-verify': ['econtent_binding'],
+  'sod-validate': ['binding'],
+  'dg-map': ['dg_binding'],
+  'dg13-merklelize': ['binding', 'identity', 'commitment'],
+  'dg13-field-reveal': ['length', 'data_0', 'data_1', 'data_2', 'data_3'],
+};
+
+function parseReturnValue(returnValue: unknown, circuitId?: string): Record<string, unknown> {
   if (returnValue && typeof returnValue === 'object' && !Array.isArray(returnValue)) {
     return returnValue as Record<string, unknown>;
   }
   if (Array.isArray(returnValue)) {
+    const names = circuitId ? OUTPUT_NAMES[circuitId] : undefined;
     const outputs: Record<string, unknown> = {};
     for (let i = 0; i < returnValue.length; i++) {
-      outputs[`output_${i}`] = String(returnValue[i]);
+      const key = names && i < names.length ? names[i]! : `output_${i}`;
+      outputs[key] = String(returnValue[i]);
     }
     return outputs;
   }

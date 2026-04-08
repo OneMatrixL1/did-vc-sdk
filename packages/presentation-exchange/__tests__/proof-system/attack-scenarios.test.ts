@@ -68,7 +68,7 @@ describe('Attack: tampered DG13 data', () => {
         signature_s: toHexArr(sod.signatureS),
       },
     });
-    const econtentBinding = sodResult.publicOutputs.output_0 as string;
+    const econtentBinding = sodResult.publicOutputs.econtent_binding as string;
 
     const dgMapResult = await zkpProvider.prove({
       circuitId: 'dg-map',
@@ -83,7 +83,7 @@ describe('Attack: tampered DG13 data', () => {
         dg_offset: String(sod.dgOffset),
       },
     });
-    const dgBinding = dgMapResult.publicOutputs.output_0 as string;
+    const dgBinding = dgMapResult.publicOutputs.dg_binding as string;
 
     // Now prove dg13-merklelize with TAMPERED data
     const tamperedDg13 = tampered.dg13CircuitInputs;
@@ -99,7 +99,7 @@ describe('Attack: tampered DG13 data', () => {
     });
 
     // Binding mismatch: tampered DG13 hash != original DG13 hash
-    const tamperedBinding = dg13Result.publicOutputs.output_0 as string;
+    const tamperedBinding = dg13Result.publicOutputs.binding as string;
     expect(tamperedBinding).not.toBe(dgBinding);
   }, 120000);
 });

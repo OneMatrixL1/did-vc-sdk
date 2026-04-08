@@ -381,6 +381,8 @@ export interface SelfSignedCCCD {
   dg13CircuitInputs: DG13CircuitInputs;
   salt: bigint;
   dgHash: Buffer;            // SHA-256(DG13 bytes) for binding verification
+  /** DSC certificate (base64 DER SPKI of the signing key) — for CSCA trust anchor testing. */
+  dscCertificate: string;
 }
 
 export function createSelfSignedCCCD(
@@ -475,6 +477,9 @@ export function createSelfSignedCCCD(
     proof: { dgProfile: 'VN-CCCD-2024' },
   };
 
+  // Export DSC certificate (SPKI DER of the signing key, base64-encoded)
+  const dscCertificate = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+
   return {
     credential,
     dg13Fields,
@@ -483,6 +488,7 @@ export function createSelfSignedCCCD(
     dg13CircuitInputs,
     salt,
     dgHash,
+    dscCertificate,
   };
 }
 
@@ -542,6 +548,29 @@ export const MOTHER_DG13_FIELDS: Record<number, string> = {
 export const parentCCCD = createSelfSignedCCCD(PARENT_DG13_FIELDS);
 export const childCCCD = createSelfSignedCCCD(CHILD_DG13_FIELDS);
 export const motherCCCD = createSelfSignedCCCD(MOTHER_DG13_FIELDS);
+
+/**
+ * Creates a mock verifyDSC callback that trusts the given DSC certificates.
+ * Extracts EC public key (x, y) from SPKI DER and marks as trusted.
+ */
+export function createMockVerifyDSC(trustedDscCerts: string[]) {
+  const trustedSet = new Set(trustedDscCerts);
+  return async (dscCertificate: string) => {
+    const trusted = trustedSet.has(dscCertificate);
+    const spki = Buffer.from(dscCertificate, 'base64');
+    // Parse SPKI to extract EC point: SEQUENCE { SEQUENCE(algId), BIT STRING(04||x||y) }
+    const outer = parseTLV(spki, 0);
+    let pos = outer.valueOffset;
+    const algId = parseTLV(spki, pos);
+    pos += algId.totalLength;
+    const bitStr = parseTLV(spki, pos);
+    // BIT STRING: 00(unused bits) 04(uncompressed) x(48) y(48)
+    const ecPoint = spki.slice(bitStr.valueOffset + 1, bitStr.valueOffset + bitStr.length);
+    const x = Array.from(ecPoint.slice(1, 49));
+    const y = Array.from(ecPoint.slice(49, 97));
+    return { trusted, publicKey: { x, y } };
+  };
+}
 
 // Non-CCCD credential for negative tests
 export const passportCredential: MatchableCredential = {

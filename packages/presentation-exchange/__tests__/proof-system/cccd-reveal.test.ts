@@ -131,8 +131,8 @@ describe('CCCD matcher - real proof system', () => {
       .addDocumentRequest(
         new DocumentRequestBuilder('cccd', 'CCCDCredential')
           .setSchemaType('ICAO9303SOD')
-          .disclose('c1', 'gender')
-          .disclose('c2', 'fullName')
+          .disclose({ field: 'gender', id: 'c1' })
+          .disclose({ field: 'fullName', id: 'c2' })
           .build()
       )
       .build();

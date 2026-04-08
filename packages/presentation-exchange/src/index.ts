@@ -25,6 +25,7 @@ export type {
   CredentialProof,
   DataIntegrityProof,
   ICAO9303ZKPProofBundle,
+  ZKPProofEntry,
   MatchableCredential,
   RuleTreeMatch,
   LogicalRuleMatch,

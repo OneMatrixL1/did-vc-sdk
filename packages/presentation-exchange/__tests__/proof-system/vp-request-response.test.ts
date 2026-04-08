@@ -21,7 +21,7 @@ import type { SchemaProofSystem } from '../../src/types/proof-system.js';
 import type { DocumentRequestMatch } from '../../src/types/matching.js';
 import { isICAOProofBundle } from '../../src/types/icao-proof-bundle.js';
 import type { ICAO9303ZKPProofBundle } from '../../src/types/icao-proof-bundle.js';
-import { motherCCCD } from '../fixtures/cccd-factory.js';
+import { motherCCCD, createMockVerifyDSC } from '../fixtures/cccd-factory.js';
 
 let zkpProvider: ZKPProvider & { destroy(): void };
 let poseidon2: Poseidon2Hasher;
@@ -46,8 +46,8 @@ describe('VP Request -> VP Response', () => {
         new DocumentRequestBuilder('cccd', 'CCCDCredential')
           .setSchemaType('ICAO9303SOD')
           .setName('National ID')
-          .disclose('c1', 'fullName')
-          .disclose('c2', 'gender'),
+          .disclose({ field: 'fullName', id: 'c1' })
+          .disclose({ field: 'gender', id: 'c2' }),
       )
       .build();
 
@@ -59,7 +59,7 @@ describe('VP Request -> VP Response', () => {
     );
     expect(matchResult.satisfied).toBe(true);
 
-    // ===== HOLDER: resolve VP (generates 6 real ZKP proofs) =====
+    // ===== HOLDER: resolve VP (generates 5 real ZKP proofs) =====
     const vp = await resolvePresentation(
       request,
       [cccd.credential],
@@ -72,6 +72,7 @@ describe('VP Request -> VP Response', () => {
           sodInputs: cccd.sodInputs,
           dg13Inputs: cccd.dg13CircuitInputs,
           salt: cccd.salt,
+          dscCertificate: cccd.dscCertificate,
         }),
         signPresentation: async () => ({
           type: 'DataIntegrityProof',
@@ -99,25 +100,34 @@ describe('VP Request -> VP Response', () => {
 
     const bundle = cred.proof as ICAO9303ZKPProofBundle;
 
-    // All 4 proof chain steps present
-    expect(bundle.sodVerify.proofValue.length).toBeGreaterThan(100);
-    expect(bundle.dgMap.proofValue.length).toBeGreaterThan(100);
-    expect(bundle.dg13.proofValue.length).toBeGreaterThan(100);
+    // DSC certificate included in bundle
+    expect(bundle.dscCertificate).toBe(cccd.dscCertificate);
 
-    // 2 field reveals (fullName + gender)
-    expect(bundle.fieldReveals).toHaveLength(2);
-    expect(bundle.fieldReveals[0].conditionID).toBe('c1');
-    expect(bundle.fieldReveals[0].field).toBe('fullName');
-    expect(bundle.fieldReveals[0].proofValue.length).toBeGreaterThan(100);
-    expect(bundle.fieldReveals[1].conditionID).toBe('c2');
-    expect(bundle.fieldReveals[1].field).toBe('gender');
-    expect(bundle.fieldReveals[1].proofValue.length).toBeGreaterThan(100);
+    // Flat array of proofs: 3 chain + 2 reveals = 5
+    expect(bundle.proofs).toHaveLength(5);
+
+    // Chain proofs present
+    const sodVerify = bundle.proofs.find(p => p.circuitId === 'sod-verify')!;
+    const dgMap = bundle.proofs.find(p => p.circuitId === 'dg-map')!;
+    const dg13 = bundle.proofs.find(p => p.circuitId === 'dg13-merklelize')!;
+    expect(sodVerify.proofValue.length).toBeGreaterThan(100);
+    expect(dgMap.proofValue.length).toBeGreaterThan(100);
+    expect(dg13.proofValue.length).toBeGreaterThan(100);
+
+    // 2 field reveals
+    const reveals = bundle.proofs.filter(p => p.circuitId === 'dg13-field-reveal');
+    expect(reveals).toHaveLength(2);
+    expect(reveals[0].conditionID).toBe('c1');
+    expect(reveals[0].proofValue.length).toBeGreaterThan(100);
+    expect(reveals[1].conditionID).toBe('c2');
+    expect(reveals[1].proofValue.length).toBeGreaterThan(100);
 
     // ===== VERIFIER: structural verification =====
     const structural = verifyPresentationStructure(request, vp);
     expect(structural.valid).toBe(true);
 
     // ===== VERIFIER: verify ZKP proof chain =====
+    const verifyDSC = createMockVerifyDSC([cccd.dscCertificate]);
     const verifyResult = await proofSystem.verify(
       cred,
       {
@@ -127,19 +137,22 @@ describe('VP Request -> VP Response', () => {
         ],
         predicates: [],
       },
-      { zkpProvider },
+      { zkpProvider, verifyDSC },
     );
 
     expect(verifyResult.verified).toBe(true);
     expect(verifyResult.errors).toHaveLength(0);
 
     // ===== Binding chain integrity =====
-    // dg13.binding must equal dgMap output (same DG13 hash)
-    expect(bundle.dg13.publicOutputs.output_0).toBe(bundle.dgMap.publicOutputs.output_0);
+    // dg-map econtent_binding must equal sod-verify output
+    expect(dgMap.publicInputs.econtent_binding).toBe(sodVerify.publicOutputs.econtent_binding);
+
+    // dg13 binding must equal dg-map output (same DG13 hash)
+    expect(dg13.publicOutputs.binding).toBe(dgMap.publicOutputs.dg_binding);
 
     // All field reveals use the same commitment from dg13
-    const commitment = bundle.dg13.publicOutputs.output_2;
-    for (const fr of bundle.fieldReveals) {
+    const commitment = dg13.publicOutputs.commitment;
+    for (const fr of reveals) {
       expect(fr.publicInputs.commitment).toBe(commitment);
     }
   }, 600000);

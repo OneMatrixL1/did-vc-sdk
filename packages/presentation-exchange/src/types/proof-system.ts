@@ -15,8 +15,26 @@ export interface ProveContext {
   credentialData?: unknown;
 }
 
+/**
+ * Result of verifying a DSC (Document Signer Certificate) against trusted CSCAs.
+ */
+export interface DSCVerificationResult {
+  /** Whether the DSC is signed by a trusted CSCA. */
+  trusted: boolean;
+  /** Extracted EC public key from the DSC certificate. */
+  publicKey: { x: number[]; y: number[] };
+}
+
 export interface VerifyContext {
   zkpProvider: ZKPProvider;
+
+  /**
+   * Verify that a DSC certificate is trusted (signed by a known CSCA)
+   * and extract its public key for comparison with sod-verify inputs.
+   *
+   * If not provided, CSCA→DSC verification is skipped (unsafe — testing only).
+   */
+  verifyDSC?: (dscCertificate: string) => Promise<DSCVerificationResult>;
 }
 
 // ---------------------------------------------------------------------------

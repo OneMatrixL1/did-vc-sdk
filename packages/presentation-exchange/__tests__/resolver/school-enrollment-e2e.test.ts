@@ -32,15 +32,15 @@ describe('School Enrollment E2E', () => {
         new DocumentRequestBuilder('parent', 'CCCDCredential')
           .setSchemaType('ICAO9303SOD')
           .setName('Parent ID')
-          .disclose('c1', 'fullName')
-          .greaterThan('c2', 'dateOfBirth', { value: '20080209' }),
+          .disclose({ field: 'fullName', id: 'c1' })
+          .greaterThan({ field: 'dateOfBirth', value: '20080209', id: 'c2' }),
       )
       .addDocumentRequest(
         new DocumentRequestBuilder('child', 'CCCDCredential')
           .setSchemaType('ICAO9303SOD')
           .setName('Child ID')
-          .disclose('c3', 'fullName')
-          .disclose('c4', 'dateOfBirth'),
+          .disclose({ field: 'fullName', id: 'c3' })
+          .disclose({ field: 'dateOfBirth', id: 'c4' }),
       )
       .build();
 

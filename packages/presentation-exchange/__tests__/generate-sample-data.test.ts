@@ -20,7 +20,7 @@ import type { ZKPProvider, Poseidon2Hasher } from '@1matrix/zkp-provider';
 import type { SchemaProofSystem } from '../src/types/proof-system.js';
 import { motherCCCD } from './fixtures/cccd-factory.js';
 
-const DOCS_DIR = path.resolve(__dirname, '../../../docs/samples');
+const DOCS_DIR = path.resolve(__dirname, '../docs/samples');
 
 let zkpProvider: ZKPProvider & { destroy(): void };
 let poseidon2: Poseidon2Hasher;

@@ -538,17 +538,55 @@ async function verifyICAOBundle(
   const discloseByID = new Map(conditions.disclose.map((d) => [d.conditionID, d]));
   const predicateByID = new Map(conditions.predicates.map((p) => [p.conditionID, p]));
 
-  // --- 3. Verify condition-linked proofs chain to commitment ---
+  // --- 3. Verify condition-linked proofs: commitment, circuitId, tag_id, params ---
   const conditionProofs = proofs.filter((p) => p.conditionID !== undefined);
   for (const entry of conditionProofs) {
+    const cid = entry.conditionID!;
+
+    // 3a. Commitment must match dg13-merklelize output
     if (commitment !== undefined && entry.publicInputs.commitment !== commitment) {
-      errors.push(`Proof "${entry.conditionID}" commitment mismatch`);
+      errors.push(`Proof "${cid}" commitment mismatch`);
       continue;
     }
 
-    const disclose = discloseByID.get(entry.conditionID!);
+    const disclose = discloseByID.get(cid);
+    const predicate = predicateByID.get(cid);
+
     if (disclose) {
+      // 3b. Circuit must be dg13-field-reveal
+      if (entry.circuitId !== 'dg13-field-reveal') {
+        errors.push(`Proof "${cid}" expected circuitId "dg13-field-reveal", got "${entry.circuitId}"`);
+        continue;
+      }
+      // 3c. tag_id must match the requested field
+      const expectedTagId = toHex(BigInt(fieldIdToTagId(disclose.field)));
+      if (entry.publicInputs.tag_id !== expectedTagId) {
+        errors.push(`Proof "${cid}" tag_id mismatch: expected ${expectedTagId} for field "${disclose.field}", got ${entry.publicInputs.tag_id}`);
+        continue;
+      }
       disclosedFields[disclose.field] = decodeFieldRevealOutputs(entry.publicOutputs);
+    } else if (predicate) {
+      // 3b. Circuit must match the operator
+      const expectedCircuit = PREDICATE_CIRCUIT_MAP[predicate.operator];
+      if (entry.circuitId !== expectedCircuit) {
+        errors.push(`Proof "${cid}" expected circuitId "${expectedCircuit}", got "${entry.circuitId}"`);
+        continue;
+      }
+      // 3c. tag_id must match the requested field
+      const expectedTagId = toHex(BigInt(fieldIdToTagId(predicate.field)));
+      if (entry.publicInputs.tag_id !== expectedTagId) {
+        errors.push(`Proof "${cid}" tag_id mismatch: expected ${expectedTagId} for field "${predicate.field}", got ${entry.publicInputs.tag_id}`);
+        continue;
+      }
+      // 3d. Predicate params must match the request
+      const expectedParams = flattenPredicateParams(predicate);
+      for (const [key, value] of Object.entries(expectedParams)) {
+        if (String(entry.publicInputs[key]) !== String(value)) {
+          errors.push(`Proof "${cid}" param "${key}" mismatch: expected ${value}, got ${entry.publicInputs[key]}`);
+        }
+      }
+    } else {
+      errors.push(`Proof "${cid}" does not match any requested condition`);
     }
   }
 

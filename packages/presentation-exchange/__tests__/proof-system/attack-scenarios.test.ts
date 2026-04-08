@@ -20,13 +20,18 @@ import {
   buildMerkleLeaves,
 } from '../fixtures/cccd-factory.js';
 import { fieldIdToTagId } from '../../src/resolvers/zkp-field-mapping.js';
+import { createICAO9303ProofSystem } from '../../src/proof-system/icao9303-proof-system.js';
+import type { ICAO9303ZKPProofBundle, ZKPProofEntry } from '../../src/types/icao-proof-bundle.js';
+import type { SchemaProofSystem } from '../../src/types/proof-system.js';
 
 let poseidon2: Poseidon2Hasher;
 let zkpProvider: ZKPProvider & { destroy(): void };
+let proofSystem: SchemaProofSystem;
 
 beforeAll(async () => {
   poseidon2 = await createPoseidon2Hasher();
   zkpProvider = await createWasmZKPProvider();
+  proofSystem = createICAO9303ProofSystem({ poseidon2, buildMerkleTree });
 }, 60000);
 
 const toHex = (v: bigint | number) => '0x' + BigInt(v).toString(16);
@@ -341,5 +346,93 @@ describe('Attack: tampered eContent', () => {
         },
       }),
     ).rejects.toThrow();
+  }, 120000);
+});
+
+// -----------------------------------------------------------------------
+// Verifier-level attacks: parameter forgery on valid ZKP proofs
+// These test the verifier's input validation, not the circuit math.
+// -----------------------------------------------------------------------
+
+/**
+ * Helper: build a real VP credential through the ICAO pipeline, then
+ * tamper with the bundle before verification to test the verifier's checks.
+ */
+async function buildRealBundle() {
+  const cccd = motherCCCD;
+  const conditions = {
+    disclose: [
+      { type: 'DocumentCondition' as const, conditionID: 'c1', field: 'fullName', operator: 'disclose' as const },
+      { type: 'DocumentCondition' as const, conditionID: 'c2', field: 'gender', operator: 'disclose' as const },
+    ],
+    predicates: [] as Array<{ type: 'DocumentCondition'; conditionID: string; field: string; operator: string; params: Record<string, unknown>; optional?: boolean }>,
+  };
+  const cred = await proofSystem.prove(cccd.credential, conditions, {
+    zkpProvider,
+    credentialData: {
+      sodInputs: cccd.sodInputs,
+      dg13Inputs: cccd.dg13CircuitInputs,
+      salt: cccd.salt,
+    },
+  });
+  const bundle = cred.proof as ICAO9303ZKPProofBundle;
+  return { bundle, conditions };
+}
+
+describe('Attack: parameter forgery at verifier level', () => {
+  it('rejects circuit substitution — wrong circuitId for disclose', async () => {
+    const { bundle, conditions } = await buildRealBundle();
+
+    // Tamper: change circuitId of a field-reveal to a predicate circuit
+    const tampered = structuredClone(bundle);
+    const reveal = tampered.proofs.find((p: ZKPProofEntry) => p.conditionID === 'c1')!;
+    reveal.circuitId = 'date-greaterthan';
+
+    const result = await proofSystem.verify(
+      { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: tampered },
+      conditions,
+      { zkpProvider },
+    );
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => e.includes('expected circuitId "dg13-field-reveal"'))).toBe(true);
+  }, 120000);
+
+  it('rejects tag_id substitution — wrong field revealed', async () => {
+    const { bundle, conditions } = await buildRealBundle();
+
+    // Tamper: swap tag_id of fullName reveal to gender's tag_id
+    const tampered = structuredClone(bundle);
+    const reveal = tampered.proofs.find((p: ZKPProofEntry) => p.conditionID === 'c1')!;
+    reveal.publicInputs.tag_id = '0x' + BigInt(fieldIdToTagId('gender')).toString(16);
+
+    const result = await proofSystem.verify(
+      { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: tampered },
+      conditions,
+      { zkpProvider },
+    );
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => e.includes('tag_id mismatch'))).toBe(true);
+  }, 120000);
+
+  it('rejects unrecognized conditionID — proof for non-requested condition', async () => {
+    const { bundle, conditions } = await buildRealBundle();
+
+    // Tamper: add a fake proof with unknown conditionID
+    const tampered = structuredClone(bundle);
+    tampered.proofs.push({
+      circuitId: 'dg13-field-reveal',
+      proofValue: tampered.proofs[3]!.proofValue,
+      publicInputs: { ...tampered.proofs[3]!.publicInputs },
+      publicOutputs: { ...tampered.proofs[3]!.publicOutputs },
+      conditionID: 'fake-condition',
+    });
+
+    const result = await proofSystem.verify(
+      { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: tampered },
+      conditions,
+      { zkpProvider },
+    );
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => e.includes('does not match any requested condition'))).toBe(true);
   }, 120000);
 });

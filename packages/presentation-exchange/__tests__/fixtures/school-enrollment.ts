@@ -1,5 +1,16 @@
 import type { VPRequest } from '../../src/types/request.js';
-import type { MatchableCredential } from '../../src/types/credential.js';
+import {
+  parentCCCD,
+  childCCCD,
+  incompleteCCCD,
+  passportCredential as passportCred,
+} from './cccd-factory.js';
+
+// Re-export credentials from factory
+export const parentCredential = parentCCCD.credential;
+export const childCredential = childCCCD.credential;
+export const passportCredential = passportCred;
+export const incompleteCredential = incompleteCCCD.credential;
 
 /**
  * School enrollment example from the protocol spec.
@@ -65,49 +76,4 @@ export const schoolEnrollmentRequest: VPRequest = {
       },
     ],
   },
-};
-
-/** Parent credential — has fullName + dateOfBirth (ICAO DG13 format) */
-export const parentCredential: MatchableCredential = {
-  type: ['VerifiableCredential', 'CCCDCredential'],
-  issuer: 'did:web:cccd.gov.vn',
-  credentialSubject: {
-    fullName: 'Nguyen Van A',
-    dateOfBirth: '15/03/1985',
-    documentNumber: '012345678901',
-  },
-  proof: { dgProfile: 'VN-CCCD-2024' },
-};
-
-/** Child credential — has fullName + dateOfBirth */
-export const childCredential: MatchableCredential = {
-  type: ['VerifiableCredential', 'CCCDCredential'],
-  issuer: 'did:web:cccd.gov.vn',
-  credentialSubject: {
-    fullName: 'Nguyen Van C',
-    dateOfBirth: '15/06/2015',
-    documentNumber: '098765432109',
-  },
-  proof: { dgProfile: 'VN-CCCD-2024' },
-};
-
-/** Passport credential — should NOT match CCCDCredential requests */
-export const passportCredential: MatchableCredential = {
-  type: ['VerifiableCredential', 'PassportCredential'],
-  issuer: 'did:web:passport.gov.vn',
-  credentialSubject: {
-    fullName: 'Nguyen Van B',
-    dateOfBirth: '01/01/1990',
-    passportNumber: 'B1234567',
-  },
-};
-
-/** Incomplete credential — missing dateOfBirth */
-export const incompleteCredential: MatchableCredential = {
-  type: ['VerifiableCredential', 'CCCDCredential'],
-  issuer: 'did:web:cccd.gov.vn',
-  credentialSubject: {
-    fullName: 'Tran Thi D',
-  },
-  proof: { dgProfile: 'VN-CCCD-2024' },
 };

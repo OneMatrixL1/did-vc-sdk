@@ -8,30 +8,7 @@ import { createICAO9303ProofSystem } from '../../src/proof-system/icao9303-proof
 import { createPoseidon2Hasher, buildMerkleTree } from '@1matrix/zkp-provider';
 import type { SchemaProofSystem } from '../../src/types/proof-system.js';
 import type { DocumentRequestMatch, LogicalRuleMatch } from '../../src/types/matching.js';
-import type { MatchableCredential } from '../../src/types/credential.js';
-
-// Credentials with plain fields (not raw DG bytes — tests matching + structural flow)
-const parentCredential: MatchableCredential = {
-  type: ['VerifiableCredential', 'CCCDCredential'],
-  issuer: 'did:web:cccd.gov.vn',
-  credentialSubject: {
-    fullName: 'Nguyen Van A',
-    dateOfBirth: '15/03/1985',
-    documentNumber: '012345678901',
-  },
-  proof: { dgProfile: 'VN-CCCD-2024' },
-};
-
-const childCredential: MatchableCredential = {
-  type: ['VerifiableCredential', 'CCCDCredential'],
-  issuer: 'did:web:cccd.gov.vn',
-  credentialSubject: {
-    fullName: 'Nguyen Van C',
-    dateOfBirth: '15/06/2015',
-    documentNumber: '098765432109',
-  },
-  proof: { dgProfile: 'VN-CCCD-2024' },
-};
+import { parentCCCD, childCCCD } from '../fixtures/cccd-factory.js';
 
 let proofSystem: SchemaProofSystem;
 
@@ -41,7 +18,7 @@ beforeAll(async () => {
 }, 60000);
 
 describe('School Enrollment E2E', () => {
-  it('builds request → matches → resolves VP → verifies structure', async () => {
+  it('builds request -> matches -> resolves VP -> verifies structure', async () => {
     // 1. Build request
     const request = new VPRequestBuilder('req-e2e', 'test-nonce')
       .setName('School Enrollment')
@@ -71,7 +48,7 @@ describe('School Enrollment E2E', () => {
     expect(request.rules.type).toBe('Logical');
 
     // 2. Match credentials using real proof system
-    const credentials = [parentCredential, childCredential];
+    const credentials = [parentCCCD.credential, childCCCD.credential];
     const matchResult = matchCredentials(request.rules, credentials, {
       'ICAO9303SOD': proofSystem,
     });
@@ -109,7 +86,7 @@ describe('School Enrollment E2E', () => {
 
     const vp = await resolvePresentation(
       request,
-      [parentCredential],
+      [parentCCCD.credential],
       [{ docRequestID: 'doc1', credentialIndex: 0 }],
       {
         holder: 'did:key:z6MkTest',

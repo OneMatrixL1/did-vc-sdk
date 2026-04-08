@@ -5,10 +5,10 @@ import { DocumentRequestBuilder } from '../../src/builder/document-request-build
 import { VPRequestBuilder } from '../../src/builder/request-builder.js';
 import type { DocumentRequestMatch } from '../../src/types/matching.js';
 import {
-  parentCredential,
-  incompleteCredential,
+  parentCCCD,
+  incompleteCCCD,
   passportCredential,
-} from '../fixtures/school-enrollment.js';
+} from '../fixtures/cccd-factory.js';
 
 describe('disclosureMode: full', () => {
   const fullRequest = new DocumentRequestBuilder('natid', 'CCCDCredential')
@@ -17,7 +17,7 @@ describe('disclosureMode: full', () => {
     .build();
 
   it('marks any type-matching credential as fullyQualified regardless of fields', () => {
-    const result = matchCredentials(fullRequest, [incompleteCredential]);
+    const result = matchCredentials(fullRequest, [incompleteCCCD.credential]);
     const match = result as DocumentRequestMatch;
 
     expect(match.satisfied).toBe(true);
@@ -45,7 +45,7 @@ describe('disclosureMode: full', () => {
 
     const vp = await resolvePresentation(
       request,
-      [parentCredential],
+      [parentCCCD.credential],
       [{ docRequestID: 'natid', credentialIndex: 0 }],
       {
         holder: 'did:key:z6MkTest',

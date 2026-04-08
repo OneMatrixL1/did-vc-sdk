@@ -139,12 +139,21 @@ function parseReturnValue(returnValue: unknown): Record<string, unknown> {
   return {};
 }
 
+function flattenValues(obj: Record<string, unknown>): string[] {
+  const result: string[] = [];
+  for (const value of Object.values(obj)) {
+    if (Array.isArray(value)) {
+      result.push(...value.map(String));
+    } else {
+      result.push(String(value));
+    }
+  }
+  return result;
+}
+
 function toPublicInputsArray(
   inputs: Record<string, unknown>,
   outputs: Record<string, unknown>,
 ): string[] {
-  return [
-    ...Object.values(inputs).map(String),
-    ...Object.values(outputs).map(String),
-  ];
+  return [...flattenValues(inputs), ...flattenValues(outputs)];
 }

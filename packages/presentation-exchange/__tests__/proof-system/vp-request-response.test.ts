@@ -102,8 +102,8 @@ describe('VP Request -> VP Response', () => {
     // DSC certificate included in bundle
     expect(bundle.dscCertificate).toBe(cccd.dscCertificate);
 
-    // Flat array of proofs: 3 chain + 2 reveals = 5
-    expect(bundle.proofs).toHaveLength(5);
+    // 3 ZKP chain proofs (no field-reveal ZKPs — disclosures are raw Merkle)
+    expect(bundle.proofs).toHaveLength(3);
 
     // Chain proofs present
     const sodVerify = bundle.proofs.find(p => p.circuitId === 'sod-verify')!;
@@ -113,13 +113,12 @@ describe('VP Request -> VP Response', () => {
     expect(dgMap.proofValue.length).toBeGreaterThan(100);
     expect(dg13.proofValue.length).toBeGreaterThan(100);
 
-    // 2 field reveals
-    const reveals = bundle.proofs.filter(p => p.circuitId === 'dg13-field-reveal');
-    expect(reveals).toHaveLength(2);
-    expect(reveals[0].conditionID).toBe('c1');
-    expect(reveals[0].proofValue.length).toBeGreaterThan(100);
-    expect(reveals[1].conditionID).toBe('c2');
-    expect(reveals[1].proofValue.length).toBeGreaterThan(100);
+    // 2 Merkle disclosures (raw Merkle proofs, no ZKP)
+    expect(bundle.disclosures).toHaveLength(2);
+    expect(bundle.disclosures![0].conditionID).toBe('c1');
+    expect(bundle.disclosures![0].siblings).toHaveLength(5);
+    expect(bundle.disclosures![1].conditionID).toBe('c2');
+    expect(bundle.disclosures![1].siblings).toHaveLength(5);
 
     // ===== VERIFIER: structural verification =====
     const structural = verifyPresentationStructure(request, vp);
@@ -149,10 +148,8 @@ describe('VP Request -> VP Response', () => {
     // dg13 binding must equal dg-map output (same DG13 hash)
     expect(dg13.publicOutputs.binding).toBe(dgMap.publicOutputs.dg_binding);
 
-    // All field reveals use the same commitment from dg13
-    const commitment = dg13.publicOutputs.commitment;
-    for (const fr of reveals) {
-      expect(fr.publicInputs.commitment).toBe(commitment);
-    }
+    // ===== Disclosed values decoded correctly =====
+    expect(verifyResult.disclosedFields.fullName).toBe('Nguyen Thi B');
+    expect(verifyResult.disclosedFields.gender).toBe('Nu');
   }, 600000);
 });

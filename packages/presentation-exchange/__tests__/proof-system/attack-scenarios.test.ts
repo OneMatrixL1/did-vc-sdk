@@ -384,30 +384,13 @@ async function buildRealBundle() {
 }
 
 describe('Attack: parameter forgery at verifier level', () => {
-  it('rejects circuit substitution — wrong circuitId for disclose', async () => {
+  it('rejects tag_id substitution in disclosure — wrong field revealed', async () => {
     const { bundle, conditions } = await buildRealBundle();
 
-    // Tamper: change circuitId of a field-reveal to a predicate circuit
+    // Tamper: swap tag_id of fullName disclosure to gender's tag_id
     const tampered = structuredClone(bundle);
-    const reveal = tampered.proofs.find((p: ZKPProofEntry) => p.conditionID === 'c1')!;
-    reveal.circuitId = 'date-greaterthan';
-
-    const result = await proofSystem.verify(
-      { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: tampered },
-      conditions,
-      { zkpProvider, nonce: TEST_NONCE, holder: TEST_HOLDER },
-    );
-    expect(result.verified).toBe(false);
-    expect(result.errors.some(e => e.includes('expected circuitId "dg13-field-reveal"'))).toBe(true);
-  }, 120000);
-
-  it('rejects tag_id substitution — wrong field revealed', async () => {
-    const { bundle, conditions } = await buildRealBundle();
-
-    // Tamper: swap tag_id of fullName reveal to gender's tag_id
-    const tampered = structuredClone(bundle);
-    const reveal = tampered.proofs.find((p: ZKPProofEntry) => p.conditionID === 'c1')!;
-    reveal.publicInputs.tag_id = '0x' + BigInt(fieldIdToTagId('gender')).toString(16);
+    const disc = tampered.disclosures!.find((d: { conditionID: string }) => d.conditionID === 'c1')!;
+    disc.tagId = '0x' + BigInt(fieldIdToTagId('gender')).toString(16);
 
     const result = await proofSystem.verify(
       { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: tampered },
@@ -418,16 +401,30 @@ describe('Attack: parameter forgery at verifier level', () => {
     expect(result.errors.some(e => e.includes('tag_id mismatch'))).toBe(true);
   }, 120000);
 
-  it('rejects unrecognized conditionID — proof for non-requested condition', async () => {
+  it('rejects tampered disclosure data — Merkle proof fails', async () => {
     const { bundle, conditions } = await buildRealBundle();
 
-    // Tamper: add a fake proof with unknown conditionID
+    // Tamper: change the disclosed data
     const tampered = structuredClone(bundle);
-    tampered.proofs.push({
-      circuitId: 'dg13-field-reveal',
-      proofValue: tampered.proofs[3]!.proofValue,
-      publicInputs: { ...tampered.proofs[3]!.publicInputs },
-      publicOutputs: { ...tampered.proofs[3]!.publicOutputs },
+    const disc = tampered.disclosures!.find((d: { conditionID: string }) => d.conditionID === 'c1')!;
+    disc.data[0] = '0xdeadbeef';
+
+    const result = await proofSystem.verify(
+      { type: ['VerifiableCredential', 'CCCDCredential'], issuer: 'did:web:cccd.gov.vn', credentialSubject: {}, proof: tampered },
+      conditions,
+      { zkpProvider, nonce: TEST_NONCE, holder: TEST_HOLDER },
+    );
+    expect(result.verified).toBe(false);
+    expect(result.errors.some(e => e.includes('Merkle proof invalid'))).toBe(true);
+  }, 120000);
+
+  it('rejects unrecognized conditionID in disclosure', async () => {
+    const { bundle, conditions } = await buildRealBundle();
+
+    // Tamper: add a fake disclosure with unknown conditionID
+    const tampered = structuredClone(bundle);
+    tampered.disclosures!.push({
+      ...tampered.disclosures![0],
       conditionID: 'fake-condition',
     });
 

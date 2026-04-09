@@ -54,6 +54,7 @@ export type {
   ICAO9303ZKPProofBundle as ICAOProofBundle,
   ICAO9303ZKPProofBundle,
   ZKPProofEntry,
+  MerkleDisclosure,
 } from './icao-proof-bundle.js';
 export { isICAOProofBundle } from './icao-proof-bundle.js';
 export { isPredicateCondition } from './condition.js';

@@ -12,7 +12,7 @@ import type { MatchableCredential, PresentedCredential } from '../types/credenti
 import type { DiscloseCondition } from '../types/request.js';
 import type { PredicateCondition } from '../types/condition.js';
 import type { SchemaProofSystem, ProveContext, VerifyContext, ProofVerificationResult, DSCVerificationResult } from '../types/proof-system.js';
-import type { ICAO9303ZKPProofBundle, ZKPProofEntry } from '../types/icao-proof-bundle.js';
+import type { ICAO9303ZKPProofBundle, ZKPProofEntry, MerkleDisclosure } from '../types/icao-proof-bundle.js';
 import { isICAOProofBundle } from '../types/icao-proof-bundle.js';
 import type { ZKPProvider } from '../types/zkp-provider.js';
 import type { Poseidon2Hasher } from '../types/zkp-provider.js';
@@ -160,7 +160,7 @@ export function createICAO9303ProofSystem(
       const expectedSalt = (context.nonce && context.holder)
         ? saltDeriver(context.nonce, context.holder)
         : undefined;
-      return verifyICAOBundle(proof, conditions, context.zkpProvider, context.verifyDSC, expectedSalt);
+      return verifyICAOBundle(proof, conditions, context.zkpProvider, context.verifyDSC, expectedSalt, opts?.poseidon2);
     },
   };
 }
@@ -311,41 +311,9 @@ function buildICAOPipeline(
     },
   ];
 
-  // Step 5+: Field reveals
-  for (const d of conditions.disclose) {
-    if (!isDg13Field(d.field)) continue;
+  // Disclosures are handled as raw Merkle proofs in packageAsCredential (no ZKP needed).
 
-    steps.push({
-      kind: 'prove',
-      label: `reveal-${d.field}`,
-      circuitId: 'dg13-field-reveal',
-      buildInputs(state) {
-        const tree = state.bag.get('tree') as { getSiblings(i: number): bigint[] };
-        const fields = state.bag.get('fields') as Array<{ tagId: number; length: number; packedFields: bigint[]; packedHash: bigint }>;
-        const salt = state.bag.get('salt') as bigint;
-        const leafIndex = fieldIdToLeafIndex(d.field);
-        const field = fields[leafIndex]!;
-
-        return {
-          privateInputs: {
-            siblings: tree.getSiblings(leafIndex).map(toHex),
-            length: toHex(BigInt(field.length)),
-            data: field.packedFields.map(toHex),
-            packed_hash: toHex(field.packedHash),
-          },
-          publicInputs: {
-            commitment: state.bag.get('commitment'),
-            salt: toHex(salt),
-            tag_id: toHex(BigInt(fieldIdToTagId(d.field))),
-          },
-        };
-      },
-      processOutputs() {},
-      satisfies: [d.conditionID],
-    });
-  }
-
-  // Step N+: Predicate proofs
+  // Step 5+: Predicate proofs (ZKP required — value stays hidden)
   for (const p of conditions.predicates) {
     if (p.operator === 'equals' && 'ref' in p.params) continue;
 
@@ -451,18 +419,26 @@ function packageAsCredential(
     });
   }
 
-  // Field reveals
-  for (const d of conditions.disclose) {
-    const p = state.proofs.find((pr) => pr.satisfies.includes(d.conditionID));
-    if (!p) continue;
+  // Merkle disclosures (raw Merkle proof — no ZKP)
+  const disclosures: MerkleDisclosure[] = [];
+  const tree = state.bag.get('tree') as { getSiblings(i: number): bigint[] } | undefined;
+  const fields = state.bag.get('fields') as Array<{ tagId: number; length: number; packedFields: bigint[]; packedHash: bigint }> | undefined;
 
-    proofs.push({
-      circuitId: 'dg13-field-reveal',
-      proofValue: p.proofValue,
-      publicInputs: p.publicInputs,
-      publicOutputs: p.publicOutputs,
-      conditionID: d.conditionID,
-    });
+  if (tree && fields) {
+    for (const d of conditions.disclose) {
+      if (!isDg13Field(d.field)) continue;
+      const leafIndex = fieldIdToLeafIndex(d.field);
+      const field = fields[leafIndex]!;
+
+      disclosures.push({
+        conditionID: d.conditionID,
+        tagId: toHex(BigInt(fieldIdToTagId(d.field))),
+        length: toHex(BigInt(field.length)),
+        data: field.packedFields.map(toHex) as [string, string, string, string],
+        packedHash: toHex(field.packedHash),
+        siblings: tree.getSiblings(leafIndex).map(toHex),
+      });
+    }
   }
 
   // Predicates
@@ -482,6 +458,7 @@ function packageAsCredential(
   const bundle: ICAO9303ZKPProofBundle = {
     type: 'ICAO9303ZKPProofBundle',
     proofs,
+    ...(disclosures.length > 0 ? { disclosures } : {}),
     ...(dscCertificate ? { dscCertificate } : {}),
   };
 
@@ -516,6 +493,7 @@ async function verifyICAOBundle(
   zkpProvider: ZKPProvider,
   verifyDSC?: (dscCertificate: string) => Promise<DSCVerificationResult>,
   expectedSalt?: bigint,
+  poseidon2?: Poseidon2Hasher,
 ): Promise<ProofVerificationResult> {
   const errors: string[] = [];
   const disclosedFields: Record<string, string> = {};
@@ -595,62 +573,85 @@ async function verifyICAOBundle(
   const discloseByID = new Map(conditions.disclose.map((d) => [d.conditionID, d]));
   const predicateByID = new Map(conditions.predicates.map((p) => [p.conditionID, p]));
 
-  // --- 3. Verify condition-linked proofs: commitment, circuitId, tag_id, params ---
+  // --- 3. Verify Merkle disclosures (raw Poseidon2 path — no ZKP) ---
+  const disclosureList = bundle.disclosures ?? [];
+  const disclosedConditionIDs = new Set<string>();
+
+  if (poseidon2 && commitment !== undefined) {
+    const saltHex = expectedSalt !== undefined ? toHex(expectedSalt)
+      : (sodVerify.publicInputs.salt as string | undefined);
+
+    for (const disc of disclosureList) {
+      const disclose = discloseByID.get(disc.conditionID);
+      if (!disclose) {
+        errors.push(`Disclosure "${disc.conditionID}" does not match any requested condition`);
+        continue;
+      }
+
+      // 3a. tag_id must match the requested field
+      const expectedTagId = toHex(BigInt(fieldIdToTagId(disclose.field)));
+      if (disc.tagId !== expectedTagId) {
+        errors.push(`Disclosure "${disc.conditionID}" tag_id mismatch: expected ${expectedTagId}, got ${disc.tagId}`);
+        continue;
+      }
+
+      // 3b. Verify Merkle inclusion: recompute leaf → walk path → check commitment
+      const valid = verifyMerklePath(poseidon2, disc, commitment as string, saltHex as string);
+      if (!valid) {
+        errors.push(`Disclosure "${disc.conditionID}" Merkle proof invalid`);
+        continue;
+      }
+
+      disclosedConditionIDs.add(disc.conditionID);
+      disclosedFields[disclose.field] = decodeMerkleDisclosure(disc);
+    }
+  } else if (disclosureList.length > 0 && !poseidon2) {
+    errors.push('Merkle disclosures present but poseidon2 hasher not available for verification');
+  }
+
+  // --- 4. Verify condition-linked ZKP proofs: commitment, circuitId, tag_id, params ---
   const conditionProofs = proofs.filter((p) => p.conditionID !== undefined);
   for (const entry of conditionProofs) {
     const cid = entry.conditionID!;
 
-    // 3a. Commitment must match dg13-merklelize output
+    // 4a. Commitment must match dg13-merklelize output
     if (commitment !== undefined && entry.publicInputs.commitment !== commitment) {
       errors.push(`Proof "${cid}" commitment mismatch`);
       continue;
     }
 
-    const disclose = discloseByID.get(cid);
     const predicate = predicateByID.get(cid);
 
-    if (disclose) {
-      // 3b. Circuit must be dg13-field-reveal
-      if (entry.circuitId !== 'dg13-field-reveal') {
-        errors.push(`Proof "${cid}" expected circuitId "dg13-field-reveal", got "${entry.circuitId}"`);
-        continue;
-      }
-      // 3c. tag_id must match the requested field
-      const expectedTagId = toHex(BigInt(fieldIdToTagId(disclose.field)));
-      if (entry.publicInputs.tag_id !== expectedTagId) {
-        errors.push(`Proof "${cid}" tag_id mismatch: expected ${expectedTagId} for field "${disclose.field}", got ${entry.publicInputs.tag_id}`);
-        continue;
-      }
-      disclosedFields[disclose.field] = decodeFieldRevealOutputs(entry.publicOutputs);
-    } else if (predicate) {
-      // 3b. Circuit must match the operator
+    if (predicate) {
+      // 4b. Circuit must match the operator
       const expectedCircuit = PREDICATE_CIRCUIT_MAP[predicate.operator];
       if (entry.circuitId !== expectedCircuit) {
         errors.push(`Proof "${cid}" expected circuitId "${expectedCircuit}", got "${entry.circuitId}"`);
         continue;
       }
-      // 3c. tag_id must match the requested field
+      // 4c. tag_id must match the requested field
       const expectedTagId = toHex(BigInt(fieldIdToTagId(predicate.field)));
       if (entry.publicInputs.tag_id !== expectedTagId) {
         errors.push(`Proof "${cid}" tag_id mismatch: expected ${expectedTagId} for field "${predicate.field}", got ${entry.publicInputs.tag_id}`);
         continue;
       }
-      // 3d. Predicate params must match the request
+      // 4d. Predicate params must match the request
       const expectedParams = flattenPredicateParams(predicate);
       for (const [key, value] of Object.entries(expectedParams)) {
         if (String(entry.publicInputs[key]) !== String(value)) {
           errors.push(`Proof "${cid}" param "${key}" mismatch: expected ${value}, got ${entry.publicInputs[key]}`);
         }
       }
-    } else {
+    } else if (!discloseByID.has(cid)) {
+      // Unknown conditionID that's neither a predicate nor a disclosure
       errors.push(`Proof "${cid}" does not match any requested condition`);
     }
   }
 
-  // --- 4. Check all required conditions are covered ---
+  // --- 5. Check all required conditions are covered ---
   for (const d of conditions.disclose) {
-    if (!conditionProofs.some((p) => p.conditionID === d.conditionID)) {
-      if (!d.optional) errors.push(`Missing proof for "${d.conditionID}"`);
+    if (!disclosedConditionIDs.has(d.conditionID)) {
+      if (!d.optional) errors.push(`Missing disclosure for "${d.conditionID}"`);
     }
   }
 
@@ -713,6 +714,56 @@ function decodeFieldRevealOutputs(outputs: Record<string, unknown>): string {
   }
 
   return new TextDecoder().decode(new Uint8Array(bytes.slice(0, length)));
+}
+
+/**
+ * Verify a raw Merkle disclosure: recompute leaf → walk path → check commitment.
+ */
+function verifyMerklePath(
+  poseidon2: Poseidon2Hasher,
+  disc: MerkleDisclosure,
+  commitment: string,
+  salt: string,
+): boolean {
+  const tagId = BigInt(disc.tagId);
+  const length = BigInt(disc.length);
+  const data = disc.data.map(BigInt);
+  const packedHash = BigInt(disc.packedHash);
+  const saltBig = BigInt(salt);
+
+  // 1. Compute leaf hash (same formula as dg13-merklelize circuit)
+  const leaf = poseidon2.hash(
+    [tagId, length, data[0]!, data[1]!, data[2]!, data[3]!, saltBig, packedHash],
+    8,
+  );
+
+  // 2. Walk Merkle path
+  const leafIndex = Number(tagId) - 1;
+  let current = leaf;
+  for (let level = 0; level < disc.siblings.length; level++) {
+    const sibling = BigInt(disc.siblings[level]!);
+    const bit = (leafIndex >> level) & 1;
+    current = bit === 0
+      ? poseidon2.hash([current, sibling], 2)
+      : poseidon2.hash([sibling, current], 2);
+  }
+
+  // 3. Check commitment = Poseidon2(root, salt)
+  const computedCommitment = poseidon2.hash([current, saltBig], 2);
+  return BigInt(commitment) === computedCommitment;
+}
+
+/**
+ * Decode a MerkleDisclosure's packed data into a UTF-8 string.
+ */
+function decodeMerkleDisclosure(disc: MerkleDisclosure): string {
+  return decodeFieldRevealOutputs({
+    length: disc.length,
+    data_0: disc.data[0],
+    data_1: disc.data[1],
+    data_2: disc.data[2],
+    data_3: disc.data[3],
+  });
 }
 
 function arraysEqual(a: number[], b: number[]): boolean {

@@ -9,7 +9,7 @@
   "verifier": "did:web:bank.vn",
   "verifierName": "Vietnam International Bank",
   "verifierUrl": "https://bank.vn",
-  "createdAt": "2026-04-08T08:13:30.345Z",
+  "createdAt": "2026-04-08T10:38:01.001Z",
   "expiresAt": "2099-12-31T23:59:59Z",
   "rules": {
     "type": "DocumentRequest",

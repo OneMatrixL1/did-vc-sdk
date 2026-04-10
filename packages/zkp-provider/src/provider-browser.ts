@@ -1,13 +1,7 @@
 /**
- * Production ZKPProvider using @aztec/bb.js UltraHonkBackend + @noir-lang/noir_js.
- *
- * Circuits are bundled in this package (circuits/*.json + circuits/*.vk).
- * Each circuit backend is initialized lazily on first use.
- *
- * Uses @aztec/bb.js and @noir-lang/noir_js as direct dependencies.
+ * Browser-compatible ZKPProvider — no fs imports.
+ * Circuits MUST be passed via config.circuits (preloaded via fetch).
  */
-
-import { loadCircuit, type CircuitArtifact } from './circuits.js';
 
 export interface ZKPProveParams {
   circuitId: string;
@@ -33,7 +27,7 @@ export interface ZKPProvider {
 }
 
 export interface WasmProviderConfig {
-  circuits?: Record<string, CircuitArtifact>;
+  circuits?: Record<string, unknown>;
   threads?: number;
 }
 
@@ -48,21 +42,27 @@ interface BackendEntry {
   };
 }
 
-export async function createWasmZKPProvider(config?: WasmProviderConfig): Promise<ZKPProvider & { destroy(): void }> {
+export async function createWasmZKPProviderBrowser(config?: WasmProviderConfig): Promise<ZKPProvider & { destroy(): void }> {
   const { Barretenberg, UltraHonkBackend } = await import('@aztec/bb.js');
   const { Noir } = await import('@noir-lang/noir_js');
 
   const externalCircuits = config?.circuits ?? {};
   const backends = new Map<string, BackendEntry>();
 
-  // bb.js 4.x: shared Barretenberg API instance (auto-detects backend)
+  // bb.js 4.x: shared Barretenberg API instance (auto-detects Wasm/WasmWorker)
   const api = await Barretenberg.new();
 
   async function getBackend(circuitId: string): Promise<BackendEntry> {
     const existing = backends.get(circuitId);
     if (existing) return existing;
 
-    const artifact = externalCircuits[circuitId] ?? loadCircuit(circuitId);
+    const artifact = externalCircuits[circuitId];
+    if (!artifact) {
+      throw new Error(
+        `Circuit "${circuitId}" not provided. In browser mode, all circuits must be passed via config.circuits.`,
+      );
+    }
+
     const noir = new Noir(artifact as any);
     const backend = new UltraHonkBackend((artifact as any).bytecode, api);
     await backend.getVerificationKey();
@@ -85,8 +85,6 @@ export async function createWasmZKPProvider(config?: WasmProviderConfig): Promis
     async verify(params: ZKPVerifyParams): Promise<boolean> {
       const { backend } = await getBackend(params.circuitId);
       const proof = base64ToUint8Array(params.proofValue);
-      // NOTE: publicInputs order must match the circuit ABI parameter order.
-      // inputs are listed before outputs, both in insertion order.
       const publicInputs = toPublicInputsArray(params.publicInputs, params.publicOutputs);
       try {
         return await backend.verifyProof({ proof, publicInputs });
@@ -102,9 +100,6 @@ export async function createWasmZKPProvider(config?: WasmProviderConfig): Promis
 }
 
 function uint8ArrayToBase64(buf: Uint8Array): string {
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(buf).toString('base64');
-  }
   let binary = '';
   for (let i = 0; i < buf.length; i++) {
     binary += String.fromCharCode(buf[i]!);
@@ -113,9 +108,6 @@ function uint8ArrayToBase64(buf: Uint8Array): string {
 }
 
 function base64ToUint8Array(b64: string): Uint8Array {
-  if (typeof Buffer !== 'undefined') {
-    return new Uint8Array(Buffer.from(b64, 'base64'));
-  }
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
@@ -123,10 +115,6 @@ function base64ToUint8Array(b64: string): Uint8Array {
   }
   return bytes;
 }
-
-// ---------------------------------------------------------------------------
-// Named output mapping — maps output_N to meaningful names per circuit
-// ---------------------------------------------------------------------------
 
 const OUTPUT_NAMES: Record<string, string[]> = {
   'sod-verify': ['econtent_binding'],

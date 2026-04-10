@@ -476,7 +476,22 @@ function packageAsCredential(
     proof: bundle,
   };
 
-  if (credential['@context']) presented['@context'] = [...(credential['@context'] as string[])];
+  // Build @context: original credential contexts + inline ICAO ZKP proof terms
+  // so that JSON-LD expansion doesn't reject proof bundle fields.
+  const icaoProofContext: Record<string, unknown> = {
+    ICAO9303ZKPProofBundle: 'https://w3id.org/icao9303#ICAO9303ZKPProofBundle',
+    proofs: { '@id': 'https://w3id.org/icao9303#proofs', '@type': '@json' },
+    disclosures: { '@id': 'https://w3id.org/icao9303#disclosures', '@type': '@json' },
+    dscCertificate: 'https://w3id.org/icao9303#dscCertificate',
+    circuitId: 'https://w3id.org/icao9303#circuitId',
+    proofValue: 'https://w3id.org/security#proofValue',
+    publicInputs: { '@id': 'https://w3id.org/icao9303#publicInputs', '@type': '@json' },
+    publicOutputs: { '@id': 'https://w3id.org/icao9303#publicOutputs', '@type': '@json' },
+  };
+  const contexts = credential['@context']
+    ? [...(credential['@context'] as string[]), icaoProofContext]
+    : ['https://www.w3.org/2018/credentials/v1', icaoProofContext];
+  (presented as any)['@context'] = contexts;
   if (credential.issuanceDate !== undefined) presented.issuanceDate = credential.issuanceDate as string;
   if (credential.id !== undefined) presented.id = credential.id as string;
 

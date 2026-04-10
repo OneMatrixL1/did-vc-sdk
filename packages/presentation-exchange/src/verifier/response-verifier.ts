@@ -130,13 +130,21 @@ export async function verifyVPResponse(
     documents[entry.docRequestID] = result.disclosedFields;
   }
 
+  // For ICAO credentials the ZKP proof chain (SOD → DG → Merkle) IS the
+  // issuer proof, so credential-level LD-Signature verification is not
+  // required when all proof-system checks pass.
+  // Presentation-level crypto (holder signature) must still pass.
+  const presentationCryptoOk = !!(crypto.presentationResult as Record<string, unknown>)?.verified;
+  const zkpCoversCredentials = proofSystemOk && proofSystemResults.length > 0;
+  const effectiveCryptoOk = crypto.verified || (presentationCryptoOk && zkpCoversCredentials);
+
   return {
-    verified: structural.valid && crypto.verified && proofSystemOk,
+    verified: structural.valid && effectiveCryptoOk && proofSystemOk,
     structural,
     crypto,
     proofSystemResults,
     documents,
-    errors,
+    errors: structural.valid && effectiveCryptoOk && proofSystemOk ? [] : errors,
   };
 }
 

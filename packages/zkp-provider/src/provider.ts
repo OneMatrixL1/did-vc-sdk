@@ -86,8 +86,8 @@ export async function createWasmZKPProvider(config?: WasmProviderConfig): Promis
       const { backend } = await getBackend(params.circuitId);
       const proof = base64ToUint8Array(params.proofValue);
       // NOTE: publicInputs order must match the circuit ABI parameter order.
-      // inputs are listed before outputs, both in insertion order.
-      const publicInputs = toPublicInputsArray(params.publicInputs, params.publicOutputs);
+      // Outputs must be ordered by OUTPUT_NAMES, not by arbitrary object key order.
+      const publicInputs = toPublicInputsArray(params.publicInputs, params.publicOutputs, params.circuitId);
       try {
         return await backend.verifyProof({ proof, publicInputs });
       } catch {
@@ -167,6 +167,21 @@ function flattenValues(obj: Record<string, unknown>): string[] {
 function toPublicInputsArray(
   inputs: Record<string, unknown>,
   outputs: Record<string, unknown>,
+  circuitId?: string,
 ): string[] {
-  return [...flattenValues(inputs), ...flattenValues(outputs)];
+  const orderedOutputs = orderByOutputNames(outputs, circuitId);
+  return [...flattenValues(inputs), ...flattenValues(orderedOutputs)];
+}
+
+function orderByOutputNames(
+  outputs: Record<string, unknown>,
+  circuitId?: string,
+): Record<string, unknown> {
+  const names = circuitId ? OUTPUT_NAMES[circuitId] : undefined;
+  if (!names) return outputs;
+  const ordered: Record<string, unknown> = {};
+  for (const name of names) {
+    if (name in outputs) ordered[name] = outputs[name];
+  }
+  return ordered;
 }

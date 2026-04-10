@@ -85,7 +85,7 @@ export async function createWasmZKPProviderBrowser(config?: WasmProviderConfig):
     async verify(params: ZKPVerifyParams): Promise<boolean> {
       const { backend } = await getBackend(params.circuitId);
       const proof = base64ToUint8Array(params.proofValue);
-      const publicInputs = toPublicInputsArray(params.publicInputs, params.publicOutputs);
+      const publicInputs = toPublicInputsArray(params.publicInputs, params.publicOutputs, params.circuitId);
       try {
         return await backend.verifyProof({ proof, publicInputs });
       } catch {
@@ -155,6 +155,23 @@ function flattenValues(obj: Record<string, unknown>): string[] {
 function toPublicInputsArray(
   inputs: Record<string, unknown>,
   outputs: Record<string, unknown>,
+  circuitId?: string,
 ): string[] {
-  return [...flattenValues(inputs), ...flattenValues(outputs)];
+  // Outputs must be ordered by OUTPUT_NAMES (circuit ABI return order),
+  // not by arbitrary object key order (HashMap serialization can differ).
+  const orderedOutputs = orderByOutputNames(outputs, circuitId);
+  return [...flattenValues(inputs), ...flattenValues(orderedOutputs)];
+}
+
+function orderByOutputNames(
+  outputs: Record<string, unknown>,
+  circuitId?: string,
+): Record<string, unknown> {
+  const names = circuitId ? OUTPUT_NAMES[circuitId] : undefined;
+  if (!names) return outputs;
+  const ordered: Record<string, unknown> = {};
+  for (const name of names) {
+    if (name in outputs) ordered[name] = outputs[name];
+  }
+  return ordered;
 }

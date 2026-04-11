@@ -1,0 +1,228 @@
+{
+  "@context": [
+    "https://www.w3.org/2018/credentials/v1",
+    {
+      "verifier": {
+        "@id": "https://w3id.org/vprequest#verifier",
+        "@type": "@id"
+      },
+      "requestId": "https://w3id.org/vprequest#requestId",
+      "requestNonce": "https://w3id.org/security#nonce",
+      "presentationSubmission": {
+        "@id": "https://w3id.org/vprequest#presentationSubmission",
+        "@type": "@json"
+      }
+    }
+  ],
+  "type": [
+    "VerifiablePresentation"
+  ],
+  "holder": "did:key:z6MkHolder123",
+  "verifier": "did:web:bank.vn",
+  "requestId": "kyc-001",
+  "requestNonce": "nonce-abc123",
+  "verifiableCredential": [
+    {
+      "type": [
+        "VerifiableCredential",
+        "CCCDCredential"
+      ],
+      "issuer": "did:web:cccd.gov.vn",
+      "credentialSubject": {},
+      "proof": {
+        "type": "ICAO9303ZKPProofBundle",
+        "proofs": [
+          {
+            "circuitId": "sod-verify",
+            "proofValue": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEKrXW0Zho...[19456 chars total]",
+            "publicInputs": {
+              "pubkey_x": [
+                "49",
+                "18",
+                "30",
+                "97",
+                "48",
+                "207",
+                "115",
+                "153",
+                "177",
+                "5",
+                "216",
+                "70",
+                "121",
+                "252",
+                "144",
+                "117",
+                "4",
+                "254",
+                "18",
+                "106",
+                "233",
+                "219",
+                "93",
+                "51",
+                "127",
+                "202",
+                "60",
+                "67",
+                "5",
+                "98",
+                "64",
+                "130",
+                "130",
+                "7",
+                "247",
+                "245",
+                "47",
+                "69",
+                "215",
+                "108",
+                "70",
+                "48",
+                "125",
+                "104",
+                "86",
+                "137",
+                "111",
+                "242"
+              ],
+              "pubkey_y": [
+                "54",
+                "197",
+                "225",
+                "240",
+                "13",
+                "45",
+                "60",
+                "193",
+                "173",
+                "9",
+                "7",
+                "222",
+                "5",
+                "47",
+                "201",
+                "175",
+                "29",
+                "69",
+                "188",
+                "128",
+                "49",
+                "156",
+                "250",
+                "74",
+                "32",
+                "143",
+                "97",
+                "125",
+                "212",
+                "182",
+                "53",
+                "97",
+                "162",
+                "60",
+                "158",
+                "48",
+                "242",
+                "163",
+                "134",
+                "205",
+                "2",
+                "96",
+                "100",
+                "99",
+                "211",
+                "43",
+                "89",
+                "168"
+              ],
+              "salt": "0x175f66f36582ac2c572588a84c0dfb9c9d11b2b8ecf999a2543c48ca774ed70d"
+            },
+            "publicOutputs": {
+              "econtent_binding": "0x2dbbd5a555f04990c5d4dd875e9fefbdae9b84a2d61e55742a4a65b096b0b05d"
+            }
+          },
+          {
+            "circuitId": "dg-map",
+            "proofValue": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEKrXW0Zho...[19456 chars total]",
+            "publicInputs": {
+              "salt": "0x175f66f36582ac2c572588a84c0dfb9c9d11b2b8ecf999a2543c48ca774ed70d",
+              "econtent_binding": "0x2dbbd5a555f04990c5d4dd875e9fefbdae9b84a2d61e55742a4a65b096b0b05d",
+              "dg_number": "13"
+            },
+            "publicOutputs": {
+              "dg_binding": "0x09143ecf1fcf3f0c0df916430812535661e053fb46186bed3a680a591167966c"
+            }
+          },
+          {
+            "circuitId": "dg13-merklelize",
+            "proofValue": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEKrXW0Zho...[19456 chars total]",
+            "publicInputs": {
+              "salt": "0x175f66f36582ac2c572588a84c0dfb9c9d11b2b8ecf999a2543c48ca774ed70d"
+            },
+            "publicOutputs": {
+              "binding": "0x09143ecf1fcf3f0c0df916430812535661e053fb46186bed3a680a591167966c",
+              "identity": "0x2c5adac99e6ae697a6a9e317e926094930b90da923efd1d4e32479bd98cbf7ca",
+              "commitment": "0x04b62319ab12282e3f1aeddd12bf98246a3d12efbf19477595d20b0177cfb51c"
+            }
+          }
+        ],
+        "disclosures": [
+          {
+            "conditionID": "fullName",
+            "tagId": "0x2",
+            "length": "0xc",
+            "data": [
+              "0x4e677579656e205468692042",
+              "0x0",
+              "0x0",
+              "0x0"
+            ],
+            "packedHash": "0x2e0c46586fac6cb1dfab920e0c9def931f2d1b49fbcee89b9712e413c9d662c5",
+            "siblings": [
+              "0xd07f7ed05501db1cc8799ccd398231353227d2e9887fbb1d8be67355a97be90",
+              "0x28698d7624d65df0f61196d0642c1941716a2f006a3376442cd63d5e152f5688",
+              "0x1db0e9eb3143bcaa87458a4911a7d6746aa2241b8a2c4a12342e3a7ecf2677a2",
+              "0x2a4398b0f23f406674b52e204a50224862202908554f88b548b43a9f8dd88a34",
+              "0x213b7fa145af7392224039cf0fb5dc084abe15230ecf6ee253800034b2a3d3a8"
+            ]
+          },
+          {
+            "conditionID": "gender",
+            "tagId": "0x4",
+            "length": "0x2",
+            "data": [
+              "0x4e75",
+              "0x0",
+              "0x0",
+              "0x0"
+            ],
+            "packedHash": "0x2e0c46586fac6cb1dfab920e0c9def931f2d1b49fbcee89b9712e413c9d662c5",
+            "siblings": [
+              "0x1130674fc0fb7d86b7668a6041bcd574e932a0830e9b8830935d4c180358aa1c",
+              "0x1e6c65901e40abc6c755789ea0928b6655051f5fa556508f70e6d8c6310c1f10",
+              "0x1db0e9eb3143bcaa87458a4911a7d6746aa2241b8a2c4a12342e3a7ecf2677a2",
+              "0x2a4398b0f23f406674b52e204a50224862202908554f88b548b43a9f8dd88a34",
+              "0x213b7fa145af7392224039cf0fb5dc084abe15230ecf6ee253800034b2a3d3a8"
+            ]
+          }
+        ],
+        "dscCertificate": "MHowFAYHKoZIzj0CAQYJKyQDAwIIAQELA2IABDES...[168 chars total]"
+      }
+    }
+  ],
+  "presentationSubmission": [
+    {
+      "docRequestID": "cccd",
+      "credentialIndex": 0
+    }
+  ],
+  "proof": {
+    "type": "DataIntegrityProof",
+    "verificationMethod": "did:key:z6MkHolder123#keys-1",
+    "proofPurpose": "authentication",
+    "challenge": "nonce-abc123",
+    "domain": "bank.vn",
+    "proofValue": "zAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  }
+}

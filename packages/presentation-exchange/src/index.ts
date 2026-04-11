@@ -13,7 +13,9 @@ export type {
   DocumentConditionNode,
   LogicalConditionNode,
   DiscloseCondition,
-  ZKPCondition,
+  PredicateCondition,
+  PredicateOperator,
+  PredicateParams,
   ProofSystem,
   KeyDoc,
   VerifiablePresentation,
@@ -22,7 +24,8 @@ export type {
   PresentedCredential,
   CredentialProof,
   DataIntegrityProof,
-  ZKPProof,
+  ICAO9303ZKPProofBundle,
+  ZKPProofEntry,
   MatchableCredential,
   RuleTreeMatch,
   LogicalRuleMatch,
@@ -32,34 +35,48 @@ export type {
   SchemaResolver,
   SchemaResolverMap,
   DeriveOptions,
+  SchemaProofSystem,
+  ProofSystemMap,
+  ProveContext,
+  VerifyContext,
+  ProofVerificationResult,
+  ZKPProvider,
+  ZKPProveParams,
+  ZKPProveResult,
+  ZKPVerifyParams,
+  Poseidon2Hasher,
 } from './types/index.js';
 
-export { getCredentialIssuerId } from './types/credential.js';
+export { getCredentialIssuerId, isICAOProofBundle, isPredicateCondition } from './types/index.js';
 
 // Builders
-export { VPRequestBuilder } from './builder/index.js';
-export { DocumentRequestBuilder } from './builder/index.js';
+export { VPRequestBuilder, DocumentRequestBuilder } from './builder/index.js';
 
 // Resolver
-export { matchCredentials } from './resolver/index.js';
-export { resolvePresentation } from './resolver/index.js';
-export type { ResolveOptions, UnsignedPresentation } from './resolver/index.js';
-export { evaluateTree, booleanCombine } from './resolver/index.js';
-export type { TreeNode, LogicalNode, EvalResult } from './resolver/index.js';
-export { extractConditions } from './resolver/index.js';
-export type { ExtractedFields } from './resolver/index.js';
+export { matchCredentials, resolvePresentation, evaluateTree, booleanCombine, extractConditions } from './resolver/index.js';
+
+export type { ResolveOptions, UnsignedPresentation, TreeNode, LogicalNode, EvalResult, ExtractedConditions } from './resolver/index.js';
 
 // Verifier
-export { verifyPresentationStructure } from './verifier/index.js';
-export { verifyVPRequest, verifyVPRequestFull } from './verifier/index.js';
-export { verifyVPResponse } from './verifier/index.js';
-export type { VerificationResult, VerifyRequestOptions, VerifyVPRequestResult, VerifyVPResponseOptions, VerifyVPResponseResult } from './verifier/index.js';
+export { verifyPresentationStructure, verifyVPRequest, verifyVPRequestFull, verifyVPResponse } from './verifier/index.js';
+
+export type {
+  VerificationResult,
+  VerifyRequestOptions,
+  VerifyVPRequestResult,
+  VerifyVPResponseOptions,
+  VerifyVPResponseResult,
+} from './verifier/index.js';
 
 // Signer
 export { signVPResponse } from './signer/index.js';
 
 // Schema Resolvers
-export { jsonSchemaResolver, createICAOSchemaResolver, createBBSResolver, isBBSProof, defaultResolvers } from './resolvers/index.js';
+export { createBBSResolver, isBBSProof } from './resolvers/index.js';
+
+// Proof Systems
+export { createICAO9303ProofSystem } from './proof-system/index.js';
+export type { ICAOCredentialData, ICAO9303ProofSystemOptions } from './proof-system/index.js';
 
 // Utils
 export { resolveJsonPath } from './utils/jsonpath.js';

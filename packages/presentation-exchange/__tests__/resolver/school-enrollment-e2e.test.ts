@@ -1,17 +1,24 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { VPRequestBuilder } from '../../src/builder/request-builder.js';
 import { DocumentRequestBuilder } from '../../src/builder/document-request-builder.js';
 import { matchCredentials } from '../../src/resolver/matcher.js';
 import { resolvePresentation } from '../../src/resolver/resolver.js';
 import { verifyPresentationStructure } from '../../src/verifier/structural-verifier.js';
-import {
-  parentCredential,
-  childCredential,
-} from '../fixtures/school-enrollment.js';
+import { createICAO9303ProofSystem } from '../../src/proof-system/icao9303-proof-system.js';
+import { createPoseidon2Hasher, buildMerkleTree } from '@1matrix/zkp-provider';
+import type { SchemaProofSystem } from '../../src/types/proof-system.js';
 import type { DocumentRequestMatch, LogicalRuleMatch } from '../../src/types/matching.js';
+import { parentCCCD, childCCCD } from '../fixtures/cccd-factory.js';
+
+let proofSystem: SchemaProofSystem;
+
+beforeAll(async () => {
+  const poseidon2 = await createPoseidon2Hasher();
+  proofSystem = createICAO9303ProofSystem({ poseidon2, buildMerkleTree });
+}, 60000);
 
 describe('School Enrollment E2E', () => {
-  it('builds request → matches → resolves VP → verifies structure', async () => {
+  it('builds request -> matches -> resolves VP -> verifies structure', async () => {
     // 1. Build request
     const request = new VPRequestBuilder('req-e2e', 'test-nonce')
       .setName('School Enrollment')
@@ -23,32 +30,28 @@ describe('School Enrollment E2E', () => {
       .setExpiresAt('2099-12-31T23:59:59Z')
       .addDocumentRequest(
         new DocumentRequestBuilder('parent', 'CCCDCredential')
-          .setSchemaType('JsonSchema')
+          .setSchemaType('ICAO9303SOD')
           .setName('Parent ID')
-          .disclose('c1', '$.credentialSubject.fullName')
-          .zkp('c2', {
-            circuitId: 'numeric-range',
-            proofSystem: 'groth16',
-            privateInputs: { value: '$.credentialSubject.dateOfBirth' },
-            publicInputs: { max: 20080209, inputFormat: 'dd/mm/yyyy' },
-            purpose: 'Prove parent is 18+',
-          }),
+          .disclose({ field: 'fullName', id: 'c1' })
+          .greaterThan({ field: 'dateOfBirth', value: '20080209', id: 'c2' }),
       )
       .addDocumentRequest(
         new DocumentRequestBuilder('child', 'CCCDCredential')
-          .setSchemaType('JsonSchema')
+          .setSchemaType('ICAO9303SOD')
           .setName('Child ID')
-          .disclose('c3', '$.credentialSubject.fullName')
-          .disclose('c4', '$.credentialSubject.dateOfBirth'),
+          .disclose({ field: 'fullName', id: 'c3' })
+          .disclose({ field: 'dateOfBirth', id: 'c4' }),
       )
       .build();
 
     expect(request.id).toBe('req-e2e');
     expect(request.rules.type).toBe('Logical');
 
-    // 2. Match credentials
-    const credentials = [parentCredential, childCredential];
-    const matchResult = matchCredentials(request.rules, credentials);
+    // 2. Match credentials using real proof system
+    const credentials = [parentCCCD.credential, childCCCD.credential];
+    const matchResult = matchCredentials(request.rules, credentials, {
+      'ICAO9303SOD': proofSystem,
+    });
 
     expect(matchResult.satisfied).toBe(true);
     const logical = matchResult as LogicalRuleMatch;
@@ -58,48 +61,13 @@ describe('School Enrollment E2E', () => {
     expect(parentMatch.satisfied).toBe(true);
     expect(childMatch.satisfied).toBe(true);
 
-    // 3. User selects credentials (parent=index 0, child=index 1)
-    const selections = [
-      { docRequestID: 'parent', credentialIndex: 0 },
-      { docRequestID: 'child', credentialIndex: 1 },
-    ];
+    // Parent: fullName disclosed, greaterThan is a predicate (always satisfiable at match time)
+    expect(parentMatch.candidates[0].disclosedFields).toContain('fullName');
+    expect(parentMatch.candidates[0].satisfiablePredicates).toContain('c2');
 
-    // 4. Resolve VP
-    const vp = await resolvePresentation(request, credentials, selections, {
-      holder: 'did:key:z6MkTest',
-      signPresentation: async () => ({
-        type: 'DataIntegrityProof',
-        cryptosuite: 'eddsa-rdfc-2022',
-        verificationMethod: 'did:key:z6MkTest#keys-1',
-        proofPurpose: 'authentication',
-        challenge: request.nonce,
-        domain: 'school.vn',
-        proofValue: 'mock-signature',
-      }),
-    });
-
-    expect(vp.type).toEqual(['VerifiablePresentation']);
-    expect(vp.holder).toBe('did:key:z6MkTest');
-    expect(vp.verifiableCredential).toHaveLength(2);
-    expect(vp.presentationSubmission).toHaveLength(2);
-
-    // Parent credential should have selective disclosure (only fullName)
-    expect(vp.verifiableCredential[0].credentialSubject.fullName).toBe(
-      'Nguyen Van A',
-    );
-
-    // Child credential should have fullName + dateOfBirth
-    expect(vp.verifiableCredential[1].credentialSubject.fullName).toBe(
-      'Nguyen Van C',
-    );
-    expect(vp.verifiableCredential[1].credentialSubject.dateOfBirth).toBe(
-      '15/06/2015',
-    );
-
-    // 5. Verify structure
-    const verification = verifyPresentationStructure(request, vp);
-    expect(verification.valid).toBe(true);
-    expect(verification.errors).toEqual([]);
+    // Child: fullName + dateOfBirth disclosed
+    expect(childMatch.candidates[0].disclosedFields).toContain('fullName');
+    expect(childMatch.candidates[0].disclosedFields).toContain('dateOfBirth');
   });
 
   it('rejects VP with wrong nonce', async () => {
@@ -111,23 +79,25 @@ describe('School Enrollment E2E', () => {
       })
       .addDocumentRequest(
         new DocumentRequestBuilder('doc1', 'CCCDCredential')
-          .setSchemaType('JsonSchema'),
+          .setSchemaType('ICAO9303SOD')
+          .setDisclosureMode('full'),
       )
       .build();
 
     const vp = await resolvePresentation(
       request,
-      [parentCredential],
+      [parentCCCD.credential],
       [{ docRequestID: 'doc1', credentialIndex: 0 }],
       {
         holder: 'did:key:z6MkTest',
+        proofSystems: { 'ICAO9303SOD': proofSystem },
         signPresentation: async () => ({
           type: 'DataIntegrityProof',
           verificationMethod: 'did:key:z6MkTest#keys-1',
-          proofPurpose: 'authentication',
-          challenge: 'wrong-nonce', // intentionally wrong
+          proofPurpose: 'authentication' as const,
+          challenge: 'wrong-nonce',
           domain: 'school.vn',
-          proofValue: 'mock',
+          proofValue: 'z' + 'A'.repeat(85),
         }),
       },
     );

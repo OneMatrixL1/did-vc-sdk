@@ -1,7 +1,9 @@
 import type { LocalizableString } from './localization.js';
-import type { PresentedCredential } from './response.js';
+import type { PresentedCredential, ProofSystem } from './response.js';
+import type { PredicateCondition } from './condition.js';
 
-export type ProofSystem = 'groth16' | 'plonk' | 'halo2' | 'bulletproofs';
+export type { ProofSystem } from './response.js';
+export type { PredicateCondition, PredicateOperator, PredicateParams } from './condition.js';
 
 // ---------------------------------------------------------------------------
 // Verifier info
@@ -41,35 +43,22 @@ export interface DiscloseCondition {
   purpose?: LocalizableString;
 }
 
-export interface ZKPCondition {
-  type: 'DocumentCondition';
-  conditionID: string;
-  operator: 'zkp';
-  circuitId: string;
-  proofSystem: ProofSystem;
-  purpose?: LocalizableString;
-  circuitHash?: string;
-  privateInputs: Record<string, string>;
-  publicInputs: Record<string, unknown>;
-  dependsOn?: Record<string, string>;
-}
-
 export interface LogicalConditionNode {
   type: 'Logical';
   operator: 'AND' | 'OR';
-  values: (LogicalConditionNode | DiscloseCondition | ZKPCondition)[];
+  values: (LogicalConditionNode | DiscloseCondition | PredicateCondition)[];
 }
 
 export type DocumentConditionNode =
   | LogicalConditionNode
   | DiscloseCondition
-  | ZKPCondition;
+  | PredicateCondition;
 
 // ---------------------------------------------------------------------------
 // Rules tree (recursive)
 // ---------------------------------------------------------------------------
 
-export type DisclosureMode = 'selective' | 'full';
+export type DisclosureMode = 'selective' | 'full' | 'zkp-only';
 
 export interface DocumentRequest {
   type: 'DocumentRequest';

@@ -12,7 +12,9 @@ export type {
   DocumentConditionNode,
   LogicalConditionNode,
   DiscloseCondition,
-  ZKPCondition,
+  PredicateCondition,
+  PredicateOperator,
+  PredicateParams,
   ProofSystem,
   KeyDoc,
 } from './request.js';
@@ -24,7 +26,6 @@ export type {
   PresentedCredential,
   CredentialProof,
   DataIntegrityProof,
-  ZKPProof,
 } from './response.js';
 
 export type { MatchableCredential } from './credential.js';
@@ -39,3 +40,29 @@ export type {
 } from './matching.js';
 
 export type { SchemaResolver, SchemaResolverMap, DeriveOptions } from './schema-resolver.js';
+
+export type {
+  SchemaProofSystem,
+  ProofSystemMap,
+  ProveContext,
+  VerifyContext,
+  ProofVerificationResult,
+  DSCVerificationResult,
+} from './proof-system.js';
+
+export type {
+  ICAO9303ZKPProofBundle as ICAOProofBundle,
+  ICAO9303ZKPProofBundle,
+  ZKPProofEntry,
+  MerkleDisclosure,
+} from './icao-proof-bundle.js';
+export { isICAOProofBundle } from './icao-proof-bundle.js';
+export { isPredicateCondition } from './condition.js';
+
+export type {
+  ZKPProvider,
+  ZKPProveParams,
+  ZKPProveResult,
+  ZKPVerifyParams,
+  Poseidon2Hasher,
+} from './zkp-provider.js';

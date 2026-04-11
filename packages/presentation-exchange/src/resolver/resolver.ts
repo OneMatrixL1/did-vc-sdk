@@ -7,9 +7,9 @@ import type {
   SubmissionEntry,
 } from '../types/response.js';
 import type { CredentialSelection } from '../types/matching.js';
-import type { SchemaResolverMap } from '../types/schema-resolver.js';
-import { defaultResolvers } from '../resolvers/index.js';
-import { createBBSResolver, isBBSProof } from '../resolvers/bbs-resolver.js';
+import type { SchemaProofSystem, ProofSystemMap } from '../types/proof-system.js';
+import type { ZKPProvider } from '../types/zkp-provider.js';
+import { defaultProofSystems } from '../proof-system/index.js';
 import { extractConditions } from './field-extractor.js';
 import { signVPResponse, vpResponseContext } from '../signer/vp-signer.js';
 
@@ -29,101 +29,73 @@ export interface UnsignedPresentation {
   presentationSubmission: SubmissionEntry[];
 }
 
-/**
- * Options for {@link resolvePresentation}.
- *
- * Provide **one** of `keyDoc` or `signPresentation` to sign the VP envelope:
- *
- * @example
- * // Recommended — automatic signing via createKeyDoc
- * { holder: did, keyDoc: createKeyDoc(did, keypair, 'secp256k1') }
- *
- * // Custom signing callback
- * { holder: did, signPresentation: async (unsigned) => { ... } }
- */
 export interface ResolveOptions {
   /** The holder's DID. */
   holder: string;
-  /**
-   * Optional — extra or overriding resolvers merged on top of
-   * the built-in defaults (JsonSchema + ICAO9303SOD).
-   */
-  resolvers?: SchemaResolverMap;
   /** Custom signing callback (challenge = nonce, domain = verifierUrl). */
   signPresentation?: (payload: UnsignedPresentation) => Promise<HolderProof>;
-  /**
-   * Alternative to `signPresentation` — a {@link KeyDoc} for automatic signing
-   * via credential-sdk. Use {@link createKeyDoc} to create one.
-   */
+  /** A KeyDoc for automatic signing via credential-sdk. */
   keyDoc?: KeyDoc;
   /** Optional DID resolver forwarded to credential-sdk when using `keyDoc`. */
   didResolver?: object;
+  /** Extra or overriding proof systems. */
+  proofSystems?: ProofSystemMap;
+  /** ZKP provider for generating proofs. */
+  zkpProvider?: ZKPProvider;
+  /** Callback to provide schema-specific credential data (e.g. ICAO raw bytes). */
+  credentialData?: (docRequestID: string, schemaType: string) => unknown;
 }
 
 // ---------------------------------------------------------------------------
 // resolvePresentation
 // ---------------------------------------------------------------------------
 
-/**
- * Assemble a VerifiablePresentation from a VPRequest and user selections.
- *
- * This function:
- * 1. Validates that selections cover the request's rules
- * 2. Extracts disclosed fields per credential
- * 3. Derives selective-disclosure credentials via the schema resolver
- * 4. Signs the presentation via the provided callback
- */
 export async function resolvePresentation(
   request: VPRequest,
   credentials: MatchableCredential[],
   selections: CredentialSelection[],
   options: ResolveOptions,
 ): Promise<VerifiablePresentation> {
-  // Build a map of docRequestID → DocumentRequest for lookup
   const docRequests = collectDocumentRequests(request.rules);
+  const systems = { ...defaultProofSystems, ...options.proofSystems };
 
-  // Validate all selections synchronously first, then derive credentials in parallel
   type ResolvedItem = { docRequestID: string; docReq: DocumentRequest; cred: MatchableCredential };
   const items: ResolvedItem[] = [];
 
   for (const sel of selections) {
     const docReq = docRequests.get(sel.docRequestID);
-    if (!docReq) {
-      throw new Error(`Unknown docRequestID: ${sel.docRequestID}`);
-    }
-
+    if (!docReq) throw new Error(`Unknown docRequestID: ${sel.docRequestID}`);
     const cred = credentials[sel.credentialIndex];
-    if (!cred) {
-      throw new Error(
-        `Invalid credential index ${sel.credentialIndex} for docRequestID ${sel.docRequestID}`,
-      );
-    }
-
+    if (!cred) throw new Error(`Invalid credential index ${sel.credentialIndex} for docRequestID ${sel.docRequestID}`);
     items.push({ docRequestID: sel.docRequestID, docReq, cred });
   }
 
-  const resolvers = { ...defaultResolvers, ...options.resolvers };
-
-  const presentedList = await Promise.all(items.map(({ docReq, cred }) => {
+  const presentedList = await Promise.all(items.map(({ docRequestID, docReq, cred }) => {
     if (docReq.disclosureMode === 'full') {
       return Promise.resolve(cred);
     }
 
-    let resolver = resolvers[docReq.schemaType];
-    if (!resolver) {
+    const system = systems[docReq.schemaType];
+    if (!system) {
       throw new Error(
-        `No SchemaResolver registered for schemaType "${docReq.schemaType}". ` +
-        `Available resolvers: [${Object.keys(resolvers).join(', ')}]`,
+        `No SchemaProofSystem registered for schemaType "${docReq.schemaType}". ` +
+        `Available: [${Object.keys(systems).join(', ')}]`,
       );
     }
 
-    if (isBBSProof(cred)) {
-      resolver = createBBSResolver(resolver);
+    const { disclose, predicates } = extractConditions(docReq.conditions);
+
+    if (!options.zkpProvider && predicates.length > 0) {
+      throw new Error(`ZKPProvider required for predicate conditions in "${docRequestID}"`);
     }
 
-    const { disclose } = extractConditions(docReq.conditions);
-    const disclosedFields = disclose.map((d) => d.field);
-    return resolver.deriveCredential(cred, disclosedFields, { nonce: request.nonce });
+    return system.prove(cred, { disclose, predicates }, {
+      nonce: request.nonce,
+      holder: options.holder,
+      verifierId: request.verifier,
+      zkpProvider: options.zkpProvider!,
+      credentialData: options.credentialData?.(docRequestID, docReq.schemaType),
+    });
   }));
 
   const presentedCredentials: PresentedCredential[] = [];

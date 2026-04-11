@@ -1,0 +1,797 @@
+/**
+ * ICAO 9303 ZKP Proof System.
+ *
+ * Implements SchemaProofSystem for ICAO credentials (CCCD, Passport).
+ * Internally uses a pipeline to orchestrate:
+ *   sod-verify → dg-map → dg13-merklelize → field-reveals → predicates
+ *
+ * Developers never see circuits, Merkle trees, or proof chaining.
+ */
+
+import type { MatchableCredential, PresentedCredential } from '../types/credential.js';
+import type { DiscloseCondition } from '../types/request.js';
+import type { PredicateCondition } from '../types/condition.js';
+import type { SchemaProofSystem, ProveContext, VerifyContext, ProofVerificationResult, DSCVerificationResult } from '../types/proof-system.js';
+import type { ICAO9303ZKPProofBundle, ZKPProofEntry, MerkleDisclosure } from '../types/icao-proof-bundle.js';
+import { isICAOProofBundle } from '../types/icao-proof-bundle.js';
+import type { ZKPProvider } from '../types/zkp-provider.js';
+import type { Poseidon2Hasher } from '../types/zkp-provider.js';
+import type { PipelineState, PipelineStep } from './pipeline.js';
+import { executePipeline } from './pipeline.js';
+import {
+  getProfile,
+  getProfileByDocType,
+  resolveField as resolveProfileField,
+} from '@1matrix/credential-sdk/icao-profile';
+import { fieldIdToLeafIndex, fieldIdToTagId, isDg13Field } from '../resolvers/zkp-field-mapping.js';
+
+// ---------------------------------------------------------------------------
+// Circuit ID mapping — condition operator → circuit
+// ---------------------------------------------------------------------------
+
+const PREDICATE_CIRCUIT_MAP: Record<string, string> = {
+  greaterThan: 'date-greaterthan',
+  lessThan: 'date-lessthan',
+  greaterThanOrEqual: 'date-greaterthanorequal',
+  lessThanOrEqual: 'date-lessthanorequal',
+  inRange: 'date-inrange',
+  equals: 'field-equals',
+};
+
+// ---------------------------------------------------------------------------
+// ICAO credential data (provided by holder)
+// ---------------------------------------------------------------------------
+
+export interface SODCircuitInputs {
+  econtent: number[];        // [u8; 320] padded
+  econtentLen: number;
+  signedAttrs: number[];     // [u8; 200] padded
+  signedAttrsLen: number;
+  dgOffset: number;
+  digestOffset: number;
+  signatureR: number[];      // [u8; 48]
+  signatureS: number[];      // [u8; 48] canonical
+  pubkeyX: number[];         // [u8; 48]
+  pubkeyY: number[];         // [u8; 48]
+}
+
+export interface DG13CircuitInputs {
+  rawMsg: number[];           // [u8; 700] padded
+  dgLen: number;
+  fieldOffsets: number[];     // [u32; 32]
+  fieldLengths: number[];     // [u32; 32]
+}
+
+export interface ICAOCredentialData {
+  sodInputs: SODCircuitInputs;
+  dg13Inputs: DG13CircuitInputs;
+  /** DSC certificate in base64 DER. Included in the proof bundle for CSCA trust verification. */
+  dscCertificate?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+export type MerkleTreeBuilder = (
+  fields: Array<{ tagId: number; length: number; packedFields: bigint[]; packedHash: bigint }>,
+  salt: bigint,
+  hasher: Poseidon2Hasher,
+) => { root: bigint; commitment: bigint; leaves: bigint[]; getSiblings(i: number): bigint[] };
+
+/**
+ * Derive a deterministic salt from (nonce, holder).
+ * Binds ZKP proofs to both the session and the presenter, preventing replay/relay.
+ */
+export type DeriveSalt = (nonce: string, holder: string) => bigint;
+
+export interface ICAO9303ProofSystemOptions {
+  poseidon2?: Poseidon2Hasher;
+  buildMerkleTree?: MerkleTreeBuilder;
+  /**
+   * Salt derivation function. If not provided, uses a default
+   * poseidon2-based derivation (requires poseidon2 option).
+   */
+  deriveSalt?: DeriveSalt;
+}
+
+export function createICAO9303ProofSystem(
+  opts?: ICAO9303ProofSystemOptions,
+): SchemaProofSystem {
+  const saltDeriver = opts?.deriveSalt ?? defaultDeriveSalt(opts?.poseidon2);
+
+  return {
+    schemaType: 'ICAO9303SOD',
+
+    resolveField(credential, field) {
+      // Try ICAO profile resolution first (reads from encoded DG blobs)
+      const profile = detectProfile(credential);
+      if (profile) {
+        const rawDGs = extractRawDGs(credential);
+        const value = resolveProfileField(profile, field, rawDGs);
+        if (value !== undefined) return { found: true, value };
+      }
+
+      // Fallback: direct credentialSubject field lookup
+      const direct = credential.credentialSubject[field];
+      if (direct !== undefined) return { found: true, value: direct };
+
+      return { found: false, value: undefined };
+    },
+
+    async prove(credential, conditions, context) {
+      const data = context.credentialData as ICAOCredentialData;
+      if (!data?.sodInputs || !data?.dg13Inputs) {
+        throw new Error('ICAO proof system requires credentialData with sodInputs and dg13Inputs');
+      }
+
+      if (!context.nonce || !context.holder) {
+        throw new Error('ICAO proof system requires nonce and holder in ProveContext for salt derivation');
+      }
+
+      const poseidon2 = opts?.poseidon2;
+      if (!poseidon2) {
+        throw new Error('ICAO proof system requires poseidon2 hasher for proving');
+      }
+
+      const treeBuild = opts?.buildMerkleTree;
+      if (!treeBuild) {
+        throw new Error('ICAO proof system requires buildMerkleTree for proving');
+      }
+
+      const salt = saltDeriver(context.nonce, context.holder);
+      const pipeline = buildICAOPipeline(conditions, poseidon2, treeBuild);
+
+      const state = await executePipeline(pipeline, {
+        sodInputs: data.sodInputs,
+        dg13Inputs: data.dg13Inputs,
+        salt,
+      }, context.zkpProvider);
+
+      return packageAsCredential(credential, state, conditions, data.dscCertificate);
+    },
+
+    async verify(credential, conditions, context) {
+      const proof = Array.isArray(credential.proof) ? credential.proof[0] : credential.proof;
+      if (!isICAOProofBundle(proof)) {
+        return { verified: false, disclosedFields: {}, errors: ['Expected ICAO9303ZKPProofBundle'] };
+      }
+
+      const expectedSalt = (context.nonce && context.holder)
+        ? saltDeriver(context.nonce, context.holder)
+        : undefined;
+      return verifyICAOBundle(proof, conditions, context.zkpProvider, context.verifyDSC, expectedSalt, opts?.poseidon2);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Salt derivation — binds ZKP proofs to session (nonce) + presenter (holder)
+// ---------------------------------------------------------------------------
+
+function defaultDeriveSalt(poseidon2?: Poseidon2Hasher): DeriveSalt {
+  return (nonce: string, holder: string) => {
+    if (!poseidon2) {
+      throw new Error('deriveSalt requires poseidon2 hasher (or provide a custom deriveSalt)');
+    }
+    // Pack nonce and holder strings into field elements (31-byte chunks)
+    const combined = new TextEncoder().encode(nonce + ':' + holder);
+    const fields: bigint[] = [];
+    for (let i = 0; i < combined.length; i += 31) {
+      let felt = 0n;
+      for (let j = 0; j < 31 && i + j < combined.length; j++) {
+        felt = felt * 256n + BigInt(combined[i + j]!);
+      }
+      fields.push(felt);
+    }
+    // Pad to at least 2 elements
+    while (fields.length < 2) fields.push(0n);
+    return poseidon2.hash(fields, fields.length);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Hex helpers
+// ---------------------------------------------------------------------------
+
+const toHex = (v: bigint | number) => '0x' + BigInt(v).toString(16);
+const toHexArr = (arr: number[]) => arr.map(v => String(v));
+
+// ---------------------------------------------------------------------------
+// Pipeline construction
+// ---------------------------------------------------------------------------
+
+function buildICAOPipeline(
+  conditions: { disclose: DiscloseCondition[]; predicates: PredicateCondition[] },
+  poseidon2: Poseidon2Hasher,
+  treeBuild: MerkleTreeBuilder,
+): PipelineStep[] {
+  const steps: PipelineStep[] = [
+    // Step 1: Parse DG13 fields + build Merkle tree
+    {
+      kind: 'compute',
+      label: 'parse-and-merklelize',
+      async run(state) {
+        const dg13 = state.bag.get('dg13Inputs') as DG13CircuitInputs;
+        const salt = state.bag.get('salt') as bigint;
+
+        // Build Merkle leaves from raw_msg using field_offsets/field_lengths
+        const fields = buildFieldsFromRawMsg(dg13, poseidon2);
+        const tree = treeBuild(fields, salt, poseidon2);
+
+        state.bag.set('fields', fields);
+        state.bag.set('tree', tree);
+      },
+    },
+
+    // Step 2: sod-verify — ECDSA brainpoolP384r1 signature verification
+    {
+      kind: 'prove',
+      label: 'sod-verify',
+      circuitId: 'sod-verify',
+      buildInputs(state) {
+        const sod = state.bag.get('sodInputs') as SODCircuitInputs;
+        const salt = state.bag.get('salt') as bigint;
+        return {
+          publicInputs: {
+            pubkey_x: toHexArr(sod.pubkeyX),
+            pubkey_y: toHexArr(sod.pubkeyY),
+            salt: toHex(salt),
+          },
+          privateInputs: {
+            econtent: toHexArr(sod.econtent),
+            econtent_len: String(sod.econtentLen),
+            signed_attrs: toHexArr(sod.signedAttrs),
+            signed_attrs_len: String(sod.signedAttrsLen),
+            digest_offset: String(sod.digestOffset),
+            signature_r: toHexArr(sod.signatureR),
+            signature_s: toHexArr(sod.signatureS),
+          },
+        };
+      },
+      processOutputs(state, result) {
+        state.bag.set('econtentBinding', result.publicOutputs.econtent_binding);
+      },
+      satisfies: [],
+    },
+
+    // Step 3: dg-map — extract DG13 hash from signed eContent
+    {
+      kind: 'prove',
+      label: 'dg-map',
+      circuitId: 'dg-map',
+      buildInputs(state) {
+        const sod = state.bag.get('sodInputs') as SODCircuitInputs;
+        const salt = state.bag.get('salt') as bigint;
+        return {
+          publicInputs: {
+            salt: toHex(salt),
+            econtent_binding: state.bag.get('econtentBinding'),
+            dg_number: String(13),
+          },
+          privateInputs: {
+            econtent: toHexArr(sod.econtent),
+            econtent_len: String(sod.econtentLen),
+            dg_offset: String(sod.dgOffset),
+          },
+        };
+      },
+      processOutputs(state, result) {
+        state.bag.set('dgBinding', result.publicOutputs.dg_binding);
+      },
+      satisfies: [],
+    },
+
+    // Step 4: dg13-merklelize — build Merkle tree, verify binding
+    {
+      kind: 'prove',
+      label: 'dg13-merklelize',
+      circuitId: 'dg13-merklelize',
+      buildInputs(state) {
+        const dg13 = state.bag.get('dg13Inputs') as DG13CircuitInputs;
+        const salt = state.bag.get('salt') as bigint;
+        return {
+          publicInputs: {
+            salt: toHex(salt),
+          },
+          privateInputs: {
+            raw_msg: toHexArr(dg13.rawMsg),
+            dg_len: String(dg13.dgLen),
+            field_offsets: dg13.fieldOffsets.map(String),
+            field_lengths: dg13.fieldLengths.map(String),
+          },
+        };
+      },
+      processOutputs(state, result) {
+        state.bag.set('binding', result.publicOutputs.binding);
+        state.bag.set('identity', result.publicOutputs.identity);
+        state.bag.set('commitment', result.publicOutputs.commitment);
+      },
+      satisfies: [],
+    },
+  ];
+
+  // Disclosures are handled as raw Merkle proofs in packageAsCredential (no ZKP needed).
+
+  // Step 5+: Predicate proofs (ZKP required — value stays hidden)
+  for (const p of conditions.predicates) {
+    if (p.operator === 'equals' && 'ref' in p.params) continue;
+
+    const circuitId = PREDICATE_CIRCUIT_MAP[p.operator];
+    if (!circuitId) throw new Error(`No circuit for predicate operator "${p.operator}"`);
+
+    steps.push({
+      kind: 'prove',
+      label: `predicate-${p.conditionID}`,
+      circuitId,
+      buildInputs(state) {
+        const tree = state.bag.get('tree') as { getSiblings(i: number): bigint[] };
+        const fields = state.bag.get('fields') as Array<{ tagId: number; length: number; packedFields: bigint[]; packedHash: bigint }>;
+        const salt = state.bag.get('salt') as bigint;
+        const leafIndex = fieldIdToLeafIndex(p.field);
+        const field = fields[leafIndex]!;
+
+        return {
+          privateInputs: {
+            siblings: tree.getSiblings(leafIndex).map(toHex),
+            length: toHex(BigInt(field.length)),
+            data: field.packedFields.map(toHex),
+            packed_hash: toHex(field.packedHash),
+          },
+          publicInputs: {
+            commitment: state.bag.get('commitment'),
+            salt: toHex(salt),
+            tag_id: toHex(BigInt(fieldIdToTagId(p.field))),
+            ...flattenPredicateParams(p),
+          },
+        };
+      },
+      processOutputs() {},
+      satisfies: [p.conditionID],
+    });
+  }
+
+  return steps;
+}
+
+// ---------------------------------------------------------------------------
+// Build Merkle leaf fields from raw_msg (matches circuit packing exactly)
+// ---------------------------------------------------------------------------
+
+function buildFieldsFromRawMsg(
+  dg13: DG13CircuitInputs,
+  poseidon2: Poseidon2Hasher,
+): Array<{ tagId: number; length: number; packedFields: bigint[]; packedHash: bigint }> {
+  const fields: Array<{ tagId: number; length: number; packedFields: bigint[]; packedHash: bigint }> = [];
+
+  for (let i = 0; i < 32; i++) {
+    const tagId = i + 1;
+    const offset = dg13.fieldOffsets[i]!;
+    const length = dg13.fieldLengths[i]!;
+
+    const packedFields: bigint[] = [];
+    for (let f = 0; f < 4; f++) {
+      let felt = 0n;
+      for (let b = 0; b < 31; b++) {
+        const byteIdx = f * 31 + b;
+        if (byteIdx < length) {
+          felt = felt * 256n + BigInt(dg13.rawMsg[offset + byteIdx]!);
+        }
+      }
+      packedFields.push(felt);
+    }
+
+    fields.push({ tagId, length, packedFields, packedHash: 0n });
+  }
+
+  // Compute packed_hash from immutable fields (indices 0, 2, 5, 7, 12)
+  const immutablePacked: bigint[] = [];
+  for (const idx of [0, 2, 5, 7, 12]) {
+    immutablePacked.push(...fields[idx]!.packedFields);
+  }
+  const packedHash = poseidon2.hash(immutablePacked, 20);
+  for (const f of fields) f.packedHash = packedHash;
+
+  return fields;
+}
+
+// ---------------------------------------------------------------------------
+// Package pipeline results into PresentedCredential
+// ---------------------------------------------------------------------------
+
+function packageAsCredential(
+  credential: MatchableCredential,
+  state: PipelineState,
+  conditions: { disclose: DiscloseCondition[]; predicates: PredicateCondition[] },
+  dscCertificate?: string,
+): PresentedCredential {
+  const proofs: ZKPProofEntry[] = [];
+  const subject: Record<string, unknown> = {};  // intentionally empty — values come from verified proofs
+
+  // Pipeline chain proofs (sod-verify, dg-map, dg13-merklelize)
+  for (const label of ['sod-verify', 'dg-map', 'dg13-merklelize']) {
+    const p = state.proofs.find((pr) => pr.label === label)!;
+    proofs.push({
+      circuitId: p.circuitId!,
+      proofValue: p.proofValue,
+      publicInputs: p.publicInputs,
+      publicOutputs: p.publicOutputs,
+    });
+  }
+
+  // Merkle disclosures (raw Merkle proof — no ZKP)
+  const disclosures: MerkleDisclosure[] = [];
+  const tree = state.bag.get('tree') as { getSiblings(i: number): bigint[] } | undefined;
+  const fields = state.bag.get('fields') as Array<{ tagId: number; length: number; packedFields: bigint[]; packedHash: bigint }> | undefined;
+
+  if (tree && fields) {
+    for (const d of conditions.disclose) {
+      if (!isDg13Field(d.field)) continue;
+      const leafIndex = fieldIdToLeafIndex(d.field);
+      const field = fields[leafIndex]!;
+
+      disclosures.push({
+        conditionID: d.conditionID,
+        tagId: toHex(BigInt(fieldIdToTagId(d.field))),
+        length: toHex(BigInt(field.length)),
+        data: field.packedFields.map(toHex) as [string, string, string, string],
+        packedHash: toHex(field.packedHash),
+        siblings: tree.getSiblings(leafIndex).map(toHex),
+      });
+    }
+  }
+
+  // Predicates
+  for (const p of conditions.predicates) {
+    const proof = state.proofs.find((pr) => pr.satisfies.includes(p.conditionID));
+    if (!proof) continue;
+
+    proofs.push({
+      circuitId: PREDICATE_CIRCUIT_MAP[p.operator]!,
+      proofValue: proof.proofValue,
+      publicInputs: proof.publicInputs,
+      publicOutputs: proof.publicOutputs,
+      conditionID: p.conditionID,
+    });
+  }
+
+  const bundle: ICAO9303ZKPProofBundle = {
+    type: 'ICAO9303ZKPProofBundle',
+    proofs,
+    ...(disclosures.length > 0 ? { disclosures } : {}),
+    ...(dscCertificate ? { dscCertificate } : {}),
+  };
+
+  if (credential.credentialSubject.id !== undefined) {
+    subject.id = credential.credentialSubject.id;
+  }
+
+  const types = [...(credential.type as readonly string[])];
+  const issuer = typeof credential.issuer === 'string' ? credential.issuer : { ...credential.issuer };
+
+  const presented: PresentedCredential = {
+    type: types,
+    issuer,
+    credentialSubject: subject,
+    proof: bundle,
+  };
+
+  // Build @context: original credential contexts + inline ICAO ZKP proof terms
+  // so that JSON-LD expansion doesn't reject proof bundle fields.
+  const icaoProofContext: Record<string, unknown> = {
+    ICAO9303ZKPProofBundle: 'https://w3id.org/icao9303#ICAO9303ZKPProofBundle',
+    proofs: { '@id': 'https://w3id.org/icao9303#proofs', '@type': '@json' },
+    disclosures: { '@id': 'https://w3id.org/icao9303#disclosures', '@type': '@json' },
+    dscCertificate: 'https://w3id.org/icao9303#dscCertificate',
+    circuitId: 'https://w3id.org/icao9303#circuitId',
+    proofValue: 'https://w3id.org/security#proofValue',
+    publicInputs: { '@id': 'https://w3id.org/icao9303#publicInputs', '@type': '@json' },
+    publicOutputs: { '@id': 'https://w3id.org/icao9303#publicOutputs', '@type': '@json' },
+  };
+  const contexts = credential['@context']
+    ? [...(credential['@context'] as string[]), icaoProofContext]
+    : ['https://www.w3.org/2018/credentials/v1', icaoProofContext];
+  (presented as any)['@context'] = contexts;
+  if (credential.issuanceDate !== undefined) presented.issuanceDate = credential.issuanceDate as string;
+  if (credential.id !== undefined) presented.id = credential.id as string;
+
+  return presented;
+}
+
+// ---------------------------------------------------------------------------
+// Verification
+// ---------------------------------------------------------------------------
+
+async function verifyICAOBundle(
+  bundle: ICAO9303ZKPProofBundle,
+  conditions: { disclose: DiscloseCondition[]; predicates: PredicateCondition[] },
+  zkpProvider: ZKPProvider,
+  verifyDSC?: (dscCertificate: string) => Promise<DSCVerificationResult>,
+  expectedSalt?: bigint,
+  poseidon2?: Poseidon2Hasher,
+): Promise<ProofVerificationResult> {
+  const errors: string[] = [];
+  const disclosedFields: Record<string, string> = {};
+  const { proofs } = bundle;
+
+  // --- 1. Verify every proof individually (zkp-provider level) ---
+  for (const entry of proofs) {
+    const valid = await zkpProvider.verify({
+      circuitId: entry.circuitId,
+      proofValue: entry.proofValue,
+      publicInputs: entry.publicInputs,
+      publicOutputs: entry.publicOutputs,
+    });
+    if (!valid) {
+      const label = entry.conditionID ? `${entry.circuitId}[${entry.conditionID}]` : entry.circuitId;
+      errors.push(`Proof invalid: ${label}`);
+    }
+  }
+
+  // --- 1b. Verify salt binding (session + presenter) ---
+  if (expectedSalt !== undefined) {
+    const expectedSaltHex = toHex(expectedSalt);
+    for (const entry of proofs) {
+      if (entry.publicInputs.salt !== undefined && entry.publicInputs.salt !== expectedSaltHex) {
+        const label = entry.conditionID ? `${entry.circuitId}[${entry.conditionID}]` : entry.circuitId;
+        errors.push(`Salt mismatch in "${label}": expected ${expectedSaltHex}, got ${entry.publicInputs.salt}`);
+      }
+    }
+  }
+
+  // --- 2. Verify binding chain (presentation-exchange level) ---
+  const sodVerify = proofs.find((p) => p.circuitId === 'sod-verify');
+  const dgMap = proofs.find((p) => p.circuitId === 'dg-map');
+  const dg13 = proofs.find((p) => p.circuitId === 'dg13-merklelize');
+
+  if (!sodVerify) errors.push('Missing sod-verify proof');
+  if (!dgMap) errors.push('Missing dg-map proof');
+  if (!dg13) errors.push('Missing dg13-merklelize proof');
+
+  // If any chain proof is missing, the entire chain is unanchored — nothing can be trusted
+  if (!sodVerify || !dgMap || !dg13) {
+    return { verified: false, disclosedFields: {}, errors };
+  }
+
+  // --- 2b. Verify DSC trust anchor (CSCA → DSC → pubkey match) ---
+  if (verifyDSC) {
+    if (!bundle.dscCertificate) {
+      errors.push('Missing dscCertificate in proof bundle');
+    } else {
+      const dscResult = await verifyDSC(bundle.dscCertificate);
+      if (!dscResult.trusted) {
+        errors.push('DSC certificate is not signed by a trusted CSCA');
+      }
+      // Compare DSC pubkey with sod-verify publicInputs
+      const sodPubX = sodVerify.publicInputs.pubkey_x as string[];
+      const sodPubY = sodVerify.publicInputs.pubkey_y as string[];
+      if (!arraysEqual(dscResult.publicKey.x, sodPubX.map(Number))
+        || !arraysEqual(dscResult.publicKey.y, sodPubY.map(Number))) {
+        errors.push('DSC public key does not match sod-verify pubkey_x/pubkey_y');
+      }
+    }
+  }
+
+  // dg-map must reference sod-verify's output
+  if (dgMap.publicInputs.econtent_binding !== sodVerify.publicOutputs.econtent_binding) {
+    errors.push('dg-map econtent_binding does not match sod-verify output');
+  }
+
+  // dg13 binding must equal dg-map output (same DG13 hash)
+  if (dg13.publicOutputs.binding !== dgMap.publicOutputs.dg_binding) {
+    errors.push('dg13 binding does not match dg-map output');
+  }
+
+  const commitment = dg13.publicOutputs.commitment;
+
+  // Build conditionID lookup maps
+  const discloseByID = new Map(conditions.disclose.map((d) => [d.conditionID, d]));
+  const predicateByID = new Map(conditions.predicates.map((p) => [p.conditionID, p]));
+
+  // --- 3. Verify Merkle disclosures (raw Poseidon2 path — no ZKP) ---
+  const disclosureList = bundle.disclosures ?? [];
+  const disclosedConditionIDs = new Set<string>();
+
+  if (poseidon2 && commitment !== undefined) {
+    const saltHex = expectedSalt !== undefined ? toHex(expectedSalt)
+      : (sodVerify.publicInputs.salt as string | undefined);
+
+    for (const disc of disclosureList) {
+      const disclose = discloseByID.get(disc.conditionID);
+      if (!disclose) {
+        errors.push(`Disclosure "${disc.conditionID}" does not match any requested condition`);
+        continue;
+      }
+
+      // 3a. tag_id must match the requested field
+      const expectedTagId = toHex(BigInt(fieldIdToTagId(disclose.field)));
+      if (disc.tagId !== expectedTagId) {
+        errors.push(`Disclosure "${disc.conditionID}" tag_id mismatch: expected ${expectedTagId}, got ${disc.tagId}`);
+        continue;
+      }
+
+      // 3b. Verify Merkle inclusion: recompute leaf → walk path → check commitment
+      const valid = verifyMerklePath(poseidon2, disc, commitment as string, saltHex as string);
+      if (!valid) {
+        errors.push(`Disclosure "${disc.conditionID}" Merkle proof invalid`);
+        continue;
+      }
+
+      disclosedConditionIDs.add(disc.conditionID);
+      disclosedFields[disclose.field] = decodeMerkleDisclosure(disc);
+    }
+  } else if (disclosureList.length > 0 && !poseidon2) {
+    errors.push('Merkle disclosures present but poseidon2 hasher not available for verification');
+  }
+
+  // --- 4. Verify condition-linked ZKP proofs: commitment, circuitId, tag_id, params ---
+  const conditionProofs = proofs.filter((p) => p.conditionID !== undefined);
+  for (const entry of conditionProofs) {
+    const cid = entry.conditionID!;
+
+    // 4a. Commitment must match dg13-merklelize output
+    if (commitment !== undefined && entry.publicInputs.commitment !== commitment) {
+      errors.push(`Proof "${cid}" commitment mismatch`);
+      continue;
+    }
+
+    const predicate = predicateByID.get(cid);
+
+    if (predicate) {
+      // 4b. Circuit must match the operator
+      const expectedCircuit = PREDICATE_CIRCUIT_MAP[predicate.operator];
+      if (entry.circuitId !== expectedCircuit) {
+        errors.push(`Proof "${cid}" expected circuitId "${expectedCircuit}", got "${entry.circuitId}"`);
+        continue;
+      }
+      // 4c. tag_id must match the requested field
+      const expectedTagId = toHex(BigInt(fieldIdToTagId(predicate.field)));
+      if (entry.publicInputs.tag_id !== expectedTagId) {
+        errors.push(`Proof "${cid}" tag_id mismatch: expected ${expectedTagId} for field "${predicate.field}", got ${entry.publicInputs.tag_id}`);
+        continue;
+      }
+      // 4d. Predicate params must match the request
+      const expectedParams = flattenPredicateParams(predicate);
+      for (const [key, value] of Object.entries(expectedParams)) {
+        if (String(entry.publicInputs[key]) !== String(value)) {
+          errors.push(`Proof "${cid}" param "${key}" mismatch: expected ${value}, got ${entry.publicInputs[key]}`);
+        }
+      }
+    } else if (!discloseByID.has(cid)) {
+      // Unknown conditionID that's neither a predicate nor a disclosure
+      errors.push(`Proof "${cid}" does not match any requested condition`);
+    }
+  }
+
+  // --- 5. Check all required conditions are covered ---
+  for (const d of conditions.disclose) {
+    if (!disclosedConditionIDs.has(d.conditionID)) {
+      if (!d.optional) errors.push(`Missing disclosure for "${d.conditionID}"`);
+    }
+  }
+
+  for (const p of conditions.predicates) {
+    if (p.operator === 'equals' && 'ref' in (p.params as Record<string, unknown>)) continue;
+    if (!conditionProofs.some((pr) => pr.conditionID === p.conditionID)) {
+      if (!p.optional) errors.push(`Missing proof for "${p.conditionID}"`);
+    }
+  }
+
+  return { verified: errors.length === 0, disclosedFields, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function detectProfile(credential: MatchableCredential) {
+  const proof = credential.proof as Record<string, unknown> | undefined;
+  if (proof && typeof proof.dgProfile === 'string') {
+    const profile = getProfile(proof.dgProfile);
+    if (profile) return profile;
+  }
+  const credTypes = credential.type as readonly string[];
+  for (const t of credTypes) {
+    const profile = getProfileByDocType(t);
+    if (profile) return profile;
+  }
+  return undefined;
+}
+
+function extractRawDGs(credential: MatchableCredential): Record<string, string> {
+  const rawDGs: Record<string, string> = {};
+  for (const [key, value] of Object.entries(credential.credentialSubject)) {
+    if (key.startsWith('dg') && typeof value === 'string') {
+      rawDGs[key] = value;
+    }
+  }
+  return rawDGs;
+}
+
+/**
+ * Decode dg13-field-reveal publicOutputs (length + data_0..data_3) into a UTF-8 string.
+ * Each data_N is a hex-encoded packed chunk. `length` is the total byte count.
+ */
+function decodeFieldRevealOutputs(outputs: Record<string, unknown>): string {
+  const length = Number(outputs.length);
+  if (!length || length <= 0) return '';
+
+  const chunks = [outputs.data_0, outputs.data_1, outputs.data_2, outputs.data_3]
+    .map((v) => String(v ?? '0x00'));
+
+  const bytes: number[] = [];
+  for (const chunk of chunks) {
+    const hex = chunk.startsWith('0x') ? chunk.slice(2) : chunk;
+    if (hex === '00' || hex === '0') continue;
+    for (let i = 0; i < hex.length; i += 2) {
+      bytes.push(parseInt(hex.slice(i, i + 2), 16));
+    }
+  }
+
+  return new TextDecoder().decode(new Uint8Array(bytes.slice(0, length)));
+}
+
+/**
+ * Verify a raw Merkle disclosure: recompute leaf → walk path → check commitment.
+ */
+function verifyMerklePath(
+  poseidon2: Poseidon2Hasher,
+  disc: MerkleDisclosure,
+  commitment: string,
+  salt: string,
+): boolean {
+  const tagId = BigInt(disc.tagId);
+  const length = BigInt(disc.length);
+  const data = disc.data.map(BigInt);
+  const packedHash = BigInt(disc.packedHash);
+  const saltBig = BigInt(salt);
+
+  // 1. Compute leaf hash (same formula as dg13-merklelize circuit)
+  const leaf = poseidon2.hash(
+    [tagId, length, data[0]!, data[1]!, data[2]!, data[3]!, saltBig, packedHash],
+    8,
+  );
+
+  // 2. Walk Merkle path
+  const leafIndex = Number(tagId) - 1;
+  let current = leaf;
+  for (let level = 0; level < disc.siblings.length; level++) {
+    const sibling = BigInt(disc.siblings[level]!);
+    const bit = (leafIndex >> level) & 1;
+    current = bit === 0
+      ? poseidon2.hash([current, sibling], 2)
+      : poseidon2.hash([sibling, current], 2);
+  }
+
+  // 3. Check commitment = Poseidon2(root, salt)
+  const computedCommitment = poseidon2.hash([current, saltBig], 2);
+  return BigInt(commitment) === computedCommitment;
+}
+
+/**
+ * Decode a MerkleDisclosure's packed data into a UTF-8 string.
+ */
+function decodeMerkleDisclosure(disc: MerkleDisclosure): string {
+  return decodeFieldRevealOutputs({
+    length: disc.length,
+    data_0: disc.data[0],
+    data_1: disc.data[1],
+    data_2: disc.data[2],
+    data_3: disc.data[3],
+  });
+}
+
+function arraysEqual(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+function flattenPredicateParams(p: PredicateCondition): Record<string, unknown> {
+  const params = p.params as Record<string, unknown>;
+  if (p.operator === 'inRange') {
+    return { lower_bound: params.gte, upper_bound: params.lte };
+  }
+  if ('value' in params) {
+    return { threshold: params.value };
+  }
+  return {};
+}

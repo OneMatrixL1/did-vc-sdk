@@ -10,34 +10,31 @@ import type {
   DocumentRequestMatch,
   CandidateCredential,
 } from '../types/matching.js';
-import type { SchemaResolverMap } from '../types/schema-resolver.js';
-import { defaultResolvers } from '../resolvers/index.js';
+import type { ProofSystemMap } from '../types/proof-system.js';
+import { defaultProofSystems } from '../proof-system/index.js';
 import { extractConditions } from './field-extractor.js';
 
 /**
  * Match available credentials against a VPRequest's rule tree.
  * Returns an annotated match tree that mirrors the request structure,
  * suitable for UI rendering (show what's needed, what matches, where choices exist).
- *
- * @param resolvers  Optional — extra or overriding resolvers merged on top of
- *                   the built-in defaults (JsonSchema + ICAO9303SOD).
  */
 export function matchCredentials(
   rules: DocumentRequestNode,
   credentials: MatchableCredential[],
-  resolvers?: SchemaResolverMap,
+  proofSystems?: ProofSystemMap,
 ): RuleTreeMatch {
-  const merged = { ...defaultResolvers, ...resolvers };
+  const merged = { ...defaultProofSystems, ...proofSystems };
   return matchNode(rules, credentials, merged);
 }
 
 function matchNode(
   node: DocumentRequestNode,
   credentials: MatchableCredential[],
-  resolvers: SchemaResolverMap,
+  systems: ProofSystemMap,
 ): RuleTreeMatch {
   if (node.type === 'Logical') {
-    const children = node.values.map((child) => matchNode(child, credentials, resolvers));
+    const children = node.values.map((child) => matchNode(child, credentials, systems));
     const satisfied = node.operator === 'AND'
       ? children.every((c) => c.satisfied)
       : children.some((c) => c.satisfied);
@@ -50,29 +47,28 @@ function matchNode(
     } satisfies LogicalRuleMatch;
   }
 
-  // Leaf: DocumentRequest
-  return matchDocumentRequest(node, credentials, resolvers);
+  return matchDocumentRequest(node, credentials, systems);
 }
 
 function checkFieldCoverage(
   request: DocumentRequest,
   credential: MatchableCredential,
-  resolvers: SchemaResolverMap,
-): Pick<CandidateCredential, 'disclosedFields' | 'missingFields' | 'satisfiableZKPs' | 'unsatisfiableZKPs'> {
-  const resolver = resolvers[request.schemaType];
-  if (!resolver) {
+  systems: ProofSystemMap,
+): Pick<CandidateCredential, 'disclosedFields' | 'missingFields' | 'satisfiablePredicates' | 'unsatisfiablePredicates'> {
+  const system = systems[request.schemaType];
+  if (!system) {
     throw new Error(
-      `No SchemaResolver registered for schemaType "${request.schemaType}". ` +
-      `Available resolvers: [${Object.keys(resolvers).join(', ')}]`,
+      `No SchemaProofSystem registered for schemaType "${request.schemaType}". ` +
+      `Available: [${Object.keys(systems).join(', ')}]`,
     );
   }
 
-  const { disclose, zkp } = extractConditions(request.conditions);
+  const { disclose, predicates } = extractConditions(request.conditions);
 
   const disclosedFields: string[] = [];
   const missingFields: string[] = [];
   for (const dc of disclose) {
-    const { found } = resolver.resolveField(credential, dc.field);
+    const { found } = system.resolveField(credential, dc.field);
     if (found) {
       disclosedFields.push(dc.field);
     } else if (!dc.optional) {
@@ -80,37 +76,25 @@ function checkFieldCoverage(
     }
   }
 
-  const satisfiableZKPs: string[] = [];
-  const unsatisfiableZKPs: string[] = [];
-  for (const zc of zkp) {
-    const allInputsResolvable = Object.values(zc.privateInputs).every(
-      (path) => resolver.resolveField(credential, path).found,
-    );
-    if (allInputsResolvable) {
-      satisfiableZKPs.push(zc.conditionID);
-    } else {
-      unsatisfiableZKPs.push(zc.conditionID);
-    }
-  }
+  // Predicates are always satisfiable at match time —
+  // actual satisfiability is checked at prove time.
+  const satisfiablePredicates: string[] = predicates.map((p) => p.conditionID);
+  const unsatisfiablePredicates: string[] = [];
 
-  return {
-    disclosedFields, missingFields, satisfiableZKPs, unsatisfiableZKPs,
-  };
+  return { disclosedFields, missingFields, satisfiablePredicates, unsatisfiablePredicates };
 }
 
 function matchSingleCredential(
   request: DocumentRequest,
   cred: MatchableCredential,
   index: number,
-  resolvers: SchemaResolverMap,
+  systems: ProofSystemMap,
 ): CandidateCredential | null {
-  // 1. Filter by docType
   const credTypes = cred.type as readonly string[];
   if (!request.docType.some((dt) => credTypes.indexOf(dt) !== -1)) {
     return null;
   }
 
-  // 2. Filter by issuer (if specified)
   if (request.issuer !== undefined) {
     const allowedIssuers = Array.isArray(request.issuer) ? request.issuer : [request.issuer];
     if (!allowedIssuers.includes(getCredentialIssuerId(cred))) {
@@ -118,37 +102,35 @@ function matchSingleCredential(
     }
   }
 
-  // 3. Full-document mode: skip field coverage entirely
   if (request.disclosureMode === 'full') {
     return {
       credential: cred,
       index,
       disclosedFields: [],
       missingFields: [],
-      satisfiableZKPs: [],
-      unsatisfiableZKPs: [],
+      satisfiablePredicates: [],
+      unsatisfiablePredicates: [],
       fullyQualified: true,
     };
   }
 
-  // 4. Selective mode: check field coverage via schema resolver
-  const coverage = checkFieldCoverage(request, cred, resolvers);
+  const coverage = checkFieldCoverage(request, cred, systems);
 
   return {
     credential: cred,
     index,
     ...coverage,
-    fullyQualified: coverage.missingFields.length === 0 && coverage.unsatisfiableZKPs.length === 0,
+    fullyQualified: coverage.missingFields.length === 0 && coverage.unsatisfiablePredicates.length === 0,
   };
 }
 
 function matchDocumentRequest(
   request: DocumentRequest,
   credentials: MatchableCredential[],
-  resolvers: SchemaResolverMap,
+  systems: ProofSystemMap,
 ): DocumentRequestMatch {
   const candidates = credentials
-    .map((cred, i) => matchSingleCredential(request, cred, i, resolvers))
+    .map((cred, i) => matchSingleCredential(request, cred, i, systems))
     .filter((c): c is CandidateCredential => c !== null);
 
   return {

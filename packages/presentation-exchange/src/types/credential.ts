@@ -1,8 +1,12 @@
 // ---------------------------------------------------------------------------
-// Proof system & credential proof types (shared leaf — no type-file imports)
+// Proof system & credential proof types
 // ---------------------------------------------------------------------------
 
-export type ProofSystem = 'groth16' | 'plonk' | 'fflonk' | 'halo2' | 'stark' | (string & {});
+import type { ICAO9303ZKPProofBundle } from './icao-proof-bundle.js';
+
+export type { ICAO9303ZKPProofBundle } from './icao-proof-bundle.js';
+
+export type ProofSystem = 'groth16' | 'plonk' | 'fflonk' | 'halo2' | 'ultra_honk' | 'stark' | (string & {});
 
 export interface DataIntegrityProof {
   type: 'DataIntegrityProof';
@@ -13,17 +17,7 @@ export interface DataIntegrityProof {
   [key: string]: unknown;
 }
 
-export interface ZKPProof {
-  type: 'ZKPProof';
-  conditionID: string;
-  circuitId: string;
-  proofSystem: ProofSystem;
-  publicInputs: Record<string, unknown>;
-  publicOutputs: Record<string, unknown>;
-  proofValue: string;
-}
-
-export type CredentialProof = DataIntegrityProof | ZKPProof;
+export type CredentialProof = DataIntegrityProof | ICAO9303ZKPProofBundle;
 
 // ---------------------------------------------------------------------------
 // Presented credential (may have derived proof)

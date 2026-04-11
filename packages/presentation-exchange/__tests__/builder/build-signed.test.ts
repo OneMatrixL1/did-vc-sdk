@@ -165,7 +165,7 @@ describe('VPRequestBuilder.buildSigned()', () => {
       .addDocumentRequest(
         new DocumentRequestBuilder('dr-1', 'KYCCredential')
           .setSchemaType('JsonSchema')
-          .disclose('c-name', '$.credentialSubject.fullName'),
+          .disclose({ field: '$.credentialSubject.fullName', id: 'c-name' }),
       )
       .buildSigned(verifierKeyDoc);
 
@@ -225,7 +225,7 @@ describe('VPRequestBuilder.buildSigned()', () => {
       .addDocumentRequest(
         new DocumentRequestBuilder('dr-2', 'KYCCredential')
           .setSchemaType('JsonSchema')
-          .disclose('c-name', '$.credentialSubject.fullName'),
+          .disclose({ field: '$.credentialSubject.fullName', id: 'c-name' }),
       )
       .buildSigned(verifierKeyDoc);
 
@@ -251,7 +251,7 @@ describe('VPRequestBuilder.buildSigned()', () => {
       .addDocumentRequest(
         new DocumentRequestBuilder('dr-3', 'KYCCredential')
           .setSchemaType('JsonSchema')
-          .disclose('c-name', '$.credentialSubject.fullName'),
+          .disclose({ field: '$.credentialSubject.fullName', id: 'c-name' }),
       )
       .buildSigned(verifierKeyDoc);
 
@@ -313,7 +313,7 @@ describe('verifyVPRequestFull()', () => {
       .addDocumentRequest(
         new DocumentRequestBuilder('dr-f1', 'KYCCredential')
           .setSchemaType('JsonSchema')
-          .disclose('c-name', '$.credentialSubject.fullName'),
+          .disclose({ field: '$.credentialSubject.fullName', id: 'c-name' }),
       )
       .buildSigned(verifierKeyDoc);
 
@@ -337,7 +337,7 @@ describe('verifyVPRequestFull()', () => {
       .addDocumentRequest(
         new DocumentRequestBuilder('dr-u1', 'KYCCredential')
           .setSchemaType('JsonSchema')
-          .disclose('c-name', '$.credentialSubject.fullName'),
+          .disclose({ field: '$.credentialSubject.fullName', id: 'c-name' }),
       )
       .build();
 
@@ -359,7 +359,7 @@ describe('verifyVPRequestFull()', () => {
       .addDocumentRequest(
         new DocumentRequestBuilder('dr-t1', 'KYCCredential')
           .setSchemaType('JsonSchema')
-          .disclose('c-name', '$.credentialSubject.fullName'),
+          .disclose({ field: '$.credentialSubject.fullName', id: 'c-name' }),
       )
       .buildSigned(verifierKeyDoc);
 
@@ -389,7 +389,7 @@ describe('verifyVPRequestFull()', () => {
       .addDocumentRequest(
         new DocumentRequestBuilder('dr-sf', 'KYCCredential')
           .setSchemaType('JsonSchema')
-          .disclose('c-name', '$.credentialSubject.fullName'),
+          .disclose({ field: '$.credentialSubject.fullName', id: 'c-name' }),
       )
       .buildSigned(verifierKeyDoc);
 

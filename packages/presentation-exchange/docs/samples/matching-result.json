@@ -1,0 +1,66 @@
+{
+  "type": "DocumentRequest",
+  "request": {
+    "type": "DocumentRequest",
+    "docRequestID": "cccd",
+    "docType": [
+      "CCCDCredential"
+    ],
+    "schemaType": "ICAO9303SOD",
+    "name": "National ID (CCCD)",
+    "conditions": [
+      {
+        "type": "DocumentCondition",
+        "conditionID": "fullName",
+        "field": "fullName",
+        "operator": "disclose"
+      },
+      {
+        "type": "DocumentCondition",
+        "conditionID": "gender",
+        "field": "gender",
+        "operator": "disclose"
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "credential": {
+        "type": [
+          "VerifiableCredential",
+          "CCCDCredential"
+        ],
+        "issuer": "did:web:cccd.gov.vn",
+        "credentialSubject": {
+          "fullName": "Nguyen Thi B",
+          "dateOfBirth": "15/03/1995",
+          "documentNumber": "012345678902",
+          "gender": "Nu",
+          "nationality": "Viet Nam",
+          "ethnicity": "Kinh",
+          "religion": "Khong",
+          "hometown": "Ha Noi",
+          "permanentAddress": "123 Duong Lang",
+          "identifyingMarks": "Khong",
+          "issueDate": "01/01/2024",
+          "expiryDate": "01/01/2034",
+          "parentsInfo": "Nguyen Van A",
+          "dg13": "MBECAQEMDDAxMjM0NTY3ODkwMjARAgECDAxOZ3V5ZW4gVGhpIEIwDwIBAwwKMTUvMDMvMTk5NTAHAgEEDAJOdTANAgEFDAhWaWV0IE5hbTAJAgEGDARLaW5oMAoCAQcMBUtob25nMAsCAQgMBkhhIE5vaTATAgEJDA4xMjMgRHVvbmcgTGFuZzAKAgEKDAVLaG9uZzAPAgELDAowMS8wMS8yMDI0MA8CAQwMCjAxLzAxLzIwMzQwEQIBDQwMTmd1eWVuIFZhbiBB"
+        },
+        "proof": {
+          "dgProfile": "VN-CCCD-2024"
+        }
+      },
+      "index": 0,
+      "disclosedFields": [
+        "fullName",
+        "gender"
+      ],
+      "missingFields": [],
+      "satisfiablePredicates": [],
+      "unsatisfiablePredicates": [],
+      "fullyQualified": true
+    }
+  ],
+  "satisfied": true
+}

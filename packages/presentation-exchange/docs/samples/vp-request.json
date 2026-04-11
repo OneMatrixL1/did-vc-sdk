@@ -1,0 +1,37 @@
+{
+  "type": [
+    "VerifiablePresentationRequest"
+  ],
+  "id": "kyc-001",
+  "version": "2.0",
+  "name": "Bank KYC Verification",
+  "nonce": "nonce-abc123",
+  "verifier": "did:web:bank.vn",
+  "verifierName": "Vietnam International Bank",
+  "verifierUrl": "https://bank.vn",
+  "createdAt": "2026-04-08T10:38:01.001Z",
+  "expiresAt": "2099-12-31T23:59:59Z",
+  "rules": {
+    "type": "DocumentRequest",
+    "docRequestID": "cccd",
+    "docType": [
+      "CCCDCredential"
+    ],
+    "schemaType": "ICAO9303SOD",
+    "name": "National ID (CCCD)",
+    "conditions": [
+      {
+        "type": "DocumentCondition",
+        "conditionID": "fullName",
+        "field": "fullName",
+        "operator": "disclose"
+      },
+      {
+        "type": "DocumentCondition",
+        "conditionID": "gender",
+        "field": "gender",
+        "operator": "disclose"
+      }
+    ]
+  }
+}

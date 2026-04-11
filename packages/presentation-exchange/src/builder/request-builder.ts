@@ -18,7 +18,7 @@ import { vpRequestContext } from '../utils/vp-request-context.js';
  *   new VPRequestBuilder('req-1')
  *     .setVerifier({ id: 'did:web:example', name: 'Example', url: 'https://example.com' })
  *     .setName('Verification Request')
- *     .addDocumentRequest(new DocumentRequestBuilder('dr1', 'CCCDCredential').disclose('c1', '$.credentialSubject.fullName').build())
+ *     .addDocumentRequest(new DocumentRequestBuilder('dr1', 'CCCDCredential').disclose({ field: 'fullName' }).build())
  *     .build()
  */
 export class VPRequestBuilder {

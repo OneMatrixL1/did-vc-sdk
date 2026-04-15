@@ -4,6 +4,9 @@
  * Proof chain: sod-validate → dg-bridge → dg13-merklelize
  * Optional: did-delegate (Active Authentication delegation)
  * All proofs share the same domain hash for binding.
+ *
+ * Hashing (Poseidon2) and Merkle tree building are done in pure JS.
+ * Only ZKP proof generation goes to the native/WASM ZKPProvider.
  */
 
 import type {
@@ -12,14 +15,13 @@ import type {
   ChainProof,
   LeafData,
   ZKPProvider,
-  Poseidon2Hasher,
-  MerkleTreeBuilder,
   ProofStore,
   ProofGenPhase,
   CachedMerkleTree,
 } from './types.js';
 import type { MatchableCredential, ZKPProof, PresentedCredential, CredentialProof } from '../types/credential.js';
 import { deriveDomain, DEFAULT_DOMAIN_NAME } from './domain.js';
+import { buildMerkleTree } from './merkle-tree.js';
 import {
   buildSodValidateInputs,
   buildDgBridgeInputs,
@@ -35,10 +37,6 @@ import {
 export interface ICAO9303ProofSystemConfig {
   /** Circuit prover (native plugin or WASM). */
   zkpProvider: ZKPProvider;
-  /** Poseidon2 hasher for domain derivation. */
-  hasher: Poseidon2Hasher;
-  /** Merkle tree builder for DG13 field tree. */
-  merkleTreeBuilder: MerkleTreeBuilder;
   /** Optional persistent proof store. Without one, proofs are not cached. */
   proofStore?: ProofStore;
 }
@@ -59,14 +57,10 @@ export interface DelegationData {
 
 export class ICAO9303ProofSystem {
   private readonly zkp: ZKPProvider;
-  private readonly hasher: Poseidon2Hasher;
-  private readonly merkle: MerkleTreeBuilder;
   private readonly store: ProofStore | undefined;
 
   constructor(config: ICAO9303ProofSystemConfig) {
     this.zkp = config.zkpProvider;
-    this.hasher = config.hasher;
-    this.merkle = config.merkleTreeBuilder;
     this.store = config.proofStore;
   }
 
@@ -74,9 +68,9 @@ export class ICAO9303ProofSystem {
   // Domain
   // -------------------------------------------------------------------------
 
-  /** Derive a Domain from a human-readable name. */
-  async deriveDomain(name: string = DEFAULT_DOMAIN_NAME): Promise<Domain> {
-    return deriveDomain(name, this.hasher);
+  /** Derive a Domain from a human-readable name. Pure JS, no async. */
+  deriveDomain(name: string = DEFAULT_DOMAIN_NAME): Domain {
+    return deriveDomain(name);
   }
 
   // -------------------------------------------------------------------------
@@ -89,7 +83,7 @@ export class ICAO9303ProofSystem {
    * Steps:
    * 1. Parse SOD → build sod-validate inputs → prove
    * 2. Build dg-bridge inputs (using eContentBinding) → prove
-   * 3. Build Merkle tree from DG13 fields
+   * 3. Build Merkle tree from DG13 fields (pure JS Poseidon2)
    * 4. Build dg13-merklelize inputs → prove
    * 5. Assert dgBinding match (sanity check)
    * 6. (Optional) Build did-delegate inputs → prove
@@ -136,10 +130,10 @@ export class ICAO9303ProofSystem {
       publicOutputs: dgBridgeResult.publicOutputs,
     };
 
-    // Step 3: Build Merkle tree
+    // Step 3: Build Merkle tree (pure JS — no native/WASM)
     onProgress?.('merkle-tree');
     const dg13Inputs = buildDg13MerklelizeInputs(dg13Base64, domain.hash);
-    const merkleTree = await this.buildMerkleTreeFromDG13(dg13Inputs, domain.hash);
+    const merkleTree = this.buildMerkleTreeFromDG13(dg13Inputs, domain.hash);
 
     // Step 4: DG13 merklelize
     onProgress?.('dg13-merklelize');
@@ -197,7 +191,6 @@ export class ICAO9303ProofSystem {
       merkleTree,
     };
 
-    // Persist if store is configured
     if (this.store) {
       await this.store.save(proofSet);
     }
@@ -227,14 +220,6 @@ export class ICAO9303ProofSystem {
   // On-demand predicate proofs
   // -------------------------------------------------------------------------
 
-  /**
-   * Generate a predicate proof using cached Merkle tree data.
-   *
-   * @param proofSet - Cached chain proofs (contains merkle tree)
-   * @param circuitId - Predicate circuit (e.g. 'date-greaterthan')
-   * @param tagId - DG13 field tagId (1-based)
-   * @param extra - Threshold values and optional dateBytes
-   */
   async generatePredicateProof(
     proofSet: DomainProofSet,
     circuitId: string,
@@ -272,29 +257,16 @@ export class ICAO9303ProofSystem {
   // Verifier credential with ZKP disclosure
   // -------------------------------------------------------------------------
 
-  /**
-   * Build a PresentedCredential for the verifier with ZKP-authenticated fields.
-   *
-   * DG2 (photo) is included as raw base64 with a `dg-bridge` proof for DG2
-   * that binds its hash to the SOD eContent, proving authenticity.
-   *
-   * @param credential - The verifier's stored credential
-   * @param credentialId - Storage ID for proof cache lookup
-   * @param domain - Domain to use for proof generation
-   * @param includePhoto - Whether to include authenticated DG2 photo
-   */
   async buildVerifierCredential(
     credential: MatchableCredential,
     credentialId: string,
     domain: Domain,
     includePhoto: boolean,
   ): Promise<PresentedCredential> {
-    // Get or generate chain proofs
     const proofSet = await this.getOrGenerateProofs(credential, credentialId, domain);
 
     const proofs: CredentialProof[] = [];
 
-    // Chain proofs — proves the credential is authentic
     const chainProofs = [proofSet.sodValidate, proofSet.dgBridge, proofSet.dg13Merklelize];
     if (proofSet.didDelegate) {
       chainProofs.push(proofSet.didDelegate);
@@ -311,27 +283,22 @@ export class ICAO9303ProofSystem {
       } satisfies ZKPProof);
     }
 
-    // Build credentialSubject — only ZKP-revealed data
     const subject: Record<string, unknown> = {};
     if (credential.credentialSubject['id'] !== undefined) {
       subject['id'] = credential.credentialSubject['id'];
     }
 
-    // DG2 photo: include raw + dg-bridge proof for authenticity
     if (includePhoto) {
       const dg2 = credential.credentialSubject['dg2'];
       if (typeof dg2 === 'string') {
         subject['dg2'] = dg2;
 
-        // Generate dg-bridge proof for DG2 (binds DG2 hash to SOD)
         const sodBase64 = this.extractSOD(credential);
         const { witness: sodWitness } = buildSodValidateInputs(sodBase64, domain.hash);
         const eContentBinding = proofSet.sodValidate.publicOutputs['eContentBinding'] as string;
 
-        // Build dg-bridge inputs for DG2 instead of DG13
         const dg2BridgeInputs = buildDgBridgeInputs(sodWitness, domain.hash, eContentBinding);
         dg2BridgeInputs.publicInputs.dgNumber = 2;
-        // Find DG2 offset in eContent
         const { findDGEntry } = await import('./sod-parser.js');
         const econtent = sodWitness.econtent;
         const dg2Offset = findDGEntry(new Uint8Array(econtent), 2);
@@ -368,15 +335,13 @@ export class ICAO9303ProofSystem {
   }
 
   // -------------------------------------------------------------------------
-  // Storage delegation
+  // Storage
   // -------------------------------------------------------------------------
 
-  /** List all domains with cached proofs for a credential. */
   async listDomains(credentialId: string): Promise<Domain[]> {
     return this.store ? this.store.listDomains(credentialId) : [];
   }
 
-  /** Delete all cached proofs for a credential. */
   async deleteProofs(credentialId: string): Promise<void> {
     if (this.store) {
       await this.store.deleteAll(credentialId);
@@ -403,14 +368,17 @@ export class ICAO9303ProofSystem {
     return dg13;
   }
 
-  private async buildMerkleTreeFromDG13(
+  private buildMerkleTreeFromDG13(
     dg13Inputs: { privateInputs: { rawMsg: number[]; dgLen: number; fieldOffsets: number[]; fieldLengths: number[] } },
     domain: string,
-  ): Promise<CachedMerkleTree> {
-    const { rawMsg, fieldOffsets, fieldLengths } = dg13Inputs.privateInputs;
-    const fields = [];
-    const leafDataArr: LeafData[] = [];
+  ): CachedMerkleTree {
+    const { rawMsg, dgLen, fieldOffsets, fieldLengths } = dg13Inputs.privateInputs;
 
+    // Compute DG13 SHA-256 hash halves (needed for entropy derivation)
+    const dgHashHi = computeHashHalf(rawMsg, dgLen, 0);
+    const dgHashLo = computeHashHalf(rawMsg, dgLen, 16);
+
+    const fields = [];
     for (let i = 0; i < 16; i++) {
       const offset = fieldOffsets[i]!;
       const length = fieldLengths[i]!;
@@ -428,21 +396,10 @@ export class ICAO9303ProofSystem {
         }
       }
 
-      fields.push({
-        tagId: i + 1,
-        length,
-        packedFields,
-      });
-
-      leafDataArr.push({
-        length: length.toString(),
-        data: packedFields,
-      });
+      fields.push({ tagId: i + 1, length, packedFields });
     }
 
-    const tree = await this.merkle.build(fields, domain);
-
-    return { ...tree, leafData: leafDataArr };
+    return buildMerkleTree(fields, domain, dgHashHi, dgHashLo);
   }
 
   private extractLeafData(
@@ -455,4 +412,83 @@ export class ICAO9303ProofSystem {
     }
     return { length: leaf.length, data: [...leaf.data] };
   }
+}
+
+// ---------------------------------------------------------------------------
+// SHA-256 hash half computation (matches circuit's dgHashHi / dgHashLo)
+// ---------------------------------------------------------------------------
+
+function computeHashHalf(rawMsg: number[], dgLen: number, startByte: number): string {
+  // SHA-256 of raw DG13 bytes, then pack upper/lower 16 bytes as field element
+  // This is computed in JS using SubtleCrypto at tree-build time
+  // For now, placeholder — the actual SHA-256 is done inside the circuit.
+  // The Merkle tree builder needs these for entropy derivation.
+  // We compute SHA-256 synchronously via a simple implementation.
+  const data = new Uint8Array(rawMsg.slice(0, dgLen));
+  const hash = sha256Sync(data);
+  let result = 0n;
+  for (let i = startByte; i < startByte + 16; i++) {
+    result = result * 256n + BigInt(hash[i]!);
+  }
+  return '0x' + result.toString(16);
+}
+
+// Minimal synchronous SHA-256 (pure JS, no deps)
+function sha256Sync(data: Uint8Array): Uint8Array {
+  const K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ];
+  const rotr = (x: number, n: number) => ((x >>> n) | (x << (32 - n))) >>> 0;
+
+  const len = data.length;
+  const bitLen = len * 8;
+  const padLen = ((len + 9 + 63) & ~63);
+  const buf = new Uint8Array(padLen);
+  buf.set(data);
+  buf[len] = 0x80;
+  const view = new DataView(buf.buffer);
+  view.setUint32(padLen - 4, bitLen, false);
+
+  let [h0, h1, h2, h3, h4, h5, h6, h7] = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  ];
+
+  const w = new Uint32Array(64);
+  for (let off = 0; off < padLen; off += 64) {
+    for (let i = 0; i < 16; i++) w[i] = view.getUint32(off + i * 4, false);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i-15]!, 7) ^ rotr(w[i-15]!, 18) ^ (w[i-15]! >>> 3);
+      const s1 = rotr(w[i-2]!, 17) ^ rotr(w[i-2]!, 19) ^ (w[i-2]! >>> 10);
+      w[i] = (w[i-16]! + s0 + w[i-7]! + s1) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, h] = [h0!, h1!, h2!, h3!, h4!, h5!, h6!, h7!];
+    for (let i = 0; i < 64; i++) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + K[i]! + w[i]!) >>> 0;
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0;
+      d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    h0 = (h0! + a) >>> 0; h1 = (h1! + b) >>> 0; h2 = (h2! + c) >>> 0; h3 = (h3! + d) >>> 0;
+    h4 = (h4! + e) >>> 0; h5 = (h5! + f) >>> 0; h6 = (h6! + g) >>> 0; h7 = (h7! + h) >>> 0;
+  }
+
+  const result = new Uint8Array(32);
+  const rv = new DataView(result.buffer);
+  rv.setUint32(0, h0!, false); rv.setUint32(4, h1!, false);
+  rv.setUint32(8, h2!, false); rv.setUint32(12, h3!, false);
+  rv.setUint32(16, h4!, false); rv.setUint32(20, h5!, false);
+  rv.setUint32(24, h6!, false); rv.setUint32(28, h7!, false);
+  return result;
 }

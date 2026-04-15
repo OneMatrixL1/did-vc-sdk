@@ -13,7 +13,9 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -22,7 +24,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@1matrix/credential-sdk": "^0.54.9"
+    "@1matrix/credential-sdk": "^0.54.9",
+    "@zkpassport/poseidon2": "^0.6.2"
   },
   "devDependencies": {
     "tsup": "^8.0.0",

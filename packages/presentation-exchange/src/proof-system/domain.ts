@@ -3,7 +3,8 @@
  * BN254 field element via Poseidon2 hashing.
  */
 
-import type { Domain, Poseidon2Hasher } from './types.js';
+import type { Domain } from './types.js';
+import { poseidon2 } from './poseidon2.js';
 
 /** Default domain used at credential import and for quick sharing. */
 export const DEFAULT_DOMAIN_NAME = '1matrix';
@@ -14,12 +15,9 @@ export const DEFAULT_DOMAIN_NAME = '1matrix';
  * The name is packed into a single BN254 field element (max 31 UTF-8 bytes)
  * and hashed with Poseidon2 to produce a deterministic domain hash.
  */
-export async function deriveDomain(
-  name: string,
-  hasher: Poseidon2Hasher,
-): Promise<Domain> {
+export function deriveDomain(name: string): Domain {
   const packed = packStringToFieldHex(name);
-  const hash = await hasher.hash([packed], 1);
+  const hash = poseidon2([packed], 1);
   return { name, hash };
 }
 

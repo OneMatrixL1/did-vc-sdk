@@ -97,16 +97,6 @@ export interface ZKPProveResult {
   publicOutputs: Record<string, unknown>;
 }
 
-/** Poseidon2 hash over BN254 field elements. */
-export interface Poseidon2Hasher {
-  hash(inputs: string[], len: number): Promise<string>;
-}
-
-/** Build a Poseidon2 Merkle tree (16 leaves, depth 4). */
-export interface MerkleTreeBuilder {
-  build(fields: MerkleLeafInput[], domain: string): Promise<CachedMerkleTree>;
-}
-
 export interface MerkleLeafInput {
   tagId: number;
   length: number;

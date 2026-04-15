@@ -9,8 +9,6 @@ export type {
   ZKPProveParams,
   ZKPProveResult,
   ZKPVerifyParams,
-  Poseidon2Hasher,
-  MerkleTreeBuilder,
   MerkleLeafInput,
   ProofStore,
   ProofGenPhase,
@@ -18,6 +16,12 @@ export type {
 
 // Domain
 export { DEFAULT_DOMAIN_NAME, deriveDomain, packStringToFieldHex } from './domain.js';
+
+// Poseidon2 (pure JS, BN254)
+export { poseidon2, poseidon2BigInt } from './poseidon2.js';
+
+// Merkle tree (pure JS)
+export { buildMerkleTree, TREE_DEPTH, TREE_LEAVES } from './merkle-tree.js';
 
 // Proof system orchestrator
 export { ICAO9303ProofSystem } from './icao9303-proof-system.js';

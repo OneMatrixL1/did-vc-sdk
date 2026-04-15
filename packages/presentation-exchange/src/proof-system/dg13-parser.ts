@@ -3,12 +3,10 @@
  *
  * Extracts field positions from the DG13 ASN.1 structure and builds
  * witness inputs for the dg13-merklelize circuit.
- *
- * Ported from did-circuits/sdk/src/input/dg13-parser.ts.
  */
 
 const MAX_DG_BYTES = 700;
-const NUM_FIELDS = 32;
+const NUM_FIELDS = 16;
 
 // ---------------------------------------------------------------------------
 // TLV parsing
@@ -132,8 +130,8 @@ function parseDG13Fields(raw: Uint8Array): ParsedField[] {
 export interface DG13WitnessData {
   rawMsg: number[];         // padded to 700 bytes
   dgLen: number;            // actual DG13 length
-  fieldOffsets: number[];   // 32 offsets
-  fieldLengths: number[];   // 32 lengths
+  fieldOffsets: number[];   // 16 offsets
+  fieldLengths: number[];   // 16 lengths
 }
 
 /**
@@ -165,12 +163,10 @@ export function buildDG13WitnessData(dg13Base64: string): DG13WitnessData {
   for (let i = fields.length; i < NUM_FIELDS; i++) {
     const tagId = i + 1;
     rawMsg[pos] = 0x30;       // SEQUENCE
-    rawMsg[pos + 1] = 0x05;   // length
+    rawMsg[pos + 1] = 0x03;   // length (INTEGER only, no value)
     rawMsg[pos + 2] = 0x02;   // INTEGER
     rawMsg[pos + 3] = 0x01;   // length 1
     rawMsg[pos + 4] = tagId;  // tag ID
-    rawMsg[pos + 5] = 0x0c;   // UTF8STRING
-    rawMsg[pos + 6] = 0x00;   // length 0
     fieldOffsets[i] = pos + 7;
     fieldLengths[i] = 0;
     pos += 7;

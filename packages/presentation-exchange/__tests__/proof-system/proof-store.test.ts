@@ -10,23 +10,27 @@ function makeProofSet(credentialId: string, domainName: string, domainHash: stri
   const proof = {
     circuitId: 'test',
     proofValue: 'base64proof_' + domainHash,
-    publicInputs: { salt: domainHash },
-    publicOutputs: { binding: '0x' + domainHash.slice(2, 10) },
+    publicInputs: { domain: domainHash },
+    publicOutputs: { dgBinding: '0x' + domainHash.slice(2, 10) },
   };
   return {
     domain: { name: domainName, hash: domainHash },
     credentialId,
     createdAt: new Date().toISOString(),
-    sodVerify: { ...proof, circuitId: 'sod-verify' },
-    dgMap: { ...proof, circuitId: 'dg-map' },
+    sodValidate: { ...proof, circuitId: 'sod-validate' },
+    dgBridge: { ...proof, circuitId: 'dg-bridge' },
     dg13Merklelize: { ...proof, circuitId: 'dg13-merklelize' },
     merkleTree: {
       root: '0xroot_' + domainHash,
       commitment: '0xcommit_' + domainHash,
-      leaves: Array.from({ length: 32 }, (_, i) => '0xleaf' + i),
-      siblings: Array.from({ length: 32 }, (_, i) =>
-        Array.from({ length: 5 }, (_, j) => '0xsib' + i + '_' + j),
+      leaves: Array.from({ length: 16 }, (_, i) => '0xleaf' + i),
+      siblings: Array.from({ length: 16 }, (_, i) =>
+        Array.from({ length: 4 }, (_, j) => '0xsib' + i + '_' + j),
       ),
+      leafData: Array.from({ length: 16 }, () => ({
+        length: '10',
+        data: ['0x0', '0x0', '0x0', '0x0'] as const,
+      })),
     },
   };
 }
@@ -58,10 +62,10 @@ describe.each([
     expect(loaded!.credentialId).toBe('cred_001');
     expect(loaded!.domain.name).toBe('1matrix');
     expect(loaded!.domain.hash).toBe('0xaaa111');
-    expect(loaded!.sodVerify.circuitId).toBe('sod-verify');
-    expect(loaded!.merkleTree.leaves).toHaveLength(32);
-    expect(loaded!.merkleTree.siblings).toHaveLength(32);
-    expect(loaded!.merkleTree.siblings[0]).toHaveLength(5);
+    expect(loaded!.sodValidate.circuitId).toBe('sod-validate');
+    expect(loaded!.merkleTree.leaves).toHaveLength(16);
+    expect(loaded!.merkleTree.siblings).toHaveLength(16);
+    expect(loaded!.merkleTree.siblings[0]).toHaveLength(4);
   });
 
   it('returns null for nonexistent credential', async () => {
@@ -81,7 +85,7 @@ describe.each([
     const b = await store.get('cred_001', '0xbbb');
     expect(a!.domain.name).toBe('1matrix');
     expect(b!.domain.name).toBe('partner');
-    expect(a!.sodVerify.proofValue).not.toBe(b!.sodVerify.proofValue);
+    expect(a!.sodValidate.proofValue).not.toBe(b!.sodValidate.proofValue);
   });
 
   it('lists all domains for a credential', async () => {

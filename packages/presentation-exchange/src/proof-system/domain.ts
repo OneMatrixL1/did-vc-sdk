@@ -12,7 +12,7 @@ export const DEFAULT_DOMAIN_NAME = '1matrix';
  * Derive a {@link Domain} from a human-readable name.
  *
  * The name is packed into a single BN254 field element (max 31 UTF-8 bytes)
- * and hashed with Poseidon2 to produce a deterministic salt.
+ * and hashed with Poseidon2 to produce a deterministic domain hash.
  */
 export async function deriveDomain(
   name: string,

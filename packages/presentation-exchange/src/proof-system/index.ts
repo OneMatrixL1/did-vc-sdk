@@ -20,26 +20,28 @@ export { DEFAULT_DOMAIN_NAME, deriveDomain, packStringToFieldHex } from './domai
 
 // Proof system orchestrator
 export { ICAO9303ProofSystem } from './icao9303-proof-system.js';
-export type { ICAO9303ProofSystemConfig } from './icao9303-proof-system.js';
+export type { ICAO9303ProofSystemConfig, DelegationData } from './icao9303-proof-system.js';
 
 // Proof stores
 export { MemoryProofStore, LocalStorageProofStore } from './proof-store.js';
 
 // Witness builders (for advanced usage / custom proof generation)
 export {
-  buildSodVerifyInputs,
-  buildDgMapInputs,
+  buildSodValidateInputs,
+  buildDgBridgeInputs,
   buildDg13MerklelizeInputs,
   buildPredicateInputs,
-  buildFieldRevealInputs,
+  buildDIDDelegateInputs,
+  buildDG15WitnessData,
 } from './witness-builder.js';
 export type {
   CircuitInputs,
-  SodVerifyInputs,
-  DgMapInputs,
+  SodValidateInputs,
+  DgBridgeInputs,
   Dg13MerklelizeInputs,
   PredicateInputs,
-  FieldRevealInputs,
+  DIDDelegateInputs,
+  DG15WitnessData,
 } from './witness-builder.js';
 
 // SOD parser (for advanced usage)

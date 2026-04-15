@@ -1,8 +1,9 @@
 /**
  * ICAO 9303 ZKP Proof System — orchestrates domain-scoped proof generation.
  *
- * Proof chain: sod-verify → dg-map → dg13-merklelize
- * All proofs share the same domain hash (salt) for binding.
+ * Proof chain: sod-validate → dg-bridge → dg13-merklelize
+ * Optional: did-delegate (Active Authentication delegation)
+ * All proofs share the same domain hash for binding.
  */
 
 import type {
@@ -20,11 +21,11 @@ import type {
 import type { MatchableCredential, ZKPProof, PresentedCredential, CredentialProof } from '../types/credential.js';
 import { deriveDomain, DEFAULT_DOMAIN_NAME } from './domain.js';
 import {
-  buildSodVerifyInputs,
-  buildDgMapInputs,
+  buildSodValidateInputs,
+  buildDgBridgeInputs,
   buildDg13MerklelizeInputs,
   buildPredicateInputs,
-  buildFieldRevealInputs,
+  buildDIDDelegateInputs,
 } from './witness-builder.js';
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,16 @@ export interface ICAO9303ProofSystemConfig {
   merkleTreeBuilder: MerkleTreeBuilder;
   /** Optional persistent proof store. Without one, proofs are not cached. */
   proofStore?: ProofStore;
+}
+
+/** Optional delegation data for did-delegate circuit. */
+export interface DelegationData {
+  /** Base64-encoded DG15 from credential */
+  dg15Base64: string;
+  /** Base64-encoded Active Authentication signature from chip */
+  aaSignatureBase64: string;
+  /** Holder DID as hex field element */
+  did: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,51 +87,53 @@ export class ICAO9303ProofSystem {
    * Generate the full chain proof set for a credential under a domain.
    *
    * Steps:
-   * 1. Parse SOD → build sod-verify inputs → prove
-   * 2. Build dg-map inputs (using econtent_binding) → prove
+   * 1. Parse SOD → build sod-validate inputs → prove
+   * 2. Build dg-bridge inputs (using eContentBinding) → prove
    * 3. Build Merkle tree from DG13 fields
    * 4. Build dg13-merklelize inputs → prove
-   * 5. Assert dg_binding === dg13 binding (sanity check)
+   * 5. Assert dgBinding match (sanity check)
+   * 6. (Optional) Build did-delegate inputs → prove
    */
   async generateChainProofs(
     credential: MatchableCredential,
     credentialId: string,
     domain: Domain,
     onProgress?: (phase: ProofGenPhase) => void,
+    delegation?: DelegationData,
   ): Promise<DomainProofSet> {
     const sodBase64 = this.extractSOD(credential);
     const dg13Base64 = this.extractDG13(credential);
 
-    // Step 1: SOD verify
-    onProgress?.('sod-verify');
-    const { inputs: sodInputs, witness: sodWitness } = buildSodVerifyInputs(sodBase64, domain.hash);
+    // Step 1: SOD validate
+    onProgress?.('sod-validate');
+    const { inputs: sodInputs, witness: sodWitness } = buildSodValidateInputs(sodBase64, domain.hash);
     const sodResult = await this.zkp.prove({
-      circuitId: 'sod-verify',
+      circuitId: 'sod-validate',
       privateInputs: sodInputs.privateInputs,
       publicInputs: sodInputs.publicInputs,
     });
-    const econtentBinding = sodResult.publicOutputs['econtent_binding'] as string;
+    const eContentBinding = sodResult.publicOutputs['eContentBinding'] as string;
     const sodProof: ChainProof = {
-      circuitId: 'sod-verify',
+      circuitId: 'sod-validate',
       proofValue: sodResult.proofValue,
       publicInputs: sodInputs.publicInputs,
       publicOutputs: sodResult.publicOutputs,
     };
 
-    // Step 2: DG-map
-    onProgress?.('dg-map');
-    const dgMapInputs = buildDgMapInputs(sodWitness, domain.hash, econtentBinding);
-    const dgMapResult = await this.zkp.prove({
-      circuitId: 'dg-map',
-      privateInputs: dgMapInputs.privateInputs,
-      publicInputs: dgMapInputs.publicInputs,
+    // Step 2: DG bridge
+    onProgress?.('dg-bridge');
+    const dgBridgeInputs = buildDgBridgeInputs(sodWitness, domain.hash, eContentBinding);
+    const dgBridgeResult = await this.zkp.prove({
+      circuitId: 'dg-bridge',
+      privateInputs: dgBridgeInputs.privateInputs,
+      publicInputs: dgBridgeInputs.publicInputs,
     });
-    const dgBinding = dgMapResult.publicOutputs['dg_binding'] as string;
-    const dgMapProof: ChainProof = {
-      circuitId: 'dg-map',
-      proofValue: dgMapResult.proofValue,
-      publicInputs: dgMapInputs.publicInputs,
-      publicOutputs: dgMapResult.publicOutputs,
+    const dgBinding = dgBridgeResult.publicOutputs['dgBinding'] as string;
+    const dgBridgeProof: ChainProof = {
+      circuitId: 'dg-bridge',
+      proofValue: dgBridgeResult.proofValue,
+      publicInputs: dgBridgeInputs.publicInputs,
+      publicOutputs: dgBridgeResult.publicOutputs,
     };
 
     // Step 3: Build Merkle tree
@@ -135,7 +148,7 @@ export class ICAO9303ProofSystem {
       privateInputs: dg13Inputs.privateInputs,
       publicInputs: dg13Inputs.publicInputs,
     });
-    const dg13Binding = dg13Result.publicOutputs['binding'] as string;
+    const dg13Binding = dg13Result.publicOutputs['dgBinding'] as string;
     const dg13Proof: ChainProof = {
       circuitId: 'dg13-merklelize',
       proofValue: dg13Result.proofValue,
@@ -143,20 +156,44 @@ export class ICAO9303ProofSystem {
       publicOutputs: dg13Result.publicOutputs,
     };
 
-    // Sanity check: dg-map binding must match dg13-merklelize binding
+    // Sanity check: dg-bridge binding must match dg13-merklelize binding
     if (dgBinding !== dg13Binding) {
       throw new Error(
-        `Binding mismatch: dg-map produced ${dgBinding} but dg13-merklelize produced ${dg13Binding}`,
+        `Binding mismatch: dg-bridge produced ${dgBinding} but dg13-merklelize produced ${dg13Binding}`,
       );
+    }
+
+    // Step 5: DID delegation (optional)
+    let didDelegateProof: ChainProof | undefined;
+    if (delegation) {
+      onProgress?.('did-delegate');
+      const delegateInputs = buildDIDDelegateInputs(
+        delegation.dg15Base64,
+        delegation.aaSignatureBase64,
+        domain.hash,
+        delegation.did,
+      );
+      const delegateResult = await this.zkp.prove({
+        circuitId: 'did-delegate',
+        privateInputs: delegateInputs.privateInputs,
+        publicInputs: delegateInputs.publicInputs,
+      });
+      didDelegateProof = {
+        circuitId: 'did-delegate',
+        proofValue: delegateResult.proofValue,
+        publicInputs: delegateInputs.publicInputs,
+        publicOutputs: delegateResult.publicOutputs,
+      };
     }
 
     const proofSet: DomainProofSet = {
       domain,
       credentialId,
       createdAt: new Date().toISOString(),
-      sodVerify: sodProof,
-      dgMap: dgMapProof,
+      sodValidate: sodProof,
+      dgBridge: dgBridgeProof,
       dg13Merklelize: dg13Proof,
+      ...(didDelegateProof ? { didDelegate: didDelegateProof } : {}),
       merkleTree,
     };
 
@@ -177,16 +214,17 @@ export class ICAO9303ProofSystem {
     credentialId: string,
     domain: Domain,
     onProgress?: (phase: ProofGenPhase) => void,
+    delegation?: DelegationData,
   ): Promise<DomainProofSet> {
     if (this.store) {
       const cached = await this.store.get(credentialId, domain.hash);
       if (cached) return cached;
     }
-    return this.generateChainProofs(credential, credentialId, domain, onProgress);
+    return this.generateChainProofs(credential, credentialId, domain, onProgress, delegation);
   }
 
   // -------------------------------------------------------------------------
-  // On-demand predicate/reveal proofs
+  // On-demand predicate proofs
   // -------------------------------------------------------------------------
 
   /**
@@ -194,8 +232,8 @@ export class ICAO9303ProofSystem {
    *
    * @param proofSet - Cached chain proofs (contains merkle tree)
    * @param circuitId - Predicate circuit (e.g. 'date-greaterthan')
-   * @param tagId - DG13 field index (0-based)
-   * @param extra - Threshold values and optional date_bytes
+   * @param tagId - DG13 field tagId (1-based)
+   * @param extra - Threshold values and optional dateBytes
    */
   async generatePredicateProof(
     proofSet: DomainProofSet,
@@ -203,20 +241,19 @@ export class ICAO9303ProofSystem {
     tagId: number,
     extra: {
       threshold?: number;
-      threshold_min?: number;
-      threshold_max?: number;
-      date_bytes?: number[];
+      thresholdMin?: number;
+      thresholdMax?: number;
+      dateBytes?: number[];
     },
   ): Promise<ChainProof> {
     const commitment = proofSet.dg13Merklelize.publicOutputs['commitment'] as string;
-    const salt = proofSet.domain.hash;
-    const siblings = proofSet.merkleTree.siblings[tagId]!;
+    const domain = proofSet.domain.hash;
+    const leafIndex = tagId - 1;
+    const siblings = proofSet.merkleTree.siblings[leafIndex]!;
+    const leafData = this.extractLeafData(proofSet, leafIndex);
+    const entropy = proofSet.merkleTree.leaves[leafIndex]!;
 
-    // Leaf data needs to be extracted from the Merkle tree leaves
-    // The caller must provide the packed leaf data
-    const leafData = this.extractLeafData(proofSet, tagId);
-
-    const inputs = buildPredicateInputs(commitment, salt, tagId, siblings, leafData, extra);
+    const inputs = buildPredicateInputs(commitment, domain, tagId, siblings, leafData, entropy, extra);
     const result = await this.zkp.prove({
       circuitId,
       privateInputs: inputs.privateInputs,
@@ -225,33 +262,6 @@ export class ICAO9303ProofSystem {
 
     return {
       circuitId,
-      proofValue: result.proofValue,
-      publicInputs: inputs.publicInputs,
-      publicOutputs: result.publicOutputs,
-    };
-  }
-
-  /**
-   * Generate a field-reveal proof.
-   */
-  async generateFieldRevealProof(
-    proofSet: DomainProofSet,
-    tagId: number,
-  ): Promise<ChainProof> {
-    const commitment = proofSet.dg13Merklelize.publicOutputs['commitment'] as string;
-    const salt = proofSet.domain.hash;
-    const siblings = proofSet.merkleTree.siblings[tagId]!;
-    const leafData = this.extractLeafData(proofSet, tagId);
-
-    const inputs = buildFieldRevealInputs(commitment, salt, tagId, siblings, leafData);
-    const result = await this.zkp.prove({
-      circuitId: 'dg13-field-reveal',
-      privateInputs: inputs.privateInputs,
-      publicInputs: inputs.publicInputs,
-    });
-
-    return {
-      circuitId: 'dg13-field-reveal',
       proofValue: result.proofValue,
       publicInputs: inputs.publicInputs,
       publicOutputs: result.publicOutputs,
@@ -265,24 +275,18 @@ export class ICAO9303ProofSystem {
   /**
    * Build a PresentedCredential for the verifier with ZKP-authenticated fields.
    *
-   * DG13 fields (e.g. fullName) are disclosed via `dg13-field-reveal` proofs —
-   * the field value is in the proof's public outputs, cryptographically bound
-   * to the SOD chain.
-   *
-   * DG2 (photo) is included as raw base64 with a `dg-map` proof for DG2
+   * DG2 (photo) is included as raw base64 with a `dg-bridge` proof for DG2
    * that binds its hash to the SOD eContent, proving authenticity.
    *
    * @param credential - The verifier's stored credential
    * @param credentialId - Storage ID for proof cache lookup
    * @param domain - Domain to use for proof generation
-   * @param dg13FieldTagIds - DG13 field tag IDs to reveal (e.g. [2] for fullName)
    * @param includePhoto - Whether to include authenticated DG2 photo
    */
   async buildVerifierCredential(
     credential: MatchableCredential,
     credentialId: string,
     domain: Domain,
-    dg13FieldTagIds: number[],
     includePhoto: boolean,
   ): Promise<PresentedCredential> {
     // Get or generate chain proofs
@@ -291,7 +295,11 @@ export class ICAO9303ProofSystem {
     const proofs: CredentialProof[] = [];
 
     // Chain proofs — proves the credential is authentic
-    for (const chain of [proofSet.sodVerify, proofSet.dgMap, proofSet.dg13Merklelize]) {
+    const chainProofs = [proofSet.sodValidate, proofSet.dgBridge, proofSet.dg13Merklelize];
+    if (proofSet.didDelegate) {
+      chainProofs.push(proofSet.didDelegate);
+    }
+    for (const chain of chainProofs) {
       proofs.push({
         type: 'ZKPProof',
         conditionID: `chain-${chain.circuitId}`,
@@ -303,62 +311,47 @@ export class ICAO9303ProofSystem {
       } satisfies ZKPProof);
     }
 
-    // Field-reveal proofs for DG13 fields
-    for (const tagId of dg13FieldTagIds) {
-      const revealProof = await this.generateFieldRevealProof(proofSet, tagId);
-      proofs.push({
-        type: 'ZKPProof',
-        conditionID: `field-reveal-${tagId}`,
-        circuitId: revealProof.circuitId,
-        proofSystem: 'ultrahonk',
-        publicInputs: revealProof.publicInputs,
-        publicOutputs: revealProof.publicOutputs,
-        proofValue: revealProof.proofValue,
-      } satisfies ZKPProof);
-    }
-
     // Build credentialSubject — only ZKP-revealed data
     const subject: Record<string, unknown> = {};
     if (credential.credentialSubject['id'] !== undefined) {
       subject['id'] = credential.credentialSubject['id'];
     }
 
-    // DG2 photo: include raw + dg-map proof for authenticity
+    // DG2 photo: include raw + dg-bridge proof for authenticity
     if (includePhoto) {
       const dg2 = credential.credentialSubject['dg2'];
       if (typeof dg2 === 'string') {
         subject['dg2'] = dg2;
 
-        // Generate dg-map proof for DG2 (binds DG2 hash to SOD)
+        // Generate dg-bridge proof for DG2 (binds DG2 hash to SOD)
         const sodBase64 = this.extractSOD(credential);
-        const { inputs: sodInputs, witness: sodWitness } = buildSodVerifyInputs(sodBase64, domain.hash);
-        const econtentBinding = proofSet.sodVerify.publicOutputs['econtent_binding'] as string;
+        const { witness: sodWitness } = buildSodValidateInputs(sodBase64, domain.hash);
+        const eContentBinding = proofSet.sodValidate.publicOutputs['eContentBinding'] as string;
 
-        // Build dg-map inputs for DG2 instead of DG13
-        const dg2MapInputs = buildDgMapInputs(sodWitness, domain.hash, econtentBinding);
-        // Override dg_number to 2
-        dg2MapInputs.publicInputs.dg_number = 2;
+        // Build dg-bridge inputs for DG2 instead of DG13
+        const dg2BridgeInputs = buildDgBridgeInputs(sodWitness, domain.hash, eContentBinding);
+        dg2BridgeInputs.publicInputs.dgNumber = 2;
         // Find DG2 offset in eContent
         const { findDGEntry } = await import('./sod-parser.js');
         const econtent = sodWitness.econtent;
         const dg2Offset = findDGEntry(new Uint8Array(econtent), 2);
         if (dg2Offset >= 0) {
-          dg2MapInputs.privateInputs.dg_offset = dg2Offset;
+          dg2BridgeInputs.privateInputs.dgOffset = dg2Offset;
 
-          const dg2MapResult = await this.zkp.prove({
-            circuitId: 'dg-map',
-            privateInputs: dg2MapInputs.privateInputs,
-            publicInputs: dg2MapInputs.publicInputs,
+          const dg2BridgeResult = await this.zkp.prove({
+            circuitId: 'dg-bridge',
+            privateInputs: dg2BridgeInputs.privateInputs,
+            publicInputs: dg2BridgeInputs.publicInputs,
           });
 
           proofs.push({
             type: 'ZKPProof',
             conditionID: 'dg2-authenticity',
-            circuitId: 'dg-map',
+            circuitId: 'dg-bridge',
             proofSystem: 'ultrahonk',
-            publicInputs: dg2MapInputs.publicInputs,
-            publicOutputs: dg2MapResult.publicOutputs,
-            proofValue: dg2MapResult.proofValue,
+            publicInputs: dg2BridgeInputs.publicInputs,
+            publicOutputs: dg2BridgeResult.publicOutputs,
+            proofValue: dg2BridgeResult.proofValue,
           } satisfies ZKPProof);
         }
       }
@@ -411,16 +404,16 @@ export class ICAO9303ProofSystem {
   }
 
   private async buildMerkleTreeFromDG13(
-    dg13Inputs: { privateInputs: { raw_msg: number[]; dg_len: number; field_offsets: number[]; field_lengths: number[] } },
-    salt: string,
+    dg13Inputs: { privateInputs: { rawMsg: number[]; dgLen: number; fieldOffsets: number[]; fieldLengths: number[] } },
+    domain: string,
   ): Promise<CachedMerkleTree> {
-    const { raw_msg, field_offsets, field_lengths } = dg13Inputs.privateInputs;
+    const { rawMsg, fieldOffsets, fieldLengths } = dg13Inputs.privateInputs;
     const fields = [];
     const leafDataArr: LeafData[] = [];
 
-    for (let i = 0; i < 32; i++) {
-      const offset = field_offsets[i]!;
-      const length = field_lengths[i]!;
+    for (let i = 0; i < 16; i++) {
+      const offset = fieldOffsets[i]!;
+      const length = fieldLengths[i]!;
 
       const packedFields: [string, string, string, string] = ['0x0', '0x0', '0x0', '0x0'];
       for (let chunk = 0; chunk < 4; chunk++) {
@@ -429,7 +422,7 @@ export class ICAO9303ProofSystem {
           const chunkEnd = Math.min(chunkStart + 31, length);
           const bytes = new Uint8Array(32);
           for (let b = chunkStart; b < chunkEnd; b++) {
-            bytes[32 - (chunkEnd - b) + (b - chunkStart)] = raw_msg[offset + b]!;
+            bytes[32 - (chunkEnd - b) + (b - chunkStart)] = rawMsg[offset + b]!;
           }
           packedFields[chunk] = '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
         }
@@ -439,30 +432,27 @@ export class ICAO9303ProofSystem {
         tagId: i + 1,
         length,
         packedFields,
-        packedHash: '0x0',
       });
 
       leafDataArr.push({
         length: length.toString(),
         data: packedFields,
-        packedHash: '0x0', // Will be set by the native builder
       });
     }
 
-    const tree = await this.merkle.build(fields, salt);
+    const tree = await this.merkle.build(fields, domain);
 
-    // Merge leaf data with the tree (packedHash comes from the builder)
     return { ...tree, leafData: leafDataArr };
   }
 
   private extractLeafData(
     proofSet: DomainProofSet,
-    tagId: number,
-  ): { length: string; data: string[]; packedHash: string } {
-    const leaf = proofSet.merkleTree.leafData[tagId];
+    leafIndex: number,
+  ): { length: string; data: string[] } {
+    const leaf = proofSet.merkleTree.leafData[leafIndex];
     if (!leaf) {
-      throw new Error(`No leaf data for tagId ${tagId}`);
+      throw new Error(`No leaf data for leafIndex ${leafIndex}`);
     }
-    return { length: leaf.length, data: [...leaf.data], packedHash: leaf.packedHash };
+    return { length: leaf.length, data: [...leaf.data] };
   }
 }

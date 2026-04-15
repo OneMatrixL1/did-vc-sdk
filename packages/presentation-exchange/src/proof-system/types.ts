@@ -9,7 +9,7 @@
 // Domain
 // ---------------------------------------------------------------------------
 
-/** A named domain with its Poseidon2 hash (used as circuit "salt"). */
+/** A named domain with its Poseidon2 hash. */
 export interface Domain {
   /** Human-readable name, e.g. "1matrix". */
   readonly name: string;
@@ -29,42 +29,43 @@ export interface ChainProof {
   readonly publicOutputs: Record<string, unknown>;
 }
 
-/** Per-leaf packed data needed for field-reveal and predicate proofs. */
+/** Per-leaf packed data needed for predicate proofs. */
 export interface LeafData {
   readonly length: string;
   readonly data: readonly [string, string, string, string];
-  readonly packedHash: string;
 }
 
-/** Cached Poseidon2 Merkle tree (32 leaves, depth 5). */
+/** Cached Poseidon2 Merkle tree (16 leaves, depth 4). */
 export interface CachedMerkleTree {
   readonly root: string;
   readonly commitment: string;
   readonly leaves: readonly string[];
-  /** siblings[leafIndex] = 5-element path from leaf to root. */
+  /** siblings[leafIndex] = 4-element path from leaf to root. */
   readonly siblings: readonly (readonly string[])[];
-  /** Packed leaf data for each field (needed for reveal/predicate proofs). */
+  /** Packed leaf data for each field (needed for predicate proofs). */
   readonly leafData: readonly LeafData[];
 }
 
 /**
  * Complete set of chain proofs for one (credential, domain) pair.
  *
- * Chain: sod-verify → dg-map → dg13-merklelize, all sharing the same salt.
+ * Chain: sod-validate → dg-bridge → dg13-merklelize, all sharing the same domain.
  */
 export interface DomainProofSet {
   readonly domain: Domain;
   readonly credentialId: string;
   readonly createdAt: string;
 
-  /** SOD signature verification. publicOutputs.econtent_binding links to dgMap. */
-  readonly sodVerify: ChainProof;
-  /** DG hash extraction. publicOutputs.dg_binding must equal dg13Merklelize binding. */
-  readonly dgMap: ChainProof;
-  /** DG13 Merkle tree. publicOutputs: binding, identity, commitment. */
+  /** SOD signature verification. publicOutputs: eContentBinding, dscPubKeyHash. */
+  readonly sodValidate: ChainProof;
+  /** DG hash extraction. publicOutputs.dgBinding must equal dg13Merklelize dgBinding. */
+  readonly dgBridge: ChainProof;
+  /** DG13 Merkle tree. publicOutputs: dgBinding, identity, commitment. */
   readonly dg13Merklelize: ChainProof;
+  /** DID delegation proof (optional — requires DG15 + Active Auth). */
+  readonly didDelegate?: ChainProof;
 
-  /** Full Merkle tree for on-demand predicate/field-reveal proofs. */
+  /** Full Merkle tree for on-demand predicate proofs. */
   readonly merkleTree: CachedMerkleTree;
 }
 
@@ -93,16 +94,15 @@ export interface Poseidon2Hasher {
   hash(inputs: string[], len: number): Promise<string>;
 }
 
-/** Build a Poseidon2 Merkle tree (32 leaves, depth 5). */
+/** Build a Poseidon2 Merkle tree (16 leaves, depth 4). */
 export interface MerkleTreeBuilder {
-  build(fields: MerkleLeafInput[], salt: string): Promise<CachedMerkleTree>;
+  build(fields: MerkleLeafInput[], domain: string): Promise<CachedMerkleTree>;
 }
 
 export interface MerkleLeafInput {
   tagId: number;
   length: number;
   packedFields: [string, string, string, string];
-  packedHash: string;
 }
 
 /** Persistent storage for DomainProofSets. */
@@ -119,9 +119,10 @@ export interface ProofStore {
 
 export type ProofGenPhase =
   | 'idle'
-  | 'sod-verify'
-  | 'dg-map'
+  | 'sod-validate'
+  | 'dg-bridge'
   | 'merkle-tree'
   | 'dg13-merklelize'
+  | 'did-delegate'
   | 'complete'
   | 'error';

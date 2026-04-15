@@ -1,4 +1,4 @@
-import type { MatchableCredential } from '../types/credential.js';
+import type { MatchableCredential, ZKPProof } from '../types/credential.js';
 import type { VPRequest, DocumentRequest, DocumentRequestNode, KeyDoc } from '../types/request.js';
 import type {
   VerifiablePresentation,
@@ -58,6 +58,12 @@ export interface ResolveOptions {
   keyDoc?: KeyDoc;
   /** Optional DID resolver forwarded to credential-sdk when using `keyDoc`. */
   didResolver?: object;
+  /**
+   * Pre-computed ZKP proofs keyed by conditionID.
+   * When provided, these proofs are attached to derived credentials
+   * for any matching ZKP conditions in the request.
+   */
+  zkpProofs?: Map<string, ZKPProof>;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,9 +110,9 @@ export async function resolvePresentation(
 
   const resolvers = { ...defaultResolvers, ...options.resolvers };
 
-  const presentedList = await Promise.all(items.map(({ docReq, cred }) => {
+  const presentedList = await Promise.all(items.map(async ({ docReq, cred }) => {
     if (docReq.disclosureMode === 'full') {
-      return Promise.resolve(cred);
+      return cred as PresentedCredential;
     }
 
     let resolver = resolvers[docReq.schemaType];
@@ -121,9 +127,31 @@ export async function resolvePresentation(
       resolver = createBBSResolver(resolver);
     }
 
-    const { disclose } = extractConditions(docReq.conditions);
+    const { disclose, zkp } = extractConditions(docReq.conditions);
     const disclosedFields = disclose.map((d) => d.field);
-    return resolver.deriveCredential(cred, disclosedFields, { nonce: request.nonce });
+    const derived = await resolver.deriveCredential(cred, disclosedFields, { nonce: request.nonce });
+
+    // Attach pre-computed ZKP proofs when available
+    if (options.zkpProofs && zkp.length > 0) {
+      const existing = derived.proof;
+      const proofArr = Array.isArray(existing)
+        ? [...existing]
+        : existing ? [existing] : [];
+
+      for (const cond of zkp) {
+        const proof = options.zkpProofs.get(cond.conditionID);
+        if (proof) {
+          proofArr.push(proof);
+        }
+      }
+
+      if (proofArr.length > 0) {
+        (derived as Record<string, unknown>).proof =
+          proofArr.length === 1 ? proofArr[0] : proofArr;
+      }
+    }
+
+    return derived;
   }));
 
   const presentedCredentials: PresentedCredential[] = [];

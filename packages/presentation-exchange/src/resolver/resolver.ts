@@ -131,13 +131,18 @@ export async function resolvePresentation(
     const disclosedFields = disclose.map((d) => d.field);
     const derived = await resolver.deriveCredential(cred, disclosedFields, { nonce: request.nonce });
 
-    // Attach pre-computed ZKP proofs when available
-    if (options.zkpProofs && zkp.length > 0) {
-      const existing = derived.proof;
-      const proofArr = Array.isArray(existing)
-        ? [...existing]
-        : existing ? [existing] : [];
+    // Attach ZKP proofs: chain proofs (always) + condition-specific proofs
+    if (options.zkpProofs && options.zkpProofs.size > 0) {
+      const proofArr: unknown[] = [];
 
+      // Add all chain proofs (sod-validate, dg-bridge, dg13-merklelize, did-delegate)
+      for (const [key, proof] of options.zkpProofs) {
+        if (key.startsWith('chain-')) {
+          proofArr.push(proof);
+        }
+      }
+
+      // Add condition-specific ZKP proofs (predicates etc.)
       for (const cond of zkp) {
         const proof = options.zkpProofs.get(cond.conditionID);
         if (proof) {
@@ -145,6 +150,7 @@ export async function resolvePresentation(
         }
       }
 
+      // ZKP proofs replace the raw SOD proof — verifier trusts the ZKP chain
       if (proofArr.length > 0) {
         (derived as Record<string, unknown>).proof =
           proofArr.length === 1 ? proofArr[0] : proofArr;

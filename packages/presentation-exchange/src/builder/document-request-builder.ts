@@ -61,17 +61,29 @@ export class DocumentRequestBuilder {
 
   /** Add a disclose condition (reveal a field) */
   disclose(
-    conditionID: string,
-    field: string,
+    conditionIDOrOpts: string | { field: string; id: string; optional?: boolean; purpose?: LocalizableString },
+    field?: string,
     opts?: { optional?: boolean; purpose?: LocalizableString },
   ): this {
-    const cond: DiscloseCondition = {
-      type: 'DocumentCondition',
-      conditionID,
-      field,
-      operator: 'disclose',
-      ...opts,
-    };
+    let cond: DiscloseCondition;
+    if (typeof conditionIDOrOpts === 'object') {
+      cond = {
+        type: 'DocumentCondition',
+        conditionID: conditionIDOrOpts.id,
+        field: conditionIDOrOpts.field,
+        operator: 'disclose',
+        ...(conditionIDOrOpts.optional !== undefined && { optional: conditionIDOrOpts.optional }),
+        ...(conditionIDOrOpts.purpose !== undefined && { purpose: conditionIDOrOpts.purpose }),
+      };
+    } else {
+      cond = {
+        type: 'DocumentCondition',
+        conditionID: conditionIDOrOpts,
+        field: field!,
+        operator: 'disclose',
+        ...opts,
+      };
+    }
     this.conditions.push(cond);
     return this;
   }

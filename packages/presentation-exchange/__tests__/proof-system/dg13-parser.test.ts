@@ -64,8 +64,8 @@ describe('DG13 parser', () => {
     for (let i = 0; i < 9; i++) {
       expect(witness.fieldLengths[i]).toBeGreaterThan(0);
     }
-    // Remaining 23 fields should have zero length (padded)
-    for (let i = 9; i < 32; i++) {
+    // Remaining 7 fields should have zero length (padded, 16 total)
+    for (let i = 9; i < 16; i++) {
       expect(witness.fieldLengths[i]).toBe(0);
     }
   });
@@ -108,16 +108,14 @@ describe('DG13 parser', () => {
 
   it('padding entries have correct TLV structure', () => {
     const witness = buildDG13WitnessData(dg13Base64);
-    // Padding starts at dgLen, each entry is 7 bytes: 30 05 02 01 [tagId] 0C 00
+    // Padding starts at dgLen, each entry is 7 bytes: 30 03 02 01 [tagId] (no value)
     let pos = dg13.length;
-    for (let i = FIELDS.length; i < 32; i++) {
+    for (let i = FIELDS.length; i < 16; i++) {
       expect(witness.rawMsg[pos]).toBe(0x30);
-      expect(witness.rawMsg[pos + 1]).toBe(0x05);
+      expect(witness.rawMsg[pos + 1]).toBe(0x03);
       expect(witness.rawMsg[pos + 2]).toBe(0x02);
       expect(witness.rawMsg[pos + 3]).toBe(0x01);
       expect(witness.rawMsg[pos + 4]).toBe(i + 1); // tagId = index + 1
-      expect(witness.rawMsg[pos + 5]).toBe(0x0c);
-      expect(witness.rawMsg[pos + 6]).toBe(0x00);
       pos += 7;
     }
   });

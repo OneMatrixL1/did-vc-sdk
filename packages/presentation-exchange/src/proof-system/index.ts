@@ -8,6 +8,7 @@ export type {
   ZKPProvider,
   ZKPProveParams,
   ZKPProveResult,
+  ZKPVerifyParams,
   Poseidon2Hasher,
   MerkleTreeBuilder,
   MerkleLeafInput,

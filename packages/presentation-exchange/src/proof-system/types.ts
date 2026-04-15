@@ -76,6 +76,14 @@ export interface DomainProofSet {
 /** Prove/verify ZKP circuits (native plugin or WASM). */
 export interface ZKPProvider {
   prove(params: ZKPProveParams): Promise<ZKPProveResult>;
+  verify?(params: ZKPVerifyParams): Promise<boolean>;
+}
+
+export interface ZKPVerifyParams {
+  circuitId: string;
+  proofValue: string;
+  publicInputs: Record<string, unknown>;
+  publicOutputs: Record<string, unknown>;
 }
 
 export interface ZKPProveParams {

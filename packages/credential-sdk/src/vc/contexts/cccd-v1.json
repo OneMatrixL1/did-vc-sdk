@@ -34,7 +34,8 @@
                         "holderDID": { "@id": "cccd:holderDID", "@type": "@id" },
                         "chipDID": { "@id": "cccd:chipDID", "@type": "@id" },
                         "timestamp": "http://purl.org/dc/terms/created",
-                        "aaSignature": "cccd:aaSignature"
+                        "aaSignature": "cccd:aaSignature",
+                        "aaChallenge": "cccd:aaChallenge"
                     }
                 }
             }

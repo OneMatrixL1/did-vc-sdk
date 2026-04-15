@@ -148,7 +148,7 @@ export class VPRequestBuilder {
       verifierName: this.verifierName,
       verifierUrl: this.verifierUrl!,
       createdAt: this.createdAt,
-      expiresAt: this.expiresAt ?? new Date(Date.now() + 30 * 60_000).toISOString(),
+      ...(this.expiresAt ? { expiresAt: this.expiresAt } : {}),
       rules,
     };
 

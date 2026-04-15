@@ -6,8 +6,6 @@ import { createOptimisticResolver } from '@1matrix/credential-sdk/ethr-did';
 import { vpRequestContext } from '../utils/vp-request-context.js';
 
 export interface VerifyRequestOptions {
-  /** Override current time for testing (default: new Date()) */
-  now?: Date;
   /** DID resolver for cryptographic proof verification. */
   resolver?: {
     supports(id: string): boolean;
@@ -39,7 +37,6 @@ export function verifyVPRequest(
 ): VerificationResult {
   const errors: string[] = [];
   validateRequiredFields(request, errors);
-  validateExpiration(request, errors, options?.now ?? new Date());
   validateVerifierCredentials(request, errors);
   validateRequestProof(request, errors);
   return { valid: errors.length === 0, errors };
@@ -64,20 +61,6 @@ function validateRequiredFields(request: VPRequest, errors: string[]): void {
   }
   if (!request.rules) {
     errors.push('VPRequest is missing required field "rules"');
-  }
-}
-
-function validateExpiration(
-  request: VPRequest,
-  errors: string[],
-  now: Date,
-): void {
-  if (!request.expiresAt) return;
-  const expires = new Date(request.expiresAt);
-  if (expires <= now) {
-    errors.push(
-      `VPRequest has expired (expiresAt: ${request.expiresAt})`,
-    );
   }
 }
 

@@ -122,7 +122,7 @@ export interface VPRequest {
   verifierUrl: string;
   verifierCredentials?: PresentedCredential[];
   createdAt: string;
-  expiresAt: string;
+  expiresAt?: string;
   rules: DocumentRequestNode;
   proof?: VerifierRequestProof;
 }

@@ -73,34 +73,10 @@ describe('verifyVPRequest', () => {
   // Expiration
   // -------------------------------------------------------------------------
 
-  it('fails when the request has expired', () => {
-    const result = verifyVPRequest(
-      makeValidRequest({ expiresAt: '2020-01-01T00:00:00Z' }),
-    );
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]).toMatch(/expired/);
-  });
-
-  it('accepts a not-yet-expired request', () => {
-    const result = verifyVPRequest(
-      makeValidRequest({ expiresAt: '2099-12-31T23:59:59Z' }),
-    );
+  it('accepts a request without expiresAt', () => {
+    const { expiresAt: _, ...noExpiry } = makeValidRequest();
+    const result = verifyVPRequest(noExpiry as any);
     expect(result.valid).toBe(true);
-  });
-
-  it('respects now override for expiration testing', () => {
-    const req = makeValidRequest({ expiresAt: '2025-06-01T00:00:00Z' });
-
-    const beforeExpiry = verifyVPRequest(req, {
-      now: new Date('2025-05-01T00:00:00Z'),
-    });
-    expect(beforeExpiry.valid).toBe(true);
-
-    const afterExpiry = verifyVPRequest(req, {
-      now: new Date('2025-07-01T00:00:00Z'),
-    });
-    expect(afterExpiry.valid).toBe(false);
-    expect(afterExpiry.errors[0]).toMatch(/expired/);
   });
 
   // -------------------------------------------------------------------------
@@ -183,7 +159,7 @@ describe('verifyVPRequest', () => {
     const req = makeValidRequest({
       id: '',
       nonce: '',
-      expiresAt: '2020-01-01T00:00:00Z',
+      verifier: '',
     });
     const result = verifyVPRequest(req);
     expect(result.valid).toBe(false);

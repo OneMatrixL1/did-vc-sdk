@@ -29,6 +29,13 @@ export interface ChainProof {
   readonly publicOutputs: Record<string, unknown>;
 }
 
+/** Per-leaf packed data needed for field-reveal and predicate proofs. */
+export interface LeafData {
+  readonly length: string;
+  readonly data: readonly [string, string, string, string];
+  readonly packedHash: string;
+}
+
 /** Cached Poseidon2 Merkle tree (32 leaves, depth 5). */
 export interface CachedMerkleTree {
   readonly root: string;
@@ -36,6 +43,8 @@ export interface CachedMerkleTree {
   readonly leaves: readonly string[];
   /** siblings[leafIndex] = 5-element path from leaf to root. */
   readonly siblings: readonly (readonly string[])[];
+  /** Packed leaf data for each field (needed for reveal/predicate proofs). */
+  readonly leafData: readonly LeafData[];
 }
 
 /**

@@ -2,6 +2,7 @@
 export type {
   Domain,
   ChainProof,
+  LeafData,
   CachedMerkleTree,
   DomainProofSet,
   ZKPProvider,

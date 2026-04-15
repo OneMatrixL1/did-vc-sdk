@@ -9,6 +9,7 @@ import type {
   Domain,
   DomainProofSet,
   ChainProof,
+  LeafData,
   ZKPProvider,
   Poseidon2Hasher,
   MerkleTreeBuilder,
@@ -16,7 +17,7 @@ import type {
   ProofGenPhase,
   CachedMerkleTree,
 } from './types.js';
-import type { MatchableCredential } from '../types/credential.js';
+import type { MatchableCredential, ZKPProof, PresentedCredential, CredentialProof } from '../types/credential.js';
 import { deriveDomain, DEFAULT_DOMAIN_NAME } from './domain.js';
 import {
   buildSodVerifyInputs,
@@ -258,6 +259,122 @@ export class ICAO9303ProofSystem {
   }
 
   // -------------------------------------------------------------------------
+  // Verifier credential with ZKP disclosure
+  // -------------------------------------------------------------------------
+
+  /**
+   * Build a PresentedCredential for the verifier with ZKP-authenticated fields.
+   *
+   * DG13 fields (e.g. fullName) are disclosed via `dg13-field-reveal` proofs —
+   * the field value is in the proof's public outputs, cryptographically bound
+   * to the SOD chain.
+   *
+   * DG2 (photo) is included as raw base64 with a `dg-map` proof for DG2
+   * that binds its hash to the SOD eContent, proving authenticity.
+   *
+   * @param credential - The verifier's stored credential
+   * @param credentialId - Storage ID for proof cache lookup
+   * @param domain - Domain to use for proof generation
+   * @param dg13FieldTagIds - DG13 field tag IDs to reveal (e.g. [2] for fullName)
+   * @param includePhoto - Whether to include authenticated DG2 photo
+   */
+  async buildVerifierCredential(
+    credential: MatchableCredential,
+    credentialId: string,
+    domain: Domain,
+    dg13FieldTagIds: number[],
+    includePhoto: boolean,
+  ): Promise<PresentedCredential> {
+    // Get or generate chain proofs
+    const proofSet = await this.getOrGenerateProofs(credential, credentialId, domain);
+
+    const proofs: CredentialProof[] = [];
+
+    // Chain proofs — proves the credential is authentic
+    for (const chain of [proofSet.sodVerify, proofSet.dgMap, proofSet.dg13Merklelize]) {
+      proofs.push({
+        type: 'ZKPProof',
+        conditionID: `chain-${chain.circuitId}`,
+        circuitId: chain.circuitId,
+        proofSystem: 'ultrahonk',
+        publicInputs: chain.publicInputs,
+        publicOutputs: chain.publicOutputs,
+        proofValue: chain.proofValue,
+      } satisfies ZKPProof);
+    }
+
+    // Field-reveal proofs for DG13 fields
+    for (const tagId of dg13FieldTagIds) {
+      const revealProof = await this.generateFieldRevealProof(proofSet, tagId);
+      proofs.push({
+        type: 'ZKPProof',
+        conditionID: `field-reveal-${tagId}`,
+        circuitId: revealProof.circuitId,
+        proofSystem: 'ultrahonk',
+        publicInputs: revealProof.publicInputs,
+        publicOutputs: revealProof.publicOutputs,
+        proofValue: revealProof.proofValue,
+      } satisfies ZKPProof);
+    }
+
+    // Build credentialSubject — only ZKP-revealed data
+    const subject: Record<string, unknown> = {};
+    if (credential.credentialSubject['id'] !== undefined) {
+      subject['id'] = credential.credentialSubject['id'];
+    }
+
+    // DG2 photo: include raw + dg-map proof for authenticity
+    if (includePhoto) {
+      const dg2 = credential.credentialSubject['dg2'];
+      if (typeof dg2 === 'string') {
+        subject['dg2'] = dg2;
+
+        // Generate dg-map proof for DG2 (binds DG2 hash to SOD)
+        const sodBase64 = this.extractSOD(credential);
+        const { inputs: sodInputs, witness: sodWitness } = buildSodVerifyInputs(sodBase64, domain.hash);
+        const econtentBinding = proofSet.sodVerify.publicOutputs['econtent_binding'] as string;
+
+        // Build dg-map inputs for DG2 instead of DG13
+        const dg2MapInputs = buildDgMapInputs(sodWitness, domain.hash, econtentBinding);
+        // Override dg_number to 2
+        dg2MapInputs.publicInputs.dg_number = 2;
+        // Find DG2 offset in eContent
+        const { findDGEntry } = await import('./sod-parser.js');
+        const econtent = sodWitness.econtent;
+        const dg2Offset = findDGEntry(new Uint8Array(econtent), 2);
+        if (dg2Offset >= 0) {
+          dg2MapInputs.privateInputs.dg_offset = dg2Offset;
+
+          const dg2MapResult = await this.zkp.prove({
+            circuitId: 'dg-map',
+            privateInputs: dg2MapInputs.privateInputs,
+            publicInputs: dg2MapInputs.publicInputs,
+          });
+
+          proofs.push({
+            type: 'ZKPProof',
+            conditionID: 'dg2-authenticity',
+            circuitId: 'dg-map',
+            proofSystem: 'ultrahonk',
+            publicInputs: dg2MapInputs.publicInputs,
+            publicOutputs: dg2MapResult.publicOutputs,
+            proofValue: dg2MapResult.proofValue,
+          } satisfies ZKPProof);
+        }
+      }
+    }
+
+    return {
+      type: [...(credential.type as string[])],
+      issuer: typeof credential.issuer === 'string'
+        ? credential.issuer
+        : { ...credential.issuer },
+      credentialSubject: subject,
+      proof: proofs,
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // Storage delegation
   // -------------------------------------------------------------------------
 
@@ -297,16 +414,14 @@ export class ICAO9303ProofSystem {
     dg13Inputs: { privateInputs: { raw_msg: number[]; dg_len: number; field_offsets: number[]; field_lengths: number[] } },
     salt: string,
   ): Promise<CachedMerkleTree> {
-    // Build MerkleLeafInput[] from DG13 witness data
-    // Each leaf packs the field data into 4 field elements (31 bytes each)
     const { raw_msg, field_offsets, field_lengths } = dg13Inputs.privateInputs;
     const fields = [];
+    const leafDataArr: LeafData[] = [];
 
     for (let i = 0; i < 32; i++) {
       const offset = field_offsets[i]!;
       const length = field_lengths[i]!;
 
-      // Pack field bytes into 4 chunks of 31 bytes each (BN254 field elements)
       const packedFields: [string, string, string, string] = ['0x0', '0x0', '0x0', '0x0'];
       for (let chunk = 0; chunk < 4; chunk++) {
         const chunkStart = chunk * 31;
@@ -320,35 +435,34 @@ export class ICAO9303ProofSystem {
         }
       }
 
-      // packedHash will be computed by the MerkleTreeBuilder
       fields.push({
         tagId: i + 1,
         length,
         packedFields,
-        packedHash: '0x0', // Builder computes this from immutable fields
+        packedHash: '0x0',
+      });
+
+      leafDataArr.push({
+        length: length.toString(),
+        data: packedFields,
+        packedHash: '0x0', // Will be set by the native builder
       });
     }
 
-    return this.merkle.build(fields, salt);
+    const tree = await this.merkle.build(fields, salt);
+
+    // Merge leaf data with the tree (packedHash comes from the builder)
+    return { ...tree, leafData: leafDataArr };
   }
 
-  /**
-   * Extract leaf data (length, packed data, packed hash) for a given field.
-   * This data comes from the cached Merkle tree.
-   *
-   * Note: The full leaf data (length, data[4], packedHash) needs to be stored
-   * alongside the Merkle tree. For now, we return placeholder structure —
-   * the app must provide this data when calling predicate/reveal proofs.
-   */
   private extractLeafData(
-    _proofSet: DomainProofSet,
-    _tagId: number,
+    proofSet: DomainProofSet,
+    tagId: number,
   ): { length: string; data: string[]; packedHash: string } {
-    // TODO: The DomainProofSet should store per-leaf data alongside the tree.
-    // For now, the caller must provide this via the predicate proof builder.
-    throw new Error(
-      'Leaf data extraction from cached tree not yet implemented. ' +
-      'Use buildPredicateInputs directly with leaf data from the credential.',
-    );
+    const leaf = proofSet.merkleTree.leafData[tagId];
+    if (!leaf) {
+      throw new Error(`No leaf data for tagId ${tagId}`);
+    }
+    return { length: leaf.length, data: [...leaf.data], packedHash: leaf.packedHash };
   }
 }

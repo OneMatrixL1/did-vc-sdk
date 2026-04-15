@@ -39,6 +39,17 @@
                     }
                 }
             }
+        },
+        "ZKPProof": {
+            "@id": "cccd:ZKPProof",
+            "@context": {
+                "conditionID": "cccd:conditionID",
+                "circuitId": "cccd:circuitId",
+                "proofSystem": "cccd:proofSystem",
+                "publicInputs": { "@id": "cccd:publicInputs", "@type": "@json" },
+                "publicOutputs": { "@id": "cccd:publicOutputs", "@type": "@json" },
+                "proofValue": "https://w3id.org/security#proofValue"
+            }
         }
     }
 }

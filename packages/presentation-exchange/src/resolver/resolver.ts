@@ -154,6 +154,15 @@ export async function resolvePresentation(
       if (proofArr.length > 0) {
         (derived as Record<string, unknown>).proof =
           proofArr.length === 1 ? proofArr[0] : proofArr;
+
+        // Strip raw DG blobs — ZKP chain proves field values without raw data.
+        // Sending raw DGs would leak all fields in the DG, defeating selective disclosure.
+        const subject = derived.credentialSubject;
+        for (const key of Object.keys(subject)) {
+          if (key.startsWith('dg')) {
+            delete subject[key];
+          }
+        }
       }
     }
 

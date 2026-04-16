@@ -284,9 +284,6 @@ export class ICAO9303ProofSystem {
     }
 
     const subject: Record<string, unknown> = {};
-    if (credential.credentialSubject['id'] !== undefined) {
-      subject['id'] = credential.credentialSubject['id'];
-    }
 
     if (includePhoto) {
       const dg2 = credential.credentialSubject['dg2'];
@@ -325,6 +322,7 @@ export class ICAO9303ProofSystem {
     }
 
     return {
+      '@context': credential['@context'] ? [...(credential['@context'] as string[])] : undefined,
       type: [...(credential.type as string[])],
       issuer: typeof credential.issuer === 'string'
         ? credential.issuer

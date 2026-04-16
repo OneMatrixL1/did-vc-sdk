@@ -140,6 +140,16 @@ function validateSubmissionEntry(
       `Credential at index ${entry.credentialIndex} has types [${credTypes.join(', ')}] but docRequestID "${entry.docRequestID}" requires one of [${docReq.docType.join(', ')}]`,
     );
   }
+
+  if (docReq.issuer !== undefined) {
+    const allowedIssuers = Array.isArray(docReq.issuer) ? docReq.issuer : [docReq.issuer];
+    const credIssuer = typeof cred.issuer === 'string' ? cred.issuer : cred.issuer.id;
+    if (!allowedIssuers.includes(credIssuer)) {
+      errors.push(
+        `Credential at index ${entry.credentialIndex} has issuer "${credIssuer}" but docRequestID "${entry.docRequestID}" requires one of [${allowedIssuers.join(', ')}]`,
+      );
+    }
+  }
 }
 
 function extractDomain(url: string): string {

@@ -24,7 +24,7 @@ export { poseidon2, poseidon2BigInt } from './poseidon2.js';
 export { buildMerkleTree, TREE_DEPTH, TREE_LEAVES } from './merkle-tree.js';
 
 // Proof system orchestrator
-export { ICAO9303ProofSystem } from './icao9303-proof-system.js';
+export { ICAO9303ProofSystem, decodeMerkleField } from './icao9303-proof-system.js';
 export type { ICAO9303ProofSystemConfig, DelegationData } from './icao9303-proof-system.js';
 
 // Proof stores

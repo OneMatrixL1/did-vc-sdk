@@ -86,34 +86,19 @@ export function createICAOSchemaResolver(defaultProfile?: ICAODocumentProfile): 
 
     deriveCredential(
       credential: MatchableCredential,
-      disclosedFields: string[],
+      _disclosedFields: string[],
     ): Promise<PresentedCredential> {
-      // Minimal shell — no raw DG data, no credential ID, no subject ID.
-      // Only requested disclosed fields are populated in credentialSubject.
+      // ZKP-only: return a minimal shell. Disclosed field values live in
+      // the proof array (MerkleDisclosure entries), NOT in credentialSubject.
       const types = [...(credential.type as readonly string[])];
       const issuer = typeof credential.issuer === 'string'
         ? credential.issuer
         : { ...credential.issuer };
 
-      // Populate disclosed fields using resolveField (same as matching)
-      const subject: Record<string, unknown> = {};
-      if (disclosedFields.length > 0) {
-        const profile = defaultProfile ?? detectProfile(credential);
-        if (profile) {
-          const rawDGs = extractRawDGs(credential);
-          for (const fieldId of disclosedFields) {
-            const value = resolveProfileField(profile, fieldId, rawDGs);
-            if (value !== undefined) {
-              subject[fieldId] = value;
-            }
-          }
-        }
-      }
-
       const presented: PresentedCredential = {
         type: types,
         issuer,
-        credentialSubject: subject,
+        credentialSubject: {},
       };
 
       // Preserve @context — needed for JSON-LD signing (defines ZKPProof terms)

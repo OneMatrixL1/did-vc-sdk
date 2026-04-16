@@ -23,7 +23,33 @@ export interface ZKPProof {
   proofValue: string;
 }
 
-export type CredentialProof = DataIntegrityProof | ZKPProof;
+/**
+ * Merkle disclosure — reveals a single DG13 field with its Merkle path.
+ *
+ * Verification: recompute leaf from packed data, walk siblings to root,
+ * check commitment matches dg13-merklelize publicOutputs.commitment.
+ */
+export interface MerkleDisclosure {
+  type: 'MerkleDisclosure';
+  /** Links to the condition that requested this disclosure. */
+  conditionID: string;
+  /** Profile field ID (e.g. 'fullName', 'dateOfBirth'). */
+  fieldId: string;
+  /** 1-based DG13 field index. */
+  tagId: number;
+  /** Byte length of the raw field value. */
+  length: string;
+  /** 4 packed 31-byte chunks as hex field elements. */
+  data: [string, string, string, string];
+  /** Per-leaf entropy (hex), domain-bound for linkability protection. */
+  entropy: string;
+  /** Merkle path from leaf to root (4 sibling hashes, hex). */
+  siblings: string[];
+  /** Decoded UTF-8 value (convenience — verification uses packed data). */
+  value: string;
+}
+
+export type CredentialProof = DataIntegrityProof | ZKPProof | MerkleDisclosure;
 
 // ---------------------------------------------------------------------------
 // Presented credential (may have derived proof)

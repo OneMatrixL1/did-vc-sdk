@@ -28,7 +28,7 @@ export type {
   ZKPProof,
 } from './response.js';
 
-export type { MatchableCredential } from './credential.js';
+export type { MatchableCredential, MerkleDisclosure } from './credential.js';
 export { getCredentialIssuerId } from './credential.js';
 
 export type {

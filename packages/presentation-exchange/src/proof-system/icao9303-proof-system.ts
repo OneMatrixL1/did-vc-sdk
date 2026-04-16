@@ -19,7 +19,7 @@ import type {
   ProofGenPhase,
   CachedMerkleTree,
 } from './types.js';
-import type { MatchableCredential, ZKPProof, PresentedCredential, CredentialProof } from '../types/credential.js';
+import type { MatchableCredential, ZKPProof, MerkleDisclosure, PresentedCredential, CredentialProof } from '../types/credential.js';
 import type { DocumentConditionNode, VerifierDisclosure, DocumentRequest } from '../types/request.js';
 import type { SubmissionEntry } from '../types/response.js';
 import { extractConditions } from '../resolver/field-extractor.js';
@@ -266,29 +266,31 @@ export class ICAO9303ProofSystem {
    *
    * Uses the same data structures and pipeline as the prover:
    * - Accepts `DocumentConditionNode[]` (same as VPRequest rules conditions)
-   * - Derives credential via ICAO resolver (populates disclosed fields)
-   * - Attaches chain ZKP proofs (same format as prover's proofs)
+   * - Derives credential via ICAO resolver (empty credentialSubject)
+   * - Attaches chain ZKP proofs + MerkleDisclosure entries for each disclosed field
+   * - Disclosed field values live in the proof array, not credentialSubject
    *
    * @param credential     - Verifier's raw credential (with DG blobs)
    * @param credentialId   - Storage key for proof caching
    * @param domain         - Domain for proof binding
    * @param conditions     - What to disclose (same format as DocumentRequest.conditions)
+   * @param fieldTagMap    - Map of fieldId → tagId (DG13 1-based field index)
    */
   async buildVerifierDisclosure(
     credential: MatchableCredential,
     credentialId: string,
     domain: Domain,
     conditions: DocumentConditionNode[],
+    fieldTagMap: Record<string, number>,
   ): Promise<VerifierDisclosure> {
     const proofSet = await this.getOrGenerateProofs(credential, credentialId, domain);
 
     // 1. Extract conditions — same as resolvePresentation does
-    const { disclose, zkp } = extractConditions(conditions);
-    const disclosedFields = disclose.map(d => d.field);
+    const { disclose } = extractConditions(conditions);
 
-    // 2. Derive credential via ICAO resolver — populates disclosed fields
+    // 2. Derive credential via ICAO resolver — empty credentialSubject
     const resolver = createICAOSchemaResolver();
-    const derived = await resolver.deriveCredential(credential, disclosedFields);
+    const derived = await resolver.deriveCredential(credential, []);
 
     // 3. Build proof array — same pattern as resolvePresentation
     const proofs: CredentialProof[] = [];
@@ -308,43 +310,73 @@ export class ICAO9303ProofSystem {
       } satisfies ZKPProof);
     }
 
-    // Photo disclosure: if 'photo' is disclosed, include dg2 + dg2-bridge proof
-    if (disclosedFields.includes('photo')) {
-      const dg2 = credential.credentialSubject['dg2'];
-      if (typeof dg2 === 'string') {
-        derived.credentialSubject['photo'] = dg2;
+    // 4. MerkleDisclosure for each disclosed DG13 field
+    for (const cond of disclose) {
+      const fieldId = cond.field;
+      const tagId = fieldTagMap[fieldId];
+      if (tagId === undefined) continue; // skip fields not in DG13
 
-        const sodBase64 = this.extractSOD(credential);
-        const { witness: sodWitness } = buildSodValidateInputs(sodBase64, domain.hash);
-        const eContentBinding = proofSet.sodValidate.publicOutputs['eContentBinding'] as string;
+      // Special case: photo is in dg2, not DG13 Merkle tree
+      if (fieldId === 'photo') {
+        const dg2 = credential.credentialSubject['dg2'];
+        if (typeof dg2 === 'string') {
+          // Photo disclosed via dg2-bridge ZKP proof + raw dg2 in credentialSubject
+          derived.credentialSubject['dg2'] = dg2;
 
-        const dg2BridgeInputs = buildDgBridgeInputs(sodWitness, domain.hash, eContentBinding);
-        dg2BridgeInputs.publicInputs.dgNumber = 2;
-        const { findDGEntry } = await import('./sod-parser.js');
-        const dg2Offset = findDGEntry(new Uint8Array(sodWitness.econtent), 2);
-        if (dg2Offset >= 0) {
-          dg2BridgeInputs.privateInputs.dgOffset = dg2Offset;
-          const dg2BridgeResult = await this.zkp.prove({
-            circuitId: 'dg-bridge',
-            privateInputs: dg2BridgeInputs.privateInputs,
-            publicInputs: dg2BridgeInputs.publicInputs,
-          });
-          proofs.push({
-            type: 'ZKPProof',
-            conditionID: 'dg2-authenticity',
-            circuitId: 'dg-bridge',
-            proofSystem: 'ultrahonk',
-            publicInputs: dg2BridgeInputs.publicInputs,
-            publicOutputs: dg2BridgeResult.publicOutputs,
-            proofValue: dg2BridgeResult.proofValue,
-          } satisfies ZKPProof);
+          const sodBase64 = this.extractSOD(credential);
+          const { witness: sodWitness } = buildSodValidateInputs(sodBase64, domain.hash);
+          const eContentBinding = proofSet.sodValidate.publicOutputs['eContentBinding'] as string;
+          const dg2BridgeInputs = buildDgBridgeInputs(sodWitness, domain.hash, eContentBinding);
+          dg2BridgeInputs.publicInputs.dgNumber = 2;
+          const { findDGEntry } = await import('./sod-parser.js');
+          const dg2Offset = findDGEntry(new Uint8Array(sodWitness.econtent), 2);
+          if (dg2Offset >= 0) {
+            dg2BridgeInputs.privateInputs.dgOffset = dg2Offset;
+            const dg2BridgeResult = await this.zkp.prove({
+              circuitId: 'dg-bridge',
+              privateInputs: dg2BridgeInputs.privateInputs,
+              publicInputs: dg2BridgeInputs.publicInputs,
+            });
+            proofs.push({
+              type: 'ZKPProof',
+              conditionID: cond.conditionID,
+              circuitId: 'dg-bridge',
+              proofSystem: 'ultrahonk',
+              publicInputs: dg2BridgeInputs.publicInputs,
+              publicOutputs: dg2BridgeResult.publicOutputs,
+              proofValue: dg2BridgeResult.proofValue,
+            } satisfies ZKPProof);
+          }
         }
+        continue;
       }
+
+      // DG13 field: build MerkleDisclosure from cached Merkle tree
+      const leafIndex = tagId - 1;
+      const leafData = proofSet.merkleTree.leafData[leafIndex];
+      const siblings = proofSet.merkleTree.siblings[leafIndex];
+      const entropy = proofSet.merkleTree.leaves[leafIndex];
+      if (!leafData || !siblings || !entropy) continue;
+
+      // Decode packed field data to UTF-8 value
+      const value = decodeMerkleField(leafData.data, parseInt(leafData.length, 10));
+
+      proofs.push({
+        type: 'MerkleDisclosure',
+        conditionID: cond.conditionID,
+        fieldId,
+        tagId,
+        length: leafData.length,
+        data: [...leafData.data] as [string, string, string, string],
+        entropy,
+        siblings: [...siblings],
+        value,
+      } satisfies MerkleDisclosure);
     }
 
     derived.proof = proofs;
 
-    // 4. Build the DocumentRequest that describes this disclosure
+    // 5. Build the DocumentRequest that describes this disclosure
     const request: DocumentRequest = {
       type: 'DocumentRequest',
       docRequestID: 'verifier-doc',
@@ -377,7 +409,7 @@ export class ICAO9303ProofSystem {
       });
     }
     const disclosure = await this.buildVerifierDisclosure(
-      credential, credentialId, domain, conditions,
+      credential, credentialId, domain, conditions, { photo: 0 },
     );
     return disclosure.credentials[0]!;
   }
@@ -539,4 +571,44 @@ function sha256Sync(data: Uint8Array): Uint8Array {
   rv.setUint32(16, h4!, false); rv.setUint32(20, h5!, false);
   rv.setUint32(24, h6!, false); rv.setUint32(28, h7!, false);
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Decode packed Merkle field data back to UTF-8 string
+// ---------------------------------------------------------------------------
+
+/**
+ * Decode packed 31-byte hex chunks back to a UTF-8 string.
+ *
+ * Each chunk is a big-endian field element containing up to 31 bytes of data,
+ * right-aligned (least significant bytes hold the actual data).
+ *
+ * Exported for use by frontend when reading MerkleDisclosure proof entries.
+ */
+export function decodeMerkleField(
+  data: readonly [string, string, string, string] | readonly string[],
+  totalLen: number,
+): string {
+  if (totalLen <= 0) return '';
+  const bytes: number[] = [];
+  for (let chunk = 0; chunk < 4; chunk++) {
+    const chunkStart = chunk * 31;
+    if (chunkStart >= totalLen) break;
+    const chunkEnd = Math.min(chunkStart + 31, totalLen);
+    const chunkLen = chunkEnd - chunkStart;
+
+    // Parse hex to bigint, then extract right-aligned bytes
+    const hex = BigInt(data[chunk]!);
+    const buf = new Uint8Array(32);
+    let val = hex;
+    for (let i = 31; i >= 0; i--) {
+      buf[i] = Number(val & 0xFFn);
+      val >>= 8n;
+    }
+    // Field data is packed right-aligned in the 32-byte slot
+    for (let b = 0; b < chunkLen; b++) {
+      bytes.push(buf[32 - chunkLen + b]!);
+    }
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes.slice(0, totalLen)));
 }

@@ -5,7 +5,7 @@
  * Each circuit backend is initialized lazily on first use.
  */
 
-import { loadCircuit, type CircuitArtifact } from './circuits.js';
+import type { CircuitArtifact } from './circuits.js';
 
 export interface ZKPProveParams {
   circuitId: string;
@@ -59,7 +59,11 @@ export async function createWasmZKPProvider(config?: WasmProviderConfig): Promis
     const existing = backends.get(circuitId);
     if (existing) return existing;
 
-    const artifact = externalCircuits[circuitId] ?? loadCircuit(circuitId);
+    let artifact = externalCircuits[circuitId];
+    if (!artifact) {
+      const { loadCircuit } = await import('./circuits.js');
+      artifact = loadCircuit(circuitId);
+    }
     const noir = new Noir(artifact as any);
     const backend = new UltraHonkBackend((artifact as any).bytecode, api);
     await backend.getVerificationKey();

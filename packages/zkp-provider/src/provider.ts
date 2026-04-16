@@ -78,15 +78,44 @@ export async function createWasmZKPProvider(config?: WasmProviderConfig): Promis
       const { backend, noir } = await getBackend(params.circuitId);
       const inputs: Record<string, unknown> = { ...params.privateInputs, ...params.publicInputs };
       const { witness, returnValue } = await noir.execute(inputs);
-      const { proof } = await backend.generateProof(witness);
+      const { proof, publicInputs } = await backend.generateProof(witness);
       const publicOutputs = parseReturnValue(returnValue, params.circuitId);
-      return { proofValue: uint8ArrayToBase64(proof), publicOutputs };
+
+      // Encode full proof: [num_public_inputs(4 BE)][public_inputs as 32-byte fields][proof bytes]
+      // This format is compatible with noir_rs verify_ultra_honk.
+      const numPub = publicInputs.length;
+      const fullProof = new Uint8Array(4 + numPub * 32 + proof.length);
+      const view = new DataView(fullProof.buffer);
+      view.setUint32(0, numPub, false); // big-endian
+      for (let i = 0; i < numPub; i++) {
+        const hexStr = publicInputs[i]!.replace(/^0x/, '');
+        for (let j = 0; j < 32; j++) {
+          fullProof[4 + i * 32 + j] = parseInt(hexStr.substring(j * 2, j * 2 + 2), 16) || 0;
+        }
+      }
+      fullProof.set(proof, 4 + numPub * 32);
+
+      return { proofValue: uint8ArrayToBase64(fullProof), publicOutputs };
     },
 
     async verify(params: ZKPVerifyParams): Promise<boolean> {
       const { backend } = await getBackend(params.circuitId);
-      const proof = base64ToUint8Array(params.proofValue);
-      const publicInputs = toPublicInputsArray(params.publicInputs, params.publicOutputs, params.circuitId);
+      const fullProof = base64ToUint8Array(params.proofValue);
+
+      // Decode full proof: [num_pub(4 BE)][public_inputs][proof]
+      const view = new DataView(fullProof.buffer, fullProof.byteOffset, fullProof.byteLength);
+      const numPub = view.getUint32(0, false);
+      const pubEnd = 4 + numPub * 32;
+      const publicInputs: string[] = [];
+      for (let i = 0; i < numPub; i++) {
+        let hex = '';
+        for (let j = 0; j < 32; j++) {
+          hex += fullProof[4 + i * 32 + j]!.toString(16).padStart(2, '0');
+        }
+        publicInputs.push('0x' + hex);
+      }
+      const proof = fullProof.slice(pubEnd);
+
       try {
         return await backend.verifyProof({ proof, publicInputs });
       } catch {

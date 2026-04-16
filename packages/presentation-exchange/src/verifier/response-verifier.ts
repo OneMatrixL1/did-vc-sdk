@@ -97,6 +97,7 @@ export async function verifyVPResponse(
   let zkpOk = true;
   const zkpProvider = options?.zkpProvider;
   const docRequests = collectAllDocumentRequests(request.rules);
+  const zkpVerifiedIndices = new Set<number>();
 
   for (const entry of presentation.presentationSubmission) {
     const cred = presentation.verifiableCredential[entry.credentialIndex];
@@ -104,6 +105,8 @@ export async function verifyVPResponse(
 
     const zkpProofs = extractZKPProofs(cred);
     if (zkpProofs.length === 0) continue;
+
+    zkpVerifiedIndices.add(entry.credentialIndex);
 
     if (!zkpProvider?.verify) {
       errors.push('ZKP proofs present but no zkpProvider was supplied — cannot verify');
@@ -150,6 +153,22 @@ export async function verifyVPResponse(
     }
 
     documents[entry.docRequestID] = {};
+  }
+
+  // --- 4. Credential-level proof verification for non-ZKP credentials ---
+  // Credentials verified via ZKP chain (step 3) don't need LD-Signature checks.
+  // All other credentials must have a valid issuer signature verified by credential-sdk.
+  const credentialResults = crypto.credentialResults as { verified?: boolean }[] | undefined;
+  for (const entry of presentation.presentationSubmission) {
+    if (zkpVerifiedIndices.has(entry.credentialIndex)) continue;
+
+    const credResult = credentialResults?.[entry.credentialIndex];
+    if (!credResult?.verified) {
+      errors.push(
+        `Credential at index ${entry.credentialIndex} (docRequestID "${entry.docRequestID}") has no ZKP proofs and failed issuer signature verification`,
+      );
+      zkpOk = false;
+    }
   }
 
   // VP envelope signature (holder's proof) must always pass.

@@ -20,6 +20,10 @@ import type {
   CachedMerkleTree,
 } from './types.js';
 import type { MatchableCredential, ZKPProof, PresentedCredential, CredentialProof } from '../types/credential.js';
+import type { DocumentConditionNode, VerifierDisclosure, DocumentRequest } from '../types/request.js';
+import type { SubmissionEntry } from '../types/response.js';
+import { extractConditions } from '../resolver/field-extractor.js';
+import { createICAOSchemaResolver } from '../resolvers/icao-schema-resolver.js';
 import { deriveDomain, DEFAULT_DOMAIN_NAME } from './domain.js';
 import { buildMerkleTree } from './merkle-tree.js';
 import {
@@ -254,24 +258,45 @@ export class ICAO9303ProofSystem {
   }
 
   // -------------------------------------------------------------------------
-  // Verifier credential with ZKP disclosure
+  // Verifier self-disclosure (same format as prover presentation)
   // -------------------------------------------------------------------------
 
-  async buildVerifierCredential(
+  /**
+   * Build a VerifierDisclosure — the verifier's own selective disclosure.
+   *
+   * Uses the same data structures and pipeline as the prover:
+   * - Accepts `DocumentConditionNode[]` (same as VPRequest rules conditions)
+   * - Derives credential via ICAO resolver (populates disclosed fields)
+   * - Attaches chain ZKP proofs (same format as prover's proofs)
+   *
+   * @param credential     - Verifier's raw credential (with DG blobs)
+   * @param credentialId   - Storage key for proof caching
+   * @param domain         - Domain for proof binding
+   * @param conditions     - What to disclose (same format as DocumentRequest.conditions)
+   */
+  async buildVerifierDisclosure(
     credential: MatchableCredential,
     credentialId: string,
     domain: Domain,
-    includePhoto: boolean,
-  ): Promise<PresentedCredential> {
+    conditions: DocumentConditionNode[],
+  ): Promise<VerifierDisclosure> {
     const proofSet = await this.getOrGenerateProofs(credential, credentialId, domain);
 
+    // 1. Extract conditions — same as resolvePresentation does
+    const { disclose, zkp } = extractConditions(conditions);
+    const disclosedFields = disclose.map(d => d.field);
+
+    // 2. Derive credential via ICAO resolver — populates disclosed fields
+    const resolver = createICAOSchemaResolver();
+    const derived = await resolver.deriveCredential(credential, disclosedFields);
+
+    // 3. Build proof array — same pattern as resolvePresentation
     const proofs: CredentialProof[] = [];
 
-    const chainProofs = [proofSet.sodValidate, proofSet.dgBridge, proofSet.dg13Merklelize];
-    if (proofSet.didDelegate) {
-      chainProofs.push(proofSet.didDelegate);
-    }
-    for (const chain of chainProofs) {
+    // Chain proofs (always attached)
+    const chains = [proofSet.sodValidate, proofSet.dgBridge, proofSet.dg13Merklelize];
+    if (proofSet.didDelegate) chains.push(proofSet.didDelegate);
+    for (const chain of chains) {
       proofs.push({
         type: 'ZKPProof',
         conditionID: `chain-${chain.circuitId}`,
@@ -283,12 +308,11 @@ export class ICAO9303ProofSystem {
       } satisfies ZKPProof);
     }
 
-    const subject: Record<string, unknown> = {};
-
-    if (includePhoto) {
+    // Photo disclosure: if 'photo' is disclosed, include dg2 + dg2-bridge proof
+    if (disclosedFields.includes('photo')) {
       const dg2 = credential.credentialSubject['dg2'];
       if (typeof dg2 === 'string') {
-        subject['dg2'] = dg2;
+        derived.credentialSubject['photo'] = dg2;
 
         const sodBase64 = this.extractSOD(credential);
         const { witness: sodWitness } = buildSodValidateInputs(sodBase64, domain.hash);
@@ -297,17 +321,14 @@ export class ICAO9303ProofSystem {
         const dg2BridgeInputs = buildDgBridgeInputs(sodWitness, domain.hash, eContentBinding);
         dg2BridgeInputs.publicInputs.dgNumber = 2;
         const { findDGEntry } = await import('./sod-parser.js');
-        const econtent = sodWitness.econtent;
-        const dg2Offset = findDGEntry(new Uint8Array(econtent), 2);
+        const dg2Offset = findDGEntry(new Uint8Array(sodWitness.econtent), 2);
         if (dg2Offset >= 0) {
           dg2BridgeInputs.privateInputs.dgOffset = dg2Offset;
-
           const dg2BridgeResult = await this.zkp.prove({
             circuitId: 'dg-bridge',
             privateInputs: dg2BridgeInputs.privateInputs,
             publicInputs: dg2BridgeInputs.publicInputs,
           });
-
           proofs.push({
             type: 'ZKPProof',
             conditionID: 'dg2-authenticity',
@@ -321,15 +342,44 @@ export class ICAO9303ProofSystem {
       }
     }
 
-    return {
-      '@context': credential['@context'] ? [...(credential['@context'] as string[])] : undefined,
-      type: [...(credential.type as string[])],
-      issuer: typeof credential.issuer === 'string'
-        ? credential.issuer
-        : { ...credential.issuer },
-      credentialSubject: subject,
-      proof: proofs,
+    derived.proof = proofs;
+
+    // 4. Build the DocumentRequest that describes this disclosure
+    const request: DocumentRequest = {
+      type: 'DocumentRequest',
+      docRequestID: 'verifier-doc',
+      docType: [...(credential.type as string[])],
+      schemaType: 'ICAO9303SOD',
+      conditions,
     };
+
+    return {
+      request,
+      credentials: [derived],
+      submission: [{ docRequestID: 'verifier-doc', credentialIndex: 0 }],
+    };
+  }
+
+  /** @deprecated Use buildVerifierDisclosure instead. */
+  async buildVerifierCredential(
+    credential: MatchableCredential,
+    credentialId: string,
+    domain: Domain,
+    includePhoto: boolean,
+  ): Promise<PresentedCredential> {
+    const conditions: DocumentConditionNode[] = [];
+    if (includePhoto) {
+      conditions.push({
+        type: 'DocumentCondition',
+        conditionID: 'v-photo',
+        field: 'photo',
+        operator: 'disclose',
+      });
+    }
+    const disclosure = await this.buildVerifierDisclosure(
+      credential, credentialId, domain, conditions,
+    );
+    return disclosure.credentials[0]!;
   }
 
   // -------------------------------------------------------------------------

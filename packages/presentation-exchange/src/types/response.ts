@@ -8,6 +8,7 @@ export type {
 } from './credential.js';
 
 import type { PresentedCredential } from './credential.js';
+import type { VerifierDisclosure } from './request.js';
 
 // ---------------------------------------------------------------------------
 // Supporting types (defined before they are referenced)
@@ -50,7 +51,10 @@ export interface VerifiablePresentation {
   verifier: string;
   requestId: string;
   requestNonce: string;
+  /** @deprecated Use `verifierDisclosure` instead. */
   verifierCredentials?: PresentedCredential[];
+  /** Verifier's self-disclosure — passed through from VPRequest. */
+  verifierDisclosure?: VerifierDisclosure;
   verifiableCredential: PresentedCredential[];
   presentationSubmission: SubmissionEntry[];
   proof: HolderProof;

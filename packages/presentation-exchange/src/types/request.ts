@@ -1,5 +1,5 @@
 import type { LocalizableString } from './localization.js';
-import type { PresentedCredential } from './response.js';
+import type { PresentedCredential, SubmissionEntry } from './response.js';
 
 export type ProofSystem = 'groth16' | 'plonk' | 'halo2' | 'bulletproofs';
 
@@ -111,6 +111,23 @@ export interface LogicalRequestNode {
 export type DocumentRequestNode = LogicalRequestNode | DocumentRequest;
 
 // ---------------------------------------------------------------------------
+// Verifier self-disclosure (symmetric with prover response)
+// ---------------------------------------------------------------------------
+
+/**
+ * The verifier's own selective disclosure — same structure as a prover response.
+ *
+ * - `request`     — what the verifier is disclosing (same DocumentRequest format)
+ * - `credentials` — derived credentials satisfying the request (same PresentedCredential format)
+ * - `submission`  — maps request → credential (same SubmissionEntry format)
+ */
+export interface VerifierDisclosure {
+  request: DocumentRequest;
+  credentials: PresentedCredential[];
+  submission: SubmissionEntry[];
+}
+
+// ---------------------------------------------------------------------------
 // Top-level request
 // ---------------------------------------------------------------------------
 
@@ -124,7 +141,10 @@ export interface VPRequest {
   verifier: string;
   verifierName: LocalizableString;
   verifierUrl: string;
+  /** @deprecated Use `verifierDisclosure` instead. */
   verifierCredentials?: PresentedCredential[];
+  /** Verifier's own selective disclosure — same format as prover response. */
+  verifierDisclosure?: VerifierDisclosure;
   createdAt: string;
   expiresAt?: string;
   rules: DocumentRequestNode;

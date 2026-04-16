@@ -15,6 +15,7 @@ export type {
   ZKPCondition,
   ProofSystem,
   KeyDoc,
+  VerifierDisclosure,
 } from './request.js';
 
 export type {

@@ -12,6 +12,7 @@ export const vpRequestContext: Record<string, unknown> = {
   verifierName: 'https://schema.org/alternateName',
   verifierUrl: 'https://schema.org/url',
   verifierCredentials: 'https://w3id.org/security#verifiableCredential',
+  verifierDisclosure: { '@id': 'https://w3id.org/vprequest#verifierDisclosure', '@type': '@json' },
   createdAt: 'https://schema.org/dateCreated',
   expiresAt: 'https://schema.org/expires',
   rules: { '@id': 'https://w3id.org/vprequest#rules', '@type': '@json' },

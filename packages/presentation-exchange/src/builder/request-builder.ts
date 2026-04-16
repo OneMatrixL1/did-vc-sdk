@@ -3,6 +3,7 @@ import type { PresentedCredential } from '../types/response.js';
 import type {
   VPRequest,
   VerifierRequestProof,
+  VerifierDisclosure,
   DocumentRequestNode,
   DocumentRequest,
   KeyDoc,
@@ -37,6 +38,8 @@ export class VPRequestBuilder {
   private verifierUrl?: string;
 
   private verifierCredentials: PresentedCredential[] = [];
+
+  private _verifierDisclosure?: VerifierDisclosure;
 
   private createdAt: string;
 
@@ -77,8 +80,15 @@ export class VPRequestBuilder {
     return this;
   }
 
+  /** @deprecated Use setVerifierDisclosure instead. */
   addVerifierCredential(credential: PresentedCredential): this {
     this.verifierCredentials.push(credential);
+    return this;
+  }
+
+  /** Set the verifier's self-disclosure (same format as prover response). */
+  setVerifierDisclosure(disclosure: VerifierDisclosure): this {
+    this._verifierDisclosure = disclosure;
     return this;
   }
 
@@ -152,7 +162,11 @@ export class VPRequestBuilder {
       rules,
     };
 
-    if (this.verifierCredentials.length > 0) {
+    if (this._verifierDisclosure) {
+      req.verifierDisclosure = this._verifierDisclosure;
+      // Backward compat: also set verifierCredentials
+      req.verifierCredentials = this._verifierDisclosure.credentials;
+    } else if (this.verifierCredentials.length > 0) {
       req.verifierCredentials = this.verifierCredentials;
     }
 

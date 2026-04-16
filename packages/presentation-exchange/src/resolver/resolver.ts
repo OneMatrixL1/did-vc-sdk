@@ -1,5 +1,5 @@
 import type { MatchableCredential, ZKPProof } from '../types/credential.js';
-import type { VPRequest, DocumentRequest, DocumentRequestNode, KeyDoc } from '../types/request.js';
+import type { VPRequest, VerifierDisclosure, DocumentRequest, DocumentRequestNode, KeyDoc } from '../types/request.js';
 import type {
   VerifiablePresentation,
   PresentedCredential,
@@ -24,7 +24,9 @@ export interface UnsignedPresentation {
   verifier: string;
   requestId: string;
   requestNonce: string;
+  /** @deprecated Use `verifierDisclosure` instead. */
   verifierCredentials?: PresentedCredential[];
+  verifierDisclosure?: VerifierDisclosure;
   verifiableCredential: PresentedCredential[];
   presentationSubmission: SubmissionEntry[];
 }
@@ -175,6 +177,7 @@ export async function resolvePresentation(
     verifier: request.verifier,
     requestId: request.id,
     requestNonce: request.nonce,
+    ...(request.verifierDisclosure ? { verifierDisclosure: request.verifierDisclosure } : {}),
     ...(request.verifierCredentials?.length ? { verifierCredentials: request.verifierCredentials } : {}),
     verifiableCredential: presentedCredentials,
     presentationSubmission: submission,

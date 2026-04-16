@@ -79,7 +79,8 @@ function validateVerifierCredentials(
   request: VPRequest,
   errors: string[],
 ): void {
-  const creds = request.verifierCredentials;
+  // Support both new verifierDisclosure and legacy verifierCredentials
+  const creds = request.verifierDisclosure?.credentials ?? request.verifierCredentials;
   if (!creds) return;
 
   for (let i = 0; i < creds.length; i++) {
@@ -258,7 +259,8 @@ async function verifyVerifierCredentials(
   request: VPRequest,
   zkpProvider?: ZKPProvider,
 ): Promise<VerifierCredentialResult> {
-  const creds = request.verifierCredentials;
+  // Support both new verifierDisclosure and legacy verifierCredentials
+  const creds = request.verifierDisclosure?.credentials ?? request.verifierCredentials;
   if (!creds || creds.length === 0) {
     return { verified: false, errors: [] };
   }

@@ -88,36 +88,19 @@ export function createICAOSchemaResolver(defaultProfile?: ICAODocumentProfile): 
       credential: MatchableCredential,
       _disclosedFields: string[],
     ): Promise<PresentedCredential> {
-      // ICAO credentials never include raw DG data in the presentation.
-      // All field disclosure goes through ZKP proofs — the credential
-      // shell carries only structural metadata for the proof attachment.
-      const selectiveSubject: Record<string, unknown> = {};
-      if (credential.credentialSubject.id !== undefined) {
-        selectiveSubject.id = credential.credentialSubject.id;
-      }
-
+      // ZKP-only: return a minimal shell for structural verification.
+      // No raw DG data, no credential ID, no issuanceDate, no subject ID —
+      // all are linkable. Only type and issuer are needed by the verifier.
       const types = [...(credential.type as readonly string[])];
       const issuer = typeof credential.issuer === 'string'
         ? credential.issuer
         : { ...credential.issuer };
 
-      const presented: PresentedCredential = {
+      return Promise.resolve({
         type: types,
         issuer,
-        credentialSubject: selectiveSubject,
-      };
-
-      if (credential['@context']) {
-        presented['@context'] = [...(credential['@context'] as string[])];
-      }
-      if (credential.issuanceDate !== undefined) {
-        presented.issuanceDate = credential.issuanceDate as string;
-      }
-      if (credential.id !== undefined) {
-        presented.id = credential.id as string;
-      }
-
-      return Promise.resolve(presented);
+        credentialSubject: {},
+      });
     },
   };
 }

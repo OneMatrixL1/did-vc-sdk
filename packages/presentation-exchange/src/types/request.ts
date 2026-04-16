@@ -78,7 +78,6 @@ export interface DocumentRequest {
   /**
    * Identifies the schema/resolution strategy for this document request.
    * The resolver for this type must be present in the SchemaResolverMap.
-   *  - 'JsonSchema': JSONPath-based field resolution (standard W3C VC)
    *  - 'ICAO9303SOD': ICAO profile field ID resolution (encoded DG blobs)
    */
   schemaType: string;

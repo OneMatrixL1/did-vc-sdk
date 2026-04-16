@@ -35,7 +35,7 @@ export class DocumentRequestBuilder {
     this.docType = Array.isArray(docType) ? docType : [docType];
   }
 
-  /** Set the schema resolution strategy (e.g. 'JsonSchema', 'ICAO9303SOD') */
+  /** Set the schema resolution strategy (e.g. 'ICAO9303SOD') */
   setSchemaType(type: string): this {
     this.schemaType = type;
     return this;

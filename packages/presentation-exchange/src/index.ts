@@ -59,10 +59,9 @@ export type { VerificationResult, VerifyRequestOptions, VerifyVPRequestResult, V
 export { signVPResponse } from './signer/index.js';
 
 // Schema Resolvers
-export { jsonSchemaResolver, createICAOSchemaResolver, createBBSResolver, isBBSProof, defaultResolvers } from './resolvers/index.js';
+export { createICAOSchemaResolver, createBBSResolver, isBBSProof, defaultResolvers } from './resolvers/index.js';
 
 // Utils
-export { resolveJsonPath } from './utils/jsonpath.js';
 export { resolveLocalized } from './utils/localization.js';
 export { createKeyDoc } from './utils/keydoc.js';
 export type { KeySystem } from './utils/keydoc.js';

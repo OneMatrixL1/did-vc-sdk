@@ -18,7 +18,6 @@ export interface SchemaResolver {
   /**
    * Resolve a field value from a credential.
    * The meaning of `field` is schema-dependent:
-   *  - JsonSchema: JSONPath (e.g. `$.credentialSubject.fullName`)
    *  - ICAO9303SOD: profile field ID (e.g. `fullName`, `permanentAddress`)
    */
   resolveField(

@@ -20,7 +20,7 @@ import { extractConditions } from './field-extractor.js';
  * suitable for UI rendering (show what's needed, what matches, where choices exist).
  *
  * @param resolvers  Optional — extra or overriding resolvers merged on top of
- *                   the built-in defaults (JsonSchema + ICAO9303SOD).
+ *                   the built-in defaults (ICAO9303SOD).
  */
 export function matchCredentials(
   rules: DocumentRequestNode,

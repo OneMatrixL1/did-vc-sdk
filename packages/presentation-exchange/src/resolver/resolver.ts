@@ -46,7 +46,7 @@ export interface ResolveOptions {
   holder: string;
   /**
    * Optional — extra or overriding resolvers merged on top of
-   * the built-in defaults (JsonSchema + ICAO9303SOD).
+   * the built-in defaults (ICAO9303SOD).
    */
   resolvers?: SchemaResolverMap;
   /** Custom signing callback (challenge = nonce, domain = verifierUrl). */

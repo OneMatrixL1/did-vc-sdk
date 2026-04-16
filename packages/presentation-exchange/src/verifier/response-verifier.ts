@@ -241,12 +241,11 @@ function verifyBindingChain(proofs: ZKPProof[]): string[] {
     }
   }
 
-  // did-delegate must share the same domain and bind to same DG15
+  // did-delegate must share the same domain.
+  // Note: did-delegate.dgBinding is for DG15 (chip key), dg-bridge.dgBinding is
+  // for DG13 (identity data) — they are different data groups, so bindings differ.
   if (didDelegate.publicInputs['domain'] !== domain) {
     errors.push('did-delegate domain does not match sod-validate domain');
-  }
-  if (didDelegate.publicOutputs['dgBinding'] !== dgBridge.publicOutputs['dgBinding']) {
-    errors.push('did-delegate dgBinding does not match dg-bridge output');
   }
 
   return errors;

@@ -106,6 +106,10 @@ export function createICAOSchemaResolver(defaultProfile?: ICAODocumentProfile): 
       if (credential['@context']) {
         presented['@context'] = [...(credential['@context'] as string[])];
       }
+      // issuanceDate is required by W3C VC spec — verifyPresentation rejects without it
+      if (credential.issuanceDate !== undefined) {
+        presented.issuanceDate = credential.issuanceDate as string;
+      }
 
       return Promise.resolve(presented);
     },

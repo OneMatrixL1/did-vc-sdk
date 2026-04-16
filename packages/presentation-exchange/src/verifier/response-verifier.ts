@@ -153,15 +153,21 @@ export async function verifyVPResponse(
       }
     }
 
-    // 3d. Verify all requested ZKP conditions have matching proofs
+    // 3d. Verify all requested ZKP conditions have matching proofs with correct circuit
     const docReqForConds = docRequests.get(entry.docRequestID);
     if (docReqForConds) {
       const { zkp: zkpConditions } = extractConditions(docReqForConds.conditions);
-      const proofConditionIDs = new Set(zkpProofs.map(p => p.conditionID));
+      const proofByConditionID = new Map(zkpProofs.map(p => [p.conditionID, p]));
       for (const cond of zkpConditions) {
-        if (!proofConditionIDs.has(cond.conditionID)) {
+        const proof = proofByConditionID.get(cond.conditionID);
+        if (!proof) {
           errors.push(
             `${entry.docRequestID}: missing ZKP proof for requested condition "${cond.conditionID}" (circuit: ${cond.circuitId})`,
+          );
+          zkpOk = false;
+        } else if (proof.circuitId !== cond.circuitId) {
+          errors.push(
+            `${entry.docRequestID}: condition "${cond.conditionID}" requires circuit "${cond.circuitId}" but proof uses "${proof.circuitId}"`,
           );
           zkpOk = false;
         }

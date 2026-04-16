@@ -1,4 +1,6 @@
 import type { VPRequest } from '../types/request.js';
+import type { PresentedCredential, ZKPProof, CredentialProof } from '../types/credential.js';
+import type { ZKPProvider } from '../proof-system/types.js';
 import type { VerificationResult } from './structural-verifier.js';
 import { verifyPresentation } from '@1matrix/credential-sdk/vc';
 // @ts-ignore -- JS module, no .d.ts
@@ -11,6 +13,13 @@ export interface VerifyRequestOptions {
     supports(id: string): boolean;
     resolve(id: string, opts?: unknown): Promise<unknown>;
   };
+  /** ZKP provider for verifying verifierCredentials' ZKP proofs. */
+  zkpProvider?: ZKPProvider;
+}
+
+export interface VerifierCredentialResult {
+  verified: boolean;
+  errors: string[];
 }
 
 export interface VerifyVPRequestResult {
@@ -20,6 +29,8 @@ export interface VerifyVPRequestResult {
   structural: VerificationResult;
   /** Result of cryptographic proof verification (null if no proof present). */
   crypto: { verified: boolean; error?: Error } | null;
+  /** Result of verifierCredentials ZKP verification (null if none present). */
+  verifierCredentials: VerifierCredentialResult | null;
   /** All error messages. */
   errors: string[];
 }
@@ -157,13 +168,20 @@ export async function verifyVPRequestFull(
       verified: false,
       structural,
       crypto: null,
+      verifierCredentials: null,
       errors: structural.errors,
     };
   }
 
-  // --- 2. Crypto (only if proof is present) ---
+  // --- 2. Crypto — proof is required ---
   if (!request.proof) {
-    return { verified: true, structural, crypto: null, errors: [] };
+    return {
+      verified: false,
+      structural,
+      crypto: null,
+      verifierCredentials: null,
+      errors: ['VPRequest has no proof — unsigned requests are not accepted'],
+    };
   }
 
   const { proof, ...unsigned } = request;
@@ -214,12 +232,67 @@ export async function verifyVPRequestFull(
     errors.push(...msgs.length > 0 ? msgs : [String(err)]);
   }
 
+  // --- 3. Verify verifierCredentials ZKP proofs ---
+  const vcResult = await verifyVerifierCredentials(request, options?.zkpProvider);
+
   return {
     verified: structural.valid && (crypto?.verified ?? false),
     structural,
     crypto,
-    errors,
+    verifierCredentials: vcResult,
+    errors: [...errors, ...vcResult.errors],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Verifier credential ZKP verification
+// ---------------------------------------------------------------------------
+
+function extractZKPProofs(cred: PresentedCredential): ZKPProof[] {
+  if (!cred.proof) return [];
+  const proofs: CredentialProof[] = Array.isArray(cred.proof) ? cred.proof : [cred.proof];
+  return proofs.filter((p): p is ZKPProof => p.type === 'ZKPProof');
+}
+
+async function verifyVerifierCredentials(
+  request: VPRequest,
+  zkpProvider?: ZKPProvider,
+): Promise<VerifierCredentialResult> {
+  const creds = request.verifierCredentials;
+  if (!creds || creds.length === 0) {
+    return { verified: false, errors: [] };
+  }
+
+  if (!zkpProvider?.verify) {
+    return { verified: false, errors: ['verifierCredentials have ZKP proofs but no zkpProvider supplied'] };
+  }
+
+  const errors: string[] = [];
+  let allValid = true;
+
+  for (let i = 0; i < creds.length; i++) {
+    const zkpProofs = extractZKPProofs(creds[i]!);
+    if (zkpProofs.length === 0) {
+      errors.push(`verifierCredentials[${i}] has no ZKP proofs`);
+      allValid = false;
+      continue;
+    }
+
+    for (const p of zkpProofs) {
+      const valid = await zkpProvider.verify({
+        circuitId: p.circuitId,
+        proofValue: p.proofValue,
+        publicInputs: p.publicInputs,
+        publicOutputs: p.publicOutputs,
+      });
+      if (!valid) {
+        errors.push(`verifierCredentials[${i}]: ZKP proof "${p.conditionID}" (${p.circuitId}) invalid`);
+        allValid = false;
+      }
+    }
+  }
+
+  return { verified: allValid, errors };
 }
 
 // ---------------------------------------------------------------------------

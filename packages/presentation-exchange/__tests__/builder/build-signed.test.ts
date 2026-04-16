@@ -326,7 +326,7 @@ describe('verifyVPRequestFull()', () => {
     expect(result.errors).toHaveLength(0);
   }, 30000);
 
-  it('passes for unsigned VPRequest (structural only, no crypto)', async () => {
+  it('rejects unsigned VPRequest', async () => {
     const unsigned = new VPRequestBuilder('req-unsigned', 'nonce-unsigned')
       .setVerifier({
         id: verifierDID,
@@ -336,16 +336,17 @@ describe('verifyVPRequestFull()', () => {
       .setExpiresAt('2099-12-31T23:59:59Z')
       .addDocumentRequest(
         new DocumentRequestBuilder('dr-u1', 'KYCCredential')
-          .setSchemaType('JsonSchema')
-          .disclose('c-name', '$.credentialSubject.fullName'),
+          .setSchemaType('ICAO9303SOD')
+          .disclose('c-name', 'fullName'),
       )
       .build();
 
     const result = await verifyVPRequestFull(unsigned);
 
-    expect(result.verified).toBe(true);
+    expect(result.verified).toBe(false);
     expect(result.structural.valid).toBe(true);
     expect(result.crypto).toBeNull();
+    expect(result.errors.some(e => e.includes('unsigned'))).toBe(true);
   }, 30000);
 
   it('fails crypto when request content is tampered', async () => {

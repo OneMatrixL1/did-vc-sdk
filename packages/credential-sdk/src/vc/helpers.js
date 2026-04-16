@@ -180,29 +180,17 @@ export function getKeyFromDIDDocument(didDocument, didUrl) {
 }
 
 /**
- * For KVAC, public key is not present so the holder assumes that the given credential is valid.
- * Secondly, these credentials are never shared as it is with the verifier so this function returns true if the credential is
- * a KVAC, else returns undefined.
+ * KVAC credential handling — disabled.
+ * KVAC (Bls12381BBDT16MAC) is not used in this project. Returning verified:true
+ * without cryptographic verification is a security risk, so this always
+ * returns undefined to force credentials through normal verification.
  * @param credential
- * @returns {object | undefined}
+ * @returns {undefined}
  */
 export function processIfKvac(credential) {
   const { proof } = credential;
   if (proof === undefined || Array.isArray(proof) || proof.type === undefined) {
     return undefined;
-  }
-  if (proof.type === Bls12381BBDT16MacDockName) {
-    return {
-      results: [
-        {
-          verified: true,
-          proof,
-          verificationMethod: {},
-          purposeResult: {},
-        },
-      ],
-      verified: true,
-    };
   }
   return undefined;
 }

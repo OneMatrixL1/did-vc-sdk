@@ -372,16 +372,18 @@ export async function verifyCredential(
   }
 
   // ZKP-proven credentials: proof is an array of ZKPProof objects.
-  // Verification happens in the presentation-exchange ZKP chain verifier.
+  // credential-sdk cannot verify ZKP proofs (needs circuit backends).
+  // Return verified:false here — the presentation-exchange layer verifies
+  // ZKP proofs via zkpProvider and overrides this result.
   if (Array.isArray(credential.proof)) {
     const allZKP = credential.proof.every(p => p.type === 'ZKPProof');
     if (allZKP) {
       return {
-        verified: true,
+        verified: false,
         results: credential.proof.map(p => ({
-          verified: true,
+          verified: false,
           proof: p,
-          purposeResult: { valid: true },
+          purposeResult: { valid: false, message: 'ZKPProof requires zkpProvider verification' },
         })),
       };
     }

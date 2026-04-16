@@ -28,6 +28,8 @@ export class DocumentRequestBuilder {
 
   private conditions: DocumentConditionNode[] = [];
 
+  private _requireHolderBinding = false;
+
   constructor(docRequestID: string, docType: string | string[]) {
     this.docRequestID = docRequestID;
     this.docType = Array.isArray(docType) ? docType : [docType];
@@ -111,6 +113,12 @@ export class DocumentRequestBuilder {
     return this;
   }
 
+  /** Require did-delegate "did" input to match the VP holder address. */
+  requireHolderBinding(): this {
+    this._requireHolderBinding = true;
+    return this;
+  }
+
   /** Add a raw condition node (for logical groupings) */
   addCondition(condition: DocumentConditionNode): this {
     this.conditions.push(condition);
@@ -135,6 +143,7 @@ export class DocumentRequestBuilder {
       ...(this.purpose !== undefined && { purpose: this.purpose }),
       ...(this.disclosureMode !== undefined && { disclosureMode: this.disclosureMode }),
       conditions: this.conditions,
+      ...(this._requireHolderBinding && { requireHolderBinding: true }),
     };
   }
 }

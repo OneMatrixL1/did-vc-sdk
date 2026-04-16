@@ -1,4 +1,4 @@
-import type { VPRequest } from '../types/request.js';
+import type { VPRequest, DocumentRequestNode, DocumentRequest } from '../types/request.js';
 import type { VerifiablePresentation } from '../types/response.js';
 import type { PresentedCredential, ZKPProof, CredentialProof } from '../types/credential.js';
 import type { ZKPProvider, ZKPVerifyParams } from '../proof-system/types.js';
@@ -96,6 +96,7 @@ export async function verifyVPResponse(
   // --- 3. ZKP proof chain verification ---
   let zkpOk = true;
   const zkpProvider = options?.zkpProvider;
+  const docRequests = collectAllDocumentRequests(request.rules);
 
   for (const entry of presentation.presentationSubmission) {
     const cred = presentation.verifiableCredential[entry.credentialIndex];
@@ -105,8 +106,8 @@ export async function verifyVPResponse(
     if (zkpProofs.length === 0) continue;
 
     if (!zkpProvider?.verify) {
-      // ZKP verification skipped — no provider available (P2P browser verifier).
-      // Backend verifier should always pass a zkpProvider.
+      errors.push('ZKP proofs present but no zkpProvider was supplied — cannot verify');
+      zkpOk = false;
       continue;
     }
 
@@ -125,35 +126,59 @@ export async function verifyVPResponse(
       }
     }
 
-    // 3b. Verify binding chain
+    // 3b. Verify binding chain (did-delegate is required)
     const chainErrors = verifyBindingChain(zkpProofs);
     if (chainErrors.length > 0) {
       errors.push(...chainErrors);
       zkpOk = false;
     }
 
+    // 3c. Per-document holder binding: did-delegate "did" must match VP holder
+    const docReq = docRequests.get(entry.docRequestID);
+    if (docReq?.requireHolderBinding) {
+      const didDelegate = zkpProofs.find(p => p.circuitId === 'did-delegate');
+      if (didDelegate) {
+        const proofDid = String(didDelegate.publicInputs['did'] ?? '');
+        const holderAddress = extractHolderAddress(presentation.holder);
+        if (!holderAddress || proofDid !== holderAddress) {
+          errors.push(
+            `${entry.docRequestID}: did-delegate "did" (${proofDid}) does not match VP holder (${holderAddress ?? 'unknown'})`,
+          );
+          zkpOk = false;
+        }
+      }
+    }
+
     documents[entry.docRequestID] = {};
   }
 
-  // ZKP proof chain IS the credential proof for ICAO credentials,
-  // so credential-level LD-Signature verification is not required
-  // when ZKP chain passes. Presentation-level signature must still pass.
-  const presentationCryptoOk = !!(crypto.presentationResult as Record<string, unknown>)?.verified;
-  const hasZKPProofs = presentation.verifiableCredential.some(c => extractZKPProofs(c).length > 0);
-  const effectiveCryptoOk = crypto.verified || (presentationCryptoOk && hasZKPProofs && zkpOk);
+  // VP envelope signature (holder's proof) must always pass.
+  // Credential-level LD-Signature may fail for ZKP credentials — that's
+  // expected because credential-sdk doesn't verify ZKPProof type.
+  // The ZKP chain verification above handles credential authenticity.
+  const vpSignatureOk = crypto.verified;
+  const verified = structural.valid && vpSignatureOk && zkpOk;
 
   return {
-    verified: structural.valid && effectiveCryptoOk && zkpOk,
+    verified,
     structural,
     crypto,
     documents,
-    errors: structural.valid && effectiveCryptoOk && zkpOk ? [] : errors,
+    errors: verified ? [] : errors,
   };
 }
 
 // ---------------------------------------------------------------------------
 // ZKP helpers
 // ---------------------------------------------------------------------------
+
+function extractHolderAddress(holder: string): string | undefined {
+  // did:ethr:0x1234... → 0x1234...
+  const parts = holder.split(':');
+  const last = parts[parts.length - 1];
+  if (last && last.startsWith('0x')) return last;
+  return undefined;
+}
 
 function extractZKPProofs(cred: PresentedCredential): ZKPProof[] {
   if (!cred.proof) return [];
@@ -173,11 +198,13 @@ function verifyBindingChain(proofs: ZKPProof[]): string[] {
   const sodValidate = proofs.find(p => p.circuitId === 'sod-validate');
   const dgBridge = proofs.find(p => p.circuitId === 'dg-bridge');
   const dg13 = proofs.find(p => p.circuitId === 'dg13-merklelize');
+  const didDelegate = proofs.find(p => p.circuitId === 'did-delegate');
 
-  if (!sodValidate || !dgBridge || !dg13) {
+  if (!sodValidate || !dgBridge || !dg13 || !didDelegate) {
     if (!sodValidate) errors.push('Missing sod-validate proof in chain');
     if (!dgBridge) errors.push('Missing dg-bridge proof in chain');
     if (!dg13) errors.push('Missing dg13-merklelize proof in chain');
+    if (!didDelegate) errors.push('Missing did-delegate proof in chain');
     return errors;
   }
 
@@ -214,11 +241,28 @@ function verifyBindingChain(proofs: ZKPProof[]): string[] {
     }
   }
 
-  // did-delegate (optional) must share the same domain
-  const didDelegate = proofs.find(p => p.circuitId === 'did-delegate');
-  if (didDelegate && didDelegate.publicInputs['domain'] !== domain) {
+  // did-delegate must share the same domain and bind to same DG15
+  if (didDelegate.publicInputs['domain'] !== domain) {
     errors.push('did-delegate domain does not match sod-validate domain');
+  }
+  if (didDelegate.publicOutputs['dgBinding'] !== dgBridge.publicOutputs['dgBinding']) {
+    errors.push('did-delegate dgBinding does not match dg-bridge output');
   }
 
   return errors;
+}
+
+function collectAllDocumentRequests(
+  node: DocumentRequestNode,
+): Map<string, DocumentRequest> {
+  const map = new Map<string, DocumentRequest>();
+  function walk(n: DocumentRequestNode): void {
+    if (n.type === 'Logical') {
+      for (const child of n.values) walk(child);
+    } else {
+      map.set(n.docRequestID, n);
+    }
+  }
+  walk(node);
+  return map;
 }

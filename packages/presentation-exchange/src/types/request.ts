@@ -92,6 +92,11 @@ export interface DocumentRequest {
    */
   disclosureMode?: DisclosureMode;
   conditions: DocumentConditionNode[];
+  /**
+   * When true, the verifier requires that the did-delegate proof's "did"
+   * public input matches the VP holder's address.
+   */
+  requireHolderBinding?: boolean;
 }
 
 /**

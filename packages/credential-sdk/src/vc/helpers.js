@@ -188,10 +188,8 @@ export function getKeyFromDIDDocument(didDocument, didUrl) {
  */
 export function processIfKvac(credential) {
   const { proof } = credential;
-  if (proof === undefined || proof.type === undefined) {
-    throw new Error(
-      `Credential should have a non-null type field but found ${proof.type}`,
-    );
+  if (proof === undefined || Array.isArray(proof) || proof.type === undefined) {
+    return undefined;
   }
   if (proof.type === Bls12381BBDT16MacDockName) {
     return {

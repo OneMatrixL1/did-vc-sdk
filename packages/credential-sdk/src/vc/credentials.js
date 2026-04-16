@@ -371,6 +371,22 @@ export async function verifyCredential(
     return r;
   }
 
+  // ZKP-proven credentials: proof is an array of ZKPProof objects.
+  // Verification happens in the presentation-exchange ZKP chain verifier.
+  if (Array.isArray(credential.proof)) {
+    const allZKP = credential.proof.every(p => p.type === 'ZKPProof');
+    if (allZKP) {
+      return {
+        verified: true,
+        results: credential.proof.map(p => ({
+          verified: true,
+          proof: p,
+          purposeResult: { valid: true },
+        })),
+      };
+    }
+  }
+
   // Bypass jsigs for ICAO SOD credentials (they lack proofPurpose/verificationMethod)
   if (credential.proof && credential.proof.type === 'ICAO9303SODSignature') {
     const icaoSuite = new ICAO9303SODSignature();

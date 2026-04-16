@@ -12,7 +12,6 @@ import {
   getProfile,
   getProfileByDocType,
   resolveField as resolveProfileField,
-  getRequiredDGs,
 } from '@1matrix/credential-sdk/icao-profile';
 import type { ICAODocumentProfile } from '@1matrix/credential-sdk/icao-profile';
 import type { SchemaResolver } from '../types/schema-resolver.js';
@@ -87,28 +86,14 @@ export function createICAOSchemaResolver(defaultProfile?: ICAODocumentProfile): 
 
     deriveCredential(
       credential: MatchableCredential,
-      disclosedFields: string[],
+      _disclosedFields: string[],
     ): Promise<PresentedCredential> {
-      const profile = defaultProfile ?? detectProfile(credential);
-      if (!profile) {
-        throw new Error(
-          'Cannot derive ICAO credential: no matching profile found. ' +
-          'Ensure credential.proof.dgProfile is set or credential type matches a registered profile.',
-        );
-      }
-
-      const rawDGs = extractRawDGs(credential);
-      const requiredDGNames = getRequiredDGs(profile, disclosedFields);
-
-      // Build credentialSubject with only the required DGs
+      // ICAO credentials never include raw DG data in the presentation.
+      // All field disclosure goes through ZKP proofs — the credential
+      // shell carries only structural metadata for the proof attachment.
       const selectiveSubject: Record<string, unknown> = {};
       if (credential.credentialSubject.id !== undefined) {
         selectiveSubject.id = credential.credentialSubject.id;
-      }
-      for (const dgName of requiredDGNames) {
-        if (rawDGs[dgName]) {
-          selectiveSubject[dgName] = rawDGs[dgName];
-        }
       }
 
       const types = [...(credential.type as readonly string[])];
@@ -130,9 +115,6 @@ export function createICAOSchemaResolver(defaultProfile?: ICAODocumentProfile): 
       }
       if (credential.id !== undefined) {
         presented.id = credential.id as string;
-      }
-      if (credential.proof !== undefined) {
-        (presented as Record<string, unknown>).proof = credential.proof;
       }
 
       return Promise.resolve(presented);

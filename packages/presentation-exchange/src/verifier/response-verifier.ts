@@ -3,6 +3,7 @@ import type { VerifiablePresentation } from '../types/response.js';
 import type { PresentedCredential, ZKPProof, CredentialProof } from '../types/credential.js';
 import type { ZKPProvider, ZKPVerifyParams } from '../proof-system/types.js';
 import { verifyPresentationStructure, type VerificationResult } from './structural-verifier.js';
+import { extractConditions } from '../resolver/field-extractor.js';
 import { verifyPresentation } from '@1matrix/credential-sdk/vc';
 // @ts-ignore -- JS module, no .d.ts
 import { createOptimisticResolver } from '@1matrix/credential-sdk/ethr-did';
@@ -146,6 +147,21 @@ export async function verifyVPResponse(
         if (!holderAddress || proofDid !== holderAddress) {
           errors.push(
             `${entry.docRequestID}: did-delegate "did" (${proofDid}) does not match VP holder (${holderAddress ?? 'unknown'})`,
+          );
+          zkpOk = false;
+        }
+      }
+    }
+
+    // 3d. Verify all requested ZKP conditions have matching proofs
+    const docReqForConds = docRequests.get(entry.docRequestID);
+    if (docReqForConds) {
+      const { zkp: zkpConditions } = extractConditions(docReqForConds.conditions);
+      const proofConditionIDs = new Set(zkpProofs.map(p => p.conditionID));
+      for (const cond of zkpConditions) {
+        if (!proofConditionIDs.has(cond.conditionID)) {
+          errors.push(
+            `${entry.docRequestID}: missing ZKP proof for requested condition "${cond.conditionID}" (circuit: ${cond.circuitId})`,
           );
           zkpOk = false;
         }

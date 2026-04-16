@@ -96,11 +96,18 @@ export function createICAOSchemaResolver(defaultProfile?: ICAODocumentProfile): 
         ? credential.issuer
         : { ...credential.issuer };
 
-      return Promise.resolve({
+      const presented: PresentedCredential = {
         type: types,
         issuer,
         credentialSubject: {},
-      });
+      };
+
+      // Preserve @context — needed for JSON-LD signing (defines ZKPProof terms)
+      if (credential['@context']) {
+        presented['@context'] = [...(credential['@context'] as string[])];
+      }
+
+      return Promise.resolve(presented);
     },
   };
 }

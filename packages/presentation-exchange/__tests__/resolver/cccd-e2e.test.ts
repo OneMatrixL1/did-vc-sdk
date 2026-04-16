@@ -362,12 +362,12 @@ describe('CCCD E2E with real secp256k1 signing', () => {
     expect(vp.proof.domain).toBe('gov.vn');
     expect(vp.proof.verificationMethod).toBe(holderKeyDoc.id);
 
-    // Derived credential contains only the required DGs (dg13 + dg2), not dg1
+    // ZKP-only: credential shell has no raw DG data
     const cred = vp.verifiableCredential[0];
     expect(cred.type).toContain('CCCDCredential');
     expect(cred.issuer).toBe(issuerDID);
-    expect(cred.credentialSubject.dg13).toBe(dg13Base64);
-    expect(cred.credentialSubject.dg2).toBe(dg2Base64);
+    expect(cred.credentialSubject.dg13).toBeUndefined();
+    expect(cred.credentialSubject.dg2).toBeUndefined();
     expect(cred.credentialSubject.dg1).toBeUndefined();
 
     // ---------------------------------------------------------------
@@ -399,31 +399,15 @@ describe('CCCD E2E with real secp256k1 signing', () => {
     expect(vpProof.jws).toBeDefined();
 
     // ---------------------------------------------------------------
-    // Step 7: Verifier reads disclosed fields using ICAO resolver
+    // Step 7: ZKP-only — presented credential has no raw DG data.
+    // Field values come from ZKP proofs, not from credential.
     // ---------------------------------------------------------------
     const resolver = createICAOSchemaResolver();
 
     const fullName = resolver.resolveField(cred, 'fullName');
-    expect(fullName.found).toBe(true);
-    expect(fullName.value).toBe('NGUYEN VAN A');
+    expect(fullName.found).toBe(false);
 
     const dob = resolver.resolveField(cred, 'dateOfBirth');
-    expect(dob.found).toBe(true);
-    expect(dob.value).toBe('15/03/1985');
-
-    const address = resolver.resolveField(cred, 'permanentAddress');
-    expect(address.found).toBe(true);
-    expect(address.value).toBe('123 Main St, Hanoi');
-
-    const photo = resolver.resolveField(cred, 'photo');
-    expect(photo.found).toBe(true);
-    expect(typeof photo.value).toBe('string');
-
-    // Omitted DG fields (dg1 was stripped) should not be resolvable
-    const mrzDob = resolver.resolveField(cred, 'mrzDateOfBirth');
-    expect(mrzDob.found).toBe(false);
-
-    const docType = resolver.resolveField(cred, 'documentType');
-    expect(docType.found).toBe(false);
+    expect(dob.found).toBe(false);
   }, 30000);
 });

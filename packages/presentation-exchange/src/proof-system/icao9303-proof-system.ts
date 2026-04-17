@@ -106,6 +106,18 @@ export class ICAO9303ProofSystem {
     // Step 1: SOD validate
     onProgress?.('sod-validate');
     const { inputs: sodInputs, witness: sodWitness } = buildSodValidateInputs(sodBase64, domain.hash);
+    console.log('[ZKP] sod-validate inputs:', {
+      eContentLen: sodInputs.privateInputs.eContentLen,
+      signedAttrsLen: sodInputs.privateInputs.signedAttrsLen,
+      digestOffset: sodInputs.privateInputs.digestOffset,
+      oidOffset: sodInputs.privateInputs.oidOffset,
+      pubkeyXLen: sodInputs.privateInputs.pubkeyX.length,
+      pubkeyYLen: sodInputs.privateInputs.pubkeyY.length,
+      eContentOIDBytes: sodInputs.privateInputs.eContent.slice(
+        sodInputs.privateInputs.oidOffset,
+        sodInputs.privateInputs.oidOffset + 11,
+      ),
+    });
     const sodResult = await this.zkp.prove({
       circuitId: 'sod-validate',
       privateInputs: sodInputs.privateInputs,
@@ -142,6 +154,18 @@ export class ICAO9303ProofSystem {
 
     // Step 4: DG13 merklelize
     onProgress?.('dg13-merklelize');
+    const { fieldOffsets, fieldLengths, rawMsg, dgLen } = dg13Inputs.privateInputs;
+    console.log('[ZKP] dg13-merklelize inputs:', {
+      dgLen,
+      fieldCount: fieldOffsets.filter((_: number, i: number) => fieldLengths[i] > 0).length,
+      fields: fieldOffsets.map((off: number, i: number) => ({
+        idx: i,
+        tagId: i + 1,
+        offset: off,
+        length: fieldLengths[i],
+        headerBytes: off >= 7 ? rawMsg.slice(off - 7, off + 1) : [],
+      })),
+    });
     const dg13Result = await this.zkp.prove({
       circuitId: 'dg13-merklelize',
       privateInputs: dg13Inputs.privateInputs,

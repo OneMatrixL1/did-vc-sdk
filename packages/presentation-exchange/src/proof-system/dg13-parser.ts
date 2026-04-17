@@ -158,15 +158,19 @@ export function buildDG13WitnessData(dg13Base64: string): DG13WitnessData {
     fieldLengths[f.index] = f.length;
   }
 
-  // Pad missing fields with empty TLV entries after the real data
+  // Pad missing fields with empty TLV entries after the real data.
+  // Layout matches the circuit's unified expectedSeqLen = length + 5 rule:
+  //   30 05 02 01 <tagId> 0c 00   (SEQUENCE { INTEGER(1), UTF8String("") })
   let pos = dgLength;
   for (let i = fields.length; i < NUM_FIELDS; i++) {
     const tagId = i + 1;
     rawMsg[pos] = 0x30;       // SEQUENCE
-    rawMsg[pos + 1] = 0x03;   // length (INTEGER only, no value)
-    rawMsg[pos + 2] = 0x02;   // INTEGER
-    rawMsg[pos + 3] = 0x01;   // length 1
-    rawMsg[pos + 4] = tagId;  // tag ID
+    rawMsg[pos + 1] = 0x05;   // content length = INTEGER(3) + UTF8String(2)
+    rawMsg[pos + 2] = 0x02;   // INTEGER tag
+    rawMsg[pos + 3] = 0x01;   // INTEGER length 1
+    rawMsg[pos + 4] = tagId;  // tagId
+    rawMsg[pos + 5] = 0x0c;   // UTF8String tag
+    rawMsg[pos + 6] = 0x00;   // UTF8String length 0
     fieldOffsets[i] = pos + 7;
     fieldLengths[i] = 0;
     pos += 7;

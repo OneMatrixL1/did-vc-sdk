@@ -26,6 +26,7 @@ export interface SodValidateInputs extends CircuitInputs {
     signedAttrs: number[];
     signedAttrsLen: number;
     digestOffset: number;
+    oidOffset: number;
     signatureR: number[];
     signatureS: number[];
   };
@@ -39,6 +40,7 @@ export interface DgBridgeInputs extends CircuitInputs {
     eContent: number[];
     eContentLen: number;
     dgOffset: number;
+    oidOffset: number;
   };
   publicInputs: {
     domain: string;
@@ -119,6 +121,7 @@ export function buildSodValidateInputs(
         signedAttrs: witness.signedAttrs,
         signedAttrsLen: witness.signedAttrsLen,
         digestOffset: witness.digestOffset,
+        oidOffset: witness.oidOffset,
         signatureR: witness.signatureR,
         signatureS: witness.signatureS,
       },
@@ -146,6 +149,7 @@ export function buildDgBridgeInputs(
       eContent: witness.econtent,
       eContentLen: witness.econtentLen,
       dgOffset: witness.dgOffset,
+      oidOffset: witness.oidOffset,
     },
     publicInputs: {
       domain,

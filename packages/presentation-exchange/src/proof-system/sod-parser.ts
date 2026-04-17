@@ -355,6 +355,7 @@ export interface SODWitnessData {
   signedAttrsLen: number;
   dgOffset: number;
   digestOffset: number;
+  oidOffset: number;       // offset of SHA-256 OID in eContent
   signatureR: number[];    // 48 bytes
   signatureS: number[];    // 48 bytes, canonicalized
 }
@@ -378,6 +379,11 @@ export function buildSODWitnessData(sodBase64: string): SODWitnessData {
   const digestOffset = findMessageDigest(signedAttrsDer);
   if (digestOffset < 0) {
     throw new Error('messageDigest not found in signedAttrs');
+  }
+
+  const oidOffset = findSHA256OID(econtent);
+  if (oidOffset < 0) {
+    throw new Error('SHA-256 OID not found in eContent');
   }
 
   const dgOffset = findDGEntry(econtent, 13);
@@ -407,9 +413,30 @@ export function buildSODWitnessData(sodBase64: string): SODWitnessData {
     signedAttrsLen: signedAttrsDer.length,
     dgOffset,
     digestOffset,
+    oidOffset,
     signatureR: Array.from(r),
     signatureS: Array.from(finalS),
   };
+}
+
+/**
+ * Find the SHA-256 AlgorithmIdentifier OID in eContent.
+ * Scans for the byte sequence: 06 09 60 86 48 01 65 03 04 02 01
+ * The offset varies depending on the DER length encoding of the outer SEQUENCE.
+ */
+export function findSHA256OID(econtent: Uint8Array): number {
+  const oid = [0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
+  for (let i = 0; i <= econtent.length - oid.length; i++) {
+    let match = true;
+    for (let j = 0; j < oid.length; j++) {
+      if (econtent[i + j] !== oid[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) return i;
+  }
+  return -1;
 }
 
 // ---------------------------------------------------------------------------

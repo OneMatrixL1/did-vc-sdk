@@ -34,20 +34,24 @@ const CHAIN_CIRCUITS = new Set([
 /**
  * Extract disclosed fields from a verified VP response.
  *
- * Call this **after** `verifyVPResponse()` passes. Maps each request condition
- * to its matching response proof by `conditionID`, producing a flat list of
- * machine-readable `DisclosedField` entries.
+ * Maps each request condition to its matching response proof by `conditionID`,
+ * producing a flat list of machine-readable `DisclosedField` entries.
+ *
+ * SECURITY: The `verified` parameter is a mandatory gate. Pass `true` only
+ * after `verifyVPResponse()` returns `verified: true`. This prevents
+ * accidental extraction from unverified presentations.
  *
  * ```ts
- * const result = extractDisclosedFields(vpRequest, vp);
- * result.field('fullName')    // { method: 'merkle', value: 'TRAN GIANG LONG', ... }
- * result.field('photo')       // { method: 'dg', value: 'base64...', ... }
- * result.field('dateOfBirth') // { method: 'predicate', value: null, predicate: {...} }
+ * const result = verifyVPResponse(request, vp, opts);
+ * if (!result.verified) throw new Error('VP failed verification');
+ * const fields = extractDisclosedFields(request, vp, true);
+ * fields.field('fullName')    // { method: 'merkle', value: 'TRAN GIANG LONG', ... }
  * ```
  */
 export function extractDisclosedFields(
   request: VPRequest,
   presentation: VerifiablePresentation,
+  verified: true,
 ): DisclosedFieldsResult {
   const docRequests = collectDocumentRequests(request.rules);
   const documents: DisclosedDocument[] = [];

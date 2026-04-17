@@ -255,7 +255,14 @@ export class ICAO9303ProofSystem {
     const leafData = this.extractLeafData(proofSet, leafIndex);
     const entropy = proofSet.merkleTree.leaves[leafIndex]!;
 
-    const inputs = buildPredicateInputs(commitment, domain, tagId, siblings, leafData, entropy, extra);
+    // Date circuits require dateBytes — derive from packed leaf data if not provided
+    const resolvedExtra = { ...extra };
+    if (circuitId.startsWith('date-') && !resolvedExtra.dateBytes) {
+      const len = parseInt(leafData.length, 10);
+      resolvedExtra.dateBytes = extractBytesFromPackedField(leafData.data, len);
+    }
+
+    const inputs = buildPredicateInputs(commitment, domain, tagId, siblings, leafData, entropy, resolvedExtra);
     const result = await this.zkp.prove({
       circuitId,
       privateInputs: inputs.privateInputs,
@@ -300,7 +307,9 @@ export class ICAO9303ProofSystem {
     for (const cond of disclose) {
       const fieldId = stripJsonPathPrefix(cond.field);
       const tagId = fieldTagMap[fieldId];
-      if (tagId === undefined) continue;
+      if (tagId === undefined) {
+        throw new Error(`Cannot build disclosure proof: field "${fieldId}" not found in fieldTagMap`);
+      }
 
       // Photo: DGDisclosure with embedded dg-bridge proof
       if (fieldId === 'photo') {
@@ -346,7 +355,12 @@ export class ICAO9303ProofSystem {
       const leafData = proofSet.merkleTree.leafData[leafIndex];
       const siblings = proofSet.merkleTree.siblings[leafIndex];
       const entropy = proofSet.merkleTree.leaves[leafIndex];
-      if (!leafData || !siblings || !entropy) continue;
+      if (!leafData || !siblings || !entropy) {
+        throw new Error(
+          `Cannot build MerkleDisclosure for field "${fieldId}" (tagId=${tagId}): ` +
+          `missing Merkle tree data at leafIndex ${leafIndex}`,
+        );
+      }
 
       const value = decodeMerkleField(leafData.data, parseInt(leafData.length, 10));
 
@@ -426,7 +440,9 @@ export class ICAO9303ProofSystem {
     for (const cond of disclose) {
       const fieldId = cond.field;
       const tagId = fieldTagMap[fieldId];
-      if (tagId === undefined) continue; // skip fields not in DG13
+      if (tagId === undefined) {
+        throw new Error(`Cannot build verifier disclosure: field "${fieldId}" not found in fieldTagMap`);
+      }
 
       // Special case: photo is in dg2, not DG13 Merkle tree
       // Use DGDisclosure — raw data + embedded dg-bridge ZKP proof
@@ -473,7 +489,12 @@ export class ICAO9303ProofSystem {
       const leafData = proofSet.merkleTree.leafData[leafIndex];
       const siblings = proofSet.merkleTree.siblings[leafIndex];
       const entropy = proofSet.merkleTree.leaves[leafIndex];
-      if (!leafData || !siblings || !entropy) continue;
+      if (!leafData || !siblings || !entropy) {
+        throw new Error(
+          `Cannot build verifier MerkleDisclosure for field "${fieldId}" (tagId=${tagId}): ` +
+          `missing Merkle tree data at leafIndex ${leafIndex}`,
+        );
+      }
 
       // Decode packed field data to UTF-8 value
       const value = decodeMerkleField(leafData.data, parseInt(leafData.length, 10));
@@ -735,6 +756,34 @@ export function decodeMerkleField(
     }
   }
   return new TextDecoder().decode(new Uint8Array(bytes.slice(0, totalLen)));
+}
+
+/**
+ * Extract raw bytes from packed 31-byte hex field chunks.
+ *
+ * Each chunk is a big-endian field element with data right-aligned.
+ * Returns the first `totalLen` bytes across all chunks.
+ */
+function extractBytesFromPackedField(data: readonly string[], totalLen: number): number[] {
+  const bytes: number[] = [];
+  for (let chunk = 0; chunk < 4; chunk++) {
+    const chunkStart = chunk * 31;
+    if (chunkStart >= totalLen) break;
+    const chunkEnd = Math.min(chunkStart + 31, totalLen);
+    const chunkLen = chunkEnd - chunkStart;
+
+    const hex = BigInt(data[chunk]!);
+    const buf = new Uint8Array(32);
+    let val = hex;
+    for (let i = 31; i >= 0; i--) {
+      buf[i] = Number(val & 0xFFn);
+      val >>= 8n;
+    }
+    for (let b = 0; b < chunkLen; b++) {
+      bytes.push(buf[32 - chunkLen + b]!);
+    }
+  }
+  return bytes.slice(0, totalLen);
 }
 
 function stripJsonPathPrefix(field: string): string {

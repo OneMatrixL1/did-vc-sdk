@@ -137,16 +137,27 @@ export async function verifyVPResponse(
       zkpOk = false;
     }
 
-    // 3c. Per-document holder binding: did-delegate "did" must match VP holder
-    const docReq = docRequests.get(entry.docRequestID);
-    if (docReq?.requireHolderBinding) {
+    // 3c. Holder binding: did-delegate "did" MUST match VP holder.
+    // This is mandatory — without it, a stolen proof chain could be replayed
+    // under a different holder DID.
+    {
       const didDelegate = zkpProofs.find(p => p.circuitId === 'did-delegate');
-      if (didDelegate) {
+      if (!didDelegate) {
+        errors.push(
+          `${entry.docRequestID}: missing did-delegate proof — holder binding cannot be verified`,
+        );
+        zkpOk = false;
+      } else {
         const proofDid = String(didDelegate.publicInputs['did'] ?? '');
         const holderAddress = extractHolderAddress(presentation.holder);
-        if (!holderAddress || proofDid !== holderAddress) {
+        if (!holderAddress) {
           errors.push(
-            `${entry.docRequestID}: did-delegate "did" (${proofDid}) does not match VP holder (${holderAddress ?? 'unknown'})`,
+            `${entry.docRequestID}: cannot extract address from VP holder "${presentation.holder}"`,
+          );
+          zkpOk = false;
+        } else if (proofDid !== holderAddress) {
+          errors.push(
+            `${entry.docRequestID}: did-delegate "did" (${proofDid}) does not match VP holder (${holderAddress})`,
           );
           zkpOk = false;
         }
@@ -214,10 +225,13 @@ export async function verifyVPResponse(
 // ---------------------------------------------------------------------------
 
 function extractHolderAddress(holder: string): string | undefined {
-  // did:ethr:0x1234... → 0x1234...
+  // Supports did:ethr:0x..., did:vbsn:0x..., did:ethr:<network>:0x...
   const parts = holder.split(':');
-  const last = parts[parts.length - 1];
-  if (last && last.startsWith('0x')) return last;
+  if (parts.length < 3 || parts[0] !== 'did') return undefined;
+  const last = parts[parts.length - 1]!;
+  if (last.startsWith('0x') && /^0x[0-9a-fA-F]{40}$/.test(last)) {
+    return last;
+  }
   return undefined;
 }
 

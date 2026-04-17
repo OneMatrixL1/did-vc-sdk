@@ -98,7 +98,7 @@ export interface DisclosedDocument {
  * For multi-document requests, iterate `documents`.
  *
  * ```ts
- * const result = extractDisclosedFields(vpRequest, vp);
+ * const result = extractDisclosedFields(vpRequest, vp, true);
  *
  * // Quick access (single doc):
  * result.field('fullName')   // { method: 'merkle', value: 'TRAN GIANG LONG', ... }

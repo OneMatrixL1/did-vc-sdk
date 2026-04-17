@@ -139,9 +139,18 @@ export async function resolvePresentation(
     const disclosedFields = disclose.map((d) => d.field);
     const derived = await resolver.deriveCredential(cred, disclosedFields, { nonce: request.nonce });
 
+    // SECURITY: If conditions require ZKP (predicates or disclosures), proofs MUST be provided.
+    const requiresZKP = zkp.length > 0 || disclose.length > 0;
+    if (requiresZKP && (!options.zkpProofs || options.zkpProofs.size === 0)) {
+      throw new Error(
+        `Credential for "${docReq.docRequestID}" has ${zkp.length} ZKP + ${disclose.length} disclose conditions ` +
+        `but no zkpProofs were provided — cannot build VP without proofs`,
+      );
+    }
+
     // Attach ZKP proofs: chain proofs (always) + condition-specific proofs
     if (options.zkpProofs && options.zkpProofs.size > 0) {
-      const proofArr: unknown[] = [];
+      const proofArr: CredentialProof[] = [];
 
       // Add all chain proofs (sod-validate, dg-bridge, dg13-merklelize, did-delegate)
       for (const [key, proof] of options.zkpProofs) {

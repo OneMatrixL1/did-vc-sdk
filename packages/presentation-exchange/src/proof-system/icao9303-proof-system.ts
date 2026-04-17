@@ -161,6 +161,8 @@ export class ICAO9303ProofSystem {
       );
     }
 
+
+
     // Step 5: DID delegation (optional)
     let didDelegateProof: ChainProof | undefined;
     if (delegation) {
@@ -215,7 +217,17 @@ export class ICAO9303ProofSystem {
   ): Promise<DomainProofSet> {
     if (this.store) {
       const cached = await this.store.get(credentialId, domain.hash);
-      if (cached) return cached;
+      if (cached) {
+        // Validate cached Merkle tree against circuit commitment.
+        // Invalidate if tree data is stale (e.g. packing bug fix).
+        const cc = cached.dg13Merklelize.publicOutputs['commitment'] as string | undefined;
+        const commitmentOk = cc && BigInt(cached.merkleTree.commitment) === BigInt(cc);
+        const delegationOk = !delegation || !!cached.didDelegate;
+        if (commitmentOk && delegationOk) {
+          return cached;
+        }
+        await this.store.deleteAll(credentialId);
+      }
     }
     return this.generateChainProofs(credential, credentialId, domain, onProgress, delegation);
   }
@@ -284,6 +296,9 @@ export class ICAO9303ProofSystem {
     fieldTagMap: Record<string, number>,
   ): Promise<VerifierDisclosure> {
     const proofSet = await this.getOrGenerateProofs(credential, credentialId, domain);
+
+
+
 
     // 1. Extract conditions — same as resolvePresentation does
     const { disclose } = extractConditions(conditions);
@@ -475,7 +490,7 @@ export class ICAO9303ProofSystem {
           const chunkEnd = Math.min(chunkStart + 31, length);
           const bytes = new Uint8Array(32);
           for (let b = chunkStart; b < chunkEnd; b++) {
-            bytes[32 - (chunkEnd - b) + (b - chunkStart)] = rawMsg[offset + b]!;
+            bytes[32 - chunkEnd + b] = rawMsg[offset + b]!;
           }
           packedFields[chunk] = '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
         }
@@ -503,7 +518,8 @@ export class ICAO9303ProofSystem {
 // SHA-256 hash half computation (matches circuit's dgHashHi / dgHashLo)
 // ---------------------------------------------------------------------------
 
-function computeHashHalf(rawMsg: number[], dgLen: number, startByte: number): string {
+/** @internal Exported for testing only. */
+export function computeHashHalf(rawMsg: number[], dgLen: number, startByte: number): string {
   // SHA-256 of raw DG13 bytes, then pack upper/lower 16 bytes as field element
   // This is computed in JS using SubtleCrypto at tree-build time
   // For now, placeholder — the actual SHA-256 is done inside the circuit.
@@ -518,8 +534,8 @@ function computeHashHalf(rawMsg: number[], dgLen: number, startByte: number): st
   return '0x' + result.toString(16);
 }
 
-// Minimal synchronous SHA-256 (pure JS, no deps)
-function sha256Sync(data: Uint8Array): Uint8Array {
+/** @internal Minimal synchronous SHA-256 (pure JS, no deps). Exported for testing. */
+export function sha256Sync(data: Uint8Array): Uint8Array {
   const K = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,

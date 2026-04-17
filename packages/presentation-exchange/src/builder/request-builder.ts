@@ -195,12 +195,18 @@ export class VPRequestBuilder {
     const domain = new URL(unsigned.verifierUrl).hostname;
     const challenge = unsigned.nonce;
 
+    // Strip verifierCredentials from signing payload — it contains proof
+    // entries (MerkleDisclosure, DGDisclosure) with properties not in the
+    // JSON-LD context.  verifierDisclosure (typed @json) already carries
+    // the same data and IS signed, so nothing is lost.
+    const { verifierCredentials: _vc, ...signable } = unsigned;
+
     const vpLikeDoc = {
       '@context': [
         'https://www.w3.org/2018/credentials/v1',
         vpRequestContext,
       ],
-      ...unsigned,
+      ...signable,
       type: ['VerifiablePresentation'],
       holder: unsigned.verifier,
     };

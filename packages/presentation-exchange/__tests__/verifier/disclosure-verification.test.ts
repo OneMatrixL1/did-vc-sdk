@@ -282,12 +282,28 @@ describe('MerkleDisclosure verification', () => {
 // ---------------------------------------------------------------------------
 
 describe('DGDisclosure verification', () => {
-  // For DGDisclosure we test the hash binding logic.
+  // For DGDisclosure we test the Poseidon2 binding logic.
+  // The dg-bridge circuit outputs: dgBinding = Poseidon2([SHA256_hi, SHA256_lo, domain], 3)
   // We can't run a real ZKP verify without a circuit, but we test
-  // the structural checks: hash match, eContentBinding, domain.
+  // the structural checks: binding match, eContentBinding, domain.
 
   const CHAIN_DOMAIN = '0xabc123';
   const CHAIN_ECB = '0xdef456'; // eContentBinding from sod-validate
+
+  /** Compute dgBinding = Poseidon2([SHA256_hi, SHA256_lo, domain], 3) matching dg-bridge circuit */
+  async function computeDGBinding(base64Data: string, domain: string): Promise<string> {
+    const bytes = new Uint8Array(Buffer.from(base64Data, 'base64'));
+    const { createHash } = await import('crypto');
+    const hash = createHash('sha256').update(bytes).digest();
+
+    let dgHashHi = 0n;
+    for (let i = 0; i < 16; i++) dgHashHi = dgHashHi * 256n + BigInt(hash[i]!);
+    let dgHashLo = 0n;
+    for (let i = 16; i < 32; i++) dgHashLo = dgHashLo * 256n + BigInt(hash[i]!);
+
+    const binding = poseidon2BigInt([dgHashHi, dgHashLo, BigInt(domain)], 3);
+    return '0x' + binding.toString(16);
+  }
 
   function makeDGDisclosure(overrides?: Partial<DGDisclosure>): DGDisclosure {
     return {
@@ -307,7 +323,7 @@ describe('DGDisclosure verification', () => {
           dgNumber: 2,
         },
         publicOutputs: {
-          dgBinding: '', // will be set to SHA256(data) in valid case
+          dgBinding: '', // will be set in valid case
         },
         proofValue: 'mock-proof-value',
       },
@@ -315,34 +331,35 @@ describe('DGDisclosure verification', () => {
     };
   }
 
-  async function sha256Base64(base64Data: string): Promise<string> {
-    const bytes = new Uint8Array(Buffer.from(base64Data, 'base64'));
-    const { createHash } = await import('crypto');
-    const hash = createHash('sha256').update(bytes).digest();
-    let hex = '0x';
-    for (const b of hash) hex += b.toString(16).padStart(2, '0');
-    return hex;
-  }
-
-  it('hash matches when data is authentic', async () => {
+  it('binding matches when data is authentic', async () => {
     const dg = makeDGDisclosure();
-    const hash = await sha256Base64(dg.data);
-    dg.dgBridgeProof.publicOutputs['dgBinding'] = hash;
+    const binding = await computeDGBinding(dg.data, CHAIN_DOMAIN);
+    dg.dgBridgeProof.publicOutputs['dgBinding'] = binding;
 
-    // Verify hash binding
-    const computedHash = await sha256Base64(dg.data);
-    expect(computedHash).toBe(dg.dgBridgeProof.publicOutputs['dgBinding']);
+    const recomputed = await computeDGBinding(dg.data, CHAIN_DOMAIN);
+    expect('0x' + BigInt(recomputed).toString(16)).toBe(dg.dgBridgeProof.publicOutputs['dgBinding']);
   });
 
-  it('hash does NOT match when photo data is swapped', async () => {
+  it('binding does NOT match when photo data is swapped', async () => {
     const dg = makeDGDisclosure();
-    const originalHash = await sha256Base64(dg.data);
-    dg.dgBridgeProof.publicOutputs['dgBinding'] = originalHash;
+    const originalBinding = await computeDGBinding(dg.data, CHAIN_DOMAIN);
+    dg.dgBridgeProof.publicOutputs['dgBinding'] = originalBinding;
 
     // Swap photo with different data
     dg.data = Buffer.from('evil-photo-data').toString('base64');
-    const computedHash = await sha256Base64(dg.data);
-    expect(computedHash).not.toBe(dg.dgBridgeProof.publicOutputs['dgBinding']);
+    const recomputed = await computeDGBinding(dg.data, CHAIN_DOMAIN);
+    expect(recomputed).not.toBe(dg.dgBridgeProof.publicOutputs['dgBinding']);
+  });
+
+  it('binding does NOT match when domain changes', async () => {
+    const dg = makeDGDisclosure();
+    const binding = await computeDGBinding(dg.data, CHAIN_DOMAIN);
+    dg.dgBridgeProof.publicOutputs['dgBinding'] = binding;
+
+    // Different domain produces different binding
+    const otherDomain = deriveDomain('evil-verifier');
+    const recomputed = await computeDGBinding(dg.data, otherDomain.hash);
+    expect(recomputed).not.toBe(dg.dgBridgeProof.publicOutputs['dgBinding']);
   });
 
   it('rejects when eContentBinding does not match chain', () => {
@@ -361,7 +378,6 @@ describe('DGDisclosure verification', () => {
     const dg = makeDGDisclosure();
     expect(dg.dgNumber).toBe(dg.dgBridgeProof.publicInputs['dgNumber']);
 
-    // If someone changes dgNumber on disclosure but not the proof
     dg.dgNumber = 13;
     expect(dg.dgNumber).not.toBe(dg.dgBridgeProof.publicInputs['dgNumber']);
   });

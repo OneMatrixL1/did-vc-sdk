@@ -187,11 +187,14 @@ export async function verifyVPRequestFull(
     };
   }
 
-  const { proof, ...unsigned } = request;
+  const { proof, verifierCredentials: _vc, ...unsigned } = request;
   const domain = proof.domain;
   const challenge = proof.challenge;
 
-  // Reconstruct the same VP-like envelope that buildSigned created
+  // Reconstruct the same VP-like envelope that buildSigned created.
+  // Strip verifierCredentials — it contains proof entries (MerkleDisclosure,
+  // DGDisclosure) with properties not in the JSON-LD context.
+  // verifierDisclosure (typed @json) already carries the same data.
   const vpToVerify = {
     '@context': [
       'https://www.w3.org/2018/credentials/v1',
@@ -353,11 +356,18 @@ async function verifyVerifierCredentials(
         continue;
       }
 
-      // 3b. SHA256(data) must match dgBridgeProof.publicOutputs.dgBinding
-      const dgHash = await sha256Base64(dg.data);
+      // 3b. dgBinding = Poseidon2([SHA256_hi, SHA256_lo, domain], 3)
+      //     The dg-bridge circuit outputs a Poseidon2 binding, not a plain SHA-256.
       const dgBinding = dg.dgBridgeProof.publicOutputs['dgBinding'] as string | undefined;
-      if (!dgBinding || dgHash !== dgBinding) {
-        errors.push(`verifierCredentials[${i}]: DGDisclosure "${dg.conditionID}" SHA256(data) does not match dgBinding`);
+      const bridgeDomainForHash = dg.dgBridgeProof.publicInputs['domain'] as string | undefined;
+      if (dgBinding && bridgeDomainForHash) {
+        const recomputedBinding = await computeDGBinding(dg.data, bridgeDomainForHash);
+        if (recomputedBinding !== BigInt(dgBinding)) {
+          errors.push(`verifierCredentials[${i}]: DGDisclosure "${dg.conditionID}" SHA256(data) does not match dgBinding`);
+          allValid = false;
+        }
+      } else if (!dgBinding) {
+        errors.push(`verifierCredentials[${i}]: DGDisclosure "${dg.conditionID}" missing dgBinding output`);
         allValid = false;
       }
 
@@ -472,10 +482,13 @@ function verifyMerkleDisclosure(
 }
 
 // ---------------------------------------------------------------------------
-// SHA-256 for DGDisclosure verification (Step 3)
+// DG binding verification (Step 3)
+//
+// The dg-bridge circuit outputs: dgBinding = Poseidon2([SHA256_hi, SHA256_lo, domain], 3)
+// where SHA256_hi/Lo are the upper/lower 16 bytes of SHA-256(DG_data) packed as field elements.
 // ---------------------------------------------------------------------------
 
-async function sha256Base64(base64Data: string): Promise<string> {
+async function computeDGBinding(base64Data: string, domain: string): Promise<bigint> {
   // Decode base64 to bytes
   let bytes: Uint8Array;
   if (typeof Buffer !== 'undefined') {
@@ -495,18 +508,22 @@ async function sha256Base64(base64Data: string): Promise<string> {
     const buf = await globalThis.crypto.subtle.digest('SHA-256', input);
     hash = new Uint8Array(buf);
   } else {
-    // Fallback: use Node.js crypto
     const { createHash } = await import('crypto');
     hash = new Uint8Array(createHash('sha256').update(bytes).digest());
   }
 
-  // Convert to hex field element matching dg-bridge dgBinding format
-  // dgBinding = full 32-byte SHA-256 as 0x-prefixed hex
-  let hex = '0x';
-  for (const b of hash) {
-    hex += b.toString(16).padStart(2, '0');
+  // Pack upper/lower 16 bytes as big-endian field elements (matches circuit)
+  let dgHashHi = 0n;
+  for (let i = 0; i < 16; i++) {
+    dgHashHi = dgHashHi * 256n + BigInt(hash[i]!);
   }
-  return hex;
+  let dgHashLo = 0n;
+  for (let i = 16; i < 32; i++) {
+    dgHashLo = dgHashLo * 256n + BigInt(hash[i]!);
+  }
+
+  // dgBinding = Poseidon2([dgHashHi, dgHashLo, domain], 3)
+  return poseidon2BigInt([dgHashHi, dgHashLo, BigInt(domain)], 3);
 }
 
 // ---------------------------------------------------------------------------

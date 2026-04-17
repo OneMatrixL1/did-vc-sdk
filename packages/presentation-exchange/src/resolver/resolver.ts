@@ -1,4 +1,4 @@
-import type { MatchableCredential, ZKPProof } from '../types/credential.js';
+import type { MatchableCredential, ZKPProof, CredentialProof } from '../types/credential.js';
 import type { VPRequest, VerifierDisclosure, DocumentRequest, DocumentRequestNode, KeyDoc } from '../types/request.js';
 import type {
   VerifiablePresentation,
@@ -66,6 +66,11 @@ export interface ResolveOptions {
    * for any matching ZKP conditions in the request.
    */
   zkpProofs?: Map<string, ZKPProof>;
+  /**
+   * Additional disclosure proofs (MerkleDisclosure, DGDisclosure) to attach
+   * alongside ZKP proofs. These carry the actual disclosed field values.
+   */
+  disclosureProofs?: CredentialProof[];
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +155,11 @@ export async function resolvePresentation(
         if (proof) {
           proofArr.push(proof);
         }
+      }
+
+      // Add disclosure proofs (MerkleDisclosure, DGDisclosure)
+      if (options.disclosureProofs) {
+        proofArr.push(...options.disclosureProofs);
       }
 
       // ZKP proofs replace the raw SOD proof — verifier trusts the ZKP chain

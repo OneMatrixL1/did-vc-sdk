@@ -270,6 +270,102 @@ export class ICAO9303ProofSystem {
   }
 
   // -------------------------------------------------------------------------
+  // Disclosure proof building (prover side)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Build disclosure proofs for a prover's VP response.
+   *
+   * Creates MerkleDisclosure entries for DG13 fields and DGDisclosure entries
+   * for non-DG13 fields (e.g. photo from DG2). These are attached alongside
+   * the chain ZKP proofs so the verifier can read disclosed values from the
+   * proof array instead of raw credentialSubject.
+   *
+   * @param credential   - The raw credential (with DG blobs in credentialSubject)
+   * @param proofSet     - Pre-generated chain proofs (includes Merkle tree)
+   * @param conditions   - Request conditions (disclose + zkp)
+   * @param fieldTagMap  - Map of fieldId → tagId (DG13 1-based field index)
+   * @returns Array of MerkleDisclosure and DGDisclosure proof entries
+   */
+  async buildDisclosureProofs(
+    credential: MatchableCredential,
+    proofSet: DomainProofSet,
+    conditions: DocumentConditionNode[],
+    fieldTagMap: Record<string, number>,
+  ): Promise<CredentialProof[]> {
+    const { disclose } = extractConditions(conditions);
+    const proofs: CredentialProof[] = [];
+
+    for (const cond of disclose) {
+      const fieldId = stripJsonPathPrefix(cond.field);
+      const tagId = fieldTagMap[fieldId];
+      if (tagId === undefined) continue;
+
+      // Photo: DGDisclosure with embedded dg-bridge proof
+      if (fieldId === 'photo') {
+        const dg2 = credential.credentialSubject['dg2'];
+        if (typeof dg2 === 'string') {
+          const sodBase64 = this.extractSOD(credential);
+          const { witness: sodWitness } = buildSodValidateInputs(sodBase64, proofSet.domain.hash);
+          const eContentBinding = proofSet.sodValidate.publicOutputs['eContentBinding'] as string;
+          const dg2BridgeInputs = buildDgBridgeInputs(sodWitness, proofSet.domain.hash, eContentBinding);
+          dg2BridgeInputs.publicInputs.dgNumber = 2;
+          const { findDGEntry } = await import('./sod-parser.js');
+          const dg2Offset = findDGEntry(new Uint8Array(sodWitness.econtent), 2);
+          if (dg2Offset >= 0) {
+            dg2BridgeInputs.privateInputs.dgOffset = dg2Offset;
+            const dg2BridgeResult = await this.zkp.prove({
+              circuitId: 'dg-bridge',
+              privateInputs: dg2BridgeInputs.privateInputs,
+              publicInputs: dg2BridgeInputs.publicInputs,
+            });
+            proofs.push({
+              type: 'DGDisclosure',
+              conditionID: cond.conditionID,
+              fieldId: 'photo',
+              dgNumber: 2,
+              data: dg2,
+              dgBridgeProof: {
+                type: 'ZKPProof',
+                conditionID: `${cond.conditionID}-bridge`,
+                circuitId: 'dg-bridge',
+                proofSystem: 'ultrahonk',
+                publicInputs: dg2BridgeInputs.publicInputs,
+                publicOutputs: dg2BridgeResult.publicOutputs,
+                proofValue: dg2BridgeResult.proofValue,
+              },
+            } satisfies DGDisclosure);
+          }
+        }
+        continue;
+      }
+
+      // DG13 field: MerkleDisclosure from cached Merkle tree
+      const leafIndex = tagId - 1;
+      const leafData = proofSet.merkleTree.leafData[leafIndex];
+      const siblings = proofSet.merkleTree.siblings[leafIndex];
+      const entropy = proofSet.merkleTree.leaves[leafIndex];
+      if (!leafData || !siblings || !entropy) continue;
+
+      const value = decodeMerkleField(leafData.data, parseInt(leafData.length, 10));
+
+      proofs.push({
+        type: 'MerkleDisclosure',
+        conditionID: cond.conditionID,
+        fieldId,
+        tagId,
+        length: leafData.length,
+        data: [...leafData.data] as [string, string, string, string],
+        entropy,
+        siblings: [...siblings],
+        value,
+      } satisfies MerkleDisclosure);
+    }
+
+    return proofs;
+  }
+
+  // -------------------------------------------------------------------------
   // Verifier self-disclosure (same format as prover presentation)
   // -------------------------------------------------------------------------
 
@@ -632,4 +728,11 @@ export function decodeMerkleField(
     }
   }
   return new TextDecoder().decode(new Uint8Array(bytes.slice(0, totalLen)));
+}
+
+function stripJsonPathPrefix(field: string): string {
+  const prefix = '$.credentialSubject.';
+  if (field.startsWith(prefix)) return field.slice(prefix.length);
+  const lastDot = field.lastIndexOf('.');
+  return lastDot >= 0 ? field.slice(lastDot + 1) : field;
 }

@@ -180,27 +180,3 @@ function parseReturnValue(returnValue: unknown, circuitId?: string): Record<stri
   return {};
 }
 
-function flattenValues(obj: Record<string, unknown>): string[] {
-  const result: string[] = [];
-  for (const value of Object.values(obj)) {
-    if (Array.isArray(value)) {
-      result.push(...value.map(String));
-    } else {
-      result.push(String(value));
-    }
-  }
-  return result;
-}
-
-function orderByOutputNames(
-  outputs: Record<string, unknown>,
-  circuitId?: string,
-): Record<string, unknown> {
-  const names = circuitId ? OUTPUT_NAMES[circuitId] : undefined;
-  if (!names) return outputs;
-  const ordered: Record<string, unknown> = {};
-  for (const name of names) {
-    if (name in outputs) ordered[name] = outputs[name];
-  }
-  return ordered;
-}

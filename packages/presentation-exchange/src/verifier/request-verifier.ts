@@ -1,7 +1,9 @@
 import type { VPRequest } from '../types/request.js';
-import type { PresentedCredential, ZKPProof, CredentialProof } from '../types/credential.js';
+import type { PresentedCredential, ZKPProof, MerkleDisclosure, DGDisclosure, CredentialProof } from '../types/credential.js';
 import type { ZKPProvider } from '../proof-system/types.js';
 import type { VerificationResult } from './structural-verifier.js';
+import { poseidon2BigInt } from '../proof-system/poseidon2.js';
+import { TREE_DEPTH } from '../proof-system/merkle-tree.js';
 import { verifyPresentation } from '@1matrix/credential-sdk/vc';
 // @ts-ignore -- JS module, no .d.ts
 import { createOptimisticResolver } from '@1matrix/credential-sdk/ethr-did';
@@ -246,13 +248,24 @@ export async function verifyVPRequestFull(
 }
 
 // ---------------------------------------------------------------------------
-// Verifier credential ZKP verification
+// Verifier credential verification (ZKP chain + MerkleDisclosure + DGDisclosure)
 // ---------------------------------------------------------------------------
 
-function extractZKPProofs(cred: PresentedCredential): ZKPProof[] {
+function extractAllProofs(cred: PresentedCredential): CredentialProof[] {
   if (!cred.proof) return [];
-  const proofs: CredentialProof[] = Array.isArray(cred.proof) ? cred.proof : [cred.proof];
-  return proofs.filter((p): p is ZKPProof => p.type === 'ZKPProof');
+  return Array.isArray(cred.proof) ? cred.proof : [cred.proof];
+}
+
+function extractZKPProofs(cred: PresentedCredential): ZKPProof[] {
+  return extractAllProofs(cred).filter((p): p is ZKPProof => p.type === 'ZKPProof');
+}
+
+function extractMerkleDisclosures(cred: PresentedCredential): MerkleDisclosure[] {
+  return extractAllProofs(cred).filter((p): p is MerkleDisclosure => p.type === 'MerkleDisclosure');
+}
+
+function extractDGDisclosures(cred: PresentedCredential): DGDisclosure[] {
+  return extractAllProofs(cred).filter((p): p is DGDisclosure => p.type === 'DGDisclosure');
 }
 
 async function verifyVerifierCredentials(
@@ -273,13 +286,15 @@ async function verifyVerifierCredentials(
   let allValid = true;
 
   for (let i = 0; i < creds.length; i++) {
-    const zkpProofs = extractZKPProofs(creds[i]!);
+    const cred = creds[i]!;
+    const zkpProofs = extractZKPProofs(cred);
     if (zkpProofs.length === 0) {
       errors.push(`verifierCredentials[${i}] has no ZKP proofs`);
       allValid = false;
       continue;
     }
 
+    // --- Step 1: Verify each ZKP proof individually ---
     for (const p of zkpProofs) {
       const valid = await zkpProvider.verify({
         circuitId: p.circuitId,
@@ -292,9 +307,206 @@ async function verifyVerifierCredentials(
         allValid = false;
       }
     }
+
+    // --- Step 1b: Verify binding chain between chain proofs ---
+    const chainErrors = verifyVerifierBindingChain(zkpProofs);
+    if (chainErrors.length > 0) {
+      errors.push(...chainErrors.map(e => `verifierCredentials[${i}]: ${e}`));
+      allValid = false;
+    }
+
+    // Extract chain values needed for disclosure verification
+    const dg13 = zkpProofs.find(p => p.circuitId === 'dg13-merklelize');
+    const sodValidate = zkpProofs.find(p => p.circuitId === 'sod-validate');
+    const chainDomain = sodValidate?.publicInputs['domain'] as string | undefined;
+    const chainCommitment = dg13?.publicOutputs['commitment'] as string | undefined;
+    const chainEContentBinding = sodValidate?.publicOutputs['eContentBinding'] as string | undefined;
+
+    // --- Step 2: Verify MerkleDisclosure entries ---
+    const merkleDisclosures = extractMerkleDisclosures(cred);
+    for (const md of merkleDisclosures) {
+      if (!chainCommitment || !chainDomain) {
+        errors.push(`verifierCredentials[${i}]: MerkleDisclosure "${md.conditionID}" cannot be verified — missing chain commitment/domain`);
+        allValid = false;
+        continue;
+      }
+      const mdErrors = verifyMerkleDisclosure(md, chainCommitment, chainDomain);
+      if (mdErrors.length > 0) {
+        errors.push(...mdErrors.map(e => `verifierCredentials[${i}]: MerkleDisclosure "${md.conditionID}": ${e}`));
+        allValid = false;
+      }
+    }
+
+    // --- Step 3: Verify DGDisclosure entries ---
+    const dgDisclosures = extractDGDisclosures(cred);
+    for (const dg of dgDisclosures) {
+      // 3a. Verify the embedded dg-bridge ZKP proof
+      const bridgeValid = await zkpProvider.verify({
+        circuitId: dg.dgBridgeProof.circuitId,
+        proofValue: dg.dgBridgeProof.proofValue,
+        publicInputs: dg.dgBridgeProof.publicInputs,
+        publicOutputs: dg.dgBridgeProof.publicOutputs,
+      });
+      if (!bridgeValid) {
+        errors.push(`verifierCredentials[${i}]: DGDisclosure "${dg.conditionID}" embedded dg-bridge proof invalid`);
+        allValid = false;
+        continue;
+      }
+
+      // 3b. SHA256(data) must match dgBridgeProof.publicOutputs.dgBinding
+      const dgHash = await sha256Base64(dg.data);
+      const dgBinding = dg.dgBridgeProof.publicOutputs['dgBinding'] as string | undefined;
+      if (!dgBinding || dgHash !== dgBinding) {
+        errors.push(`verifierCredentials[${i}]: DGDisclosure "${dg.conditionID}" SHA256(data) does not match dgBinding`);
+        allValid = false;
+      }
+
+      // 3c. eContentBinding must match chain sod-validate
+      const bridgeECB = dg.dgBridgeProof.publicInputs['eContentBinding'] as string | undefined;
+      if (chainEContentBinding && bridgeECB !== chainEContentBinding) {
+        errors.push(`verifierCredentials[${i}]: DGDisclosure "${dg.conditionID}" eContentBinding does not match chain`);
+        allValid = false;
+      }
+
+      // 3d. Domain must match chain
+      const bridgeDomain = dg.dgBridgeProof.publicInputs['domain'] as string | undefined;
+      if (chainDomain && bridgeDomain !== chainDomain) {
+        errors.push(`verifierCredentials[${i}]: DGDisclosure "${dg.conditionID}" domain does not match chain`);
+        allValid = false;
+      }
+    }
   }
 
   return { verified: allValid, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Binding chain verification for verifier credentials
+// (Adapted from response-verifier.ts — did-delegate is optional for verifier)
+// ---------------------------------------------------------------------------
+
+function verifyVerifierBindingChain(proofs: ZKPProof[]): string[] {
+  const errors: string[] = [];
+
+  const sodValidate = proofs.find(p => p.circuitId === 'sod-validate');
+  const dgBridge = proofs.find(p => p.conditionID?.startsWith('chain-') && p.circuitId === 'dg-bridge');
+  const dg13 = proofs.find(p => p.circuitId === 'dg13-merklelize');
+
+  if (!sodValidate || !dgBridge || !dg13) {
+    if (!sodValidate) errors.push('Missing sod-validate proof in chain');
+    if (!dgBridge) errors.push('Missing dg-bridge proof in chain');
+    if (!dg13) errors.push('Missing dg13-merklelize proof in chain');
+    return errors;
+  }
+
+  // sod-validate outputs eContentBinding → dg-bridge expects it as public input
+  if (dgBridge.publicInputs['eContentBinding'] !== sodValidate.publicOutputs['eContentBinding']) {
+    errors.push('dg-bridge eContentBinding does not match sod-validate output');
+  }
+
+  // dg-bridge outputs dgBinding → dg13-merklelize outputs dgBinding (must match)
+  if (dg13.publicOutputs['dgBinding'] !== dgBridge.publicOutputs['dgBinding']) {
+    errors.push('dg13-merklelize dgBinding does not match dg-bridge output');
+  }
+
+  // All chain proofs must share the same domain
+  const domain = sodValidate.publicInputs['domain'];
+  if (dgBridge.publicInputs['domain'] !== domain) {
+    errors.push('dg-bridge domain does not match sod-validate domain');
+  }
+  if (dg13.publicInputs['domain'] !== domain) {
+    errors.push('dg13-merklelize domain does not match sod-validate domain');
+  }
+
+  return errors;
+}
+
+// ---------------------------------------------------------------------------
+// MerkleDisclosure verification (Step 2)
+// Recompute leaf → walk siblings → check commitment
+// ---------------------------------------------------------------------------
+
+function verifyMerkleDisclosure(
+  md: MerkleDisclosure,
+  expectedCommitment: string,
+  domain: string,
+): string[] {
+  const errors: string[] = [];
+
+  try {
+    const tagId = BigInt(md.tagId);
+    const length = BigInt(md.length);
+    const data = md.data.map(BigInt);
+    const entropy = BigInt(md.entropy);
+    const domainBig = BigInt(domain);
+
+    // Recompute leaf = Poseidon2([tagId, length, data[0..3], entropy], 7)
+    const leaf = poseidon2BigInt(
+      [tagId, length, data[0]!, data[1]!, data[2]!, data[3]!, entropy],
+      7,
+    );
+
+    // Walk Merkle path from leaf to root
+    let current = leaf;
+    let idx = md.tagId - 1; // 0-based leaf index
+    for (let level = 0; level < TREE_DEPTH; level++) {
+      const sibling = BigInt(md.siblings[level]!);
+      current = idx % 2 === 0
+        ? poseidon2BigInt([current, sibling], 2)
+        : poseidon2BigInt([sibling, current], 2);
+      idx = Math.floor(idx / 2);
+    }
+
+    // commitment = Poseidon2([root, domain], 2)
+    const recomputedCommitment = poseidon2BigInt([current, domainBig], 2);
+    const expectedBig = BigInt(expectedCommitment);
+
+    if (recomputedCommitment !== expectedBig) {
+      errors.push('Merkle path does not match dg13-merklelize commitment');
+    }
+  } catch (e) {
+    errors.push(`Verification error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  return errors;
+}
+
+// ---------------------------------------------------------------------------
+// SHA-256 for DGDisclosure verification (Step 3)
+// ---------------------------------------------------------------------------
+
+async function sha256Base64(base64Data: string): Promise<string> {
+  // Decode base64 to bytes
+  let bytes: Uint8Array;
+  if (typeof Buffer !== 'undefined') {
+    bytes = new Uint8Array(Buffer.from(base64Data, 'base64'));
+  } else {
+    const binary = atob(base64Data);
+    bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+  }
+
+  // SHA-256 hash
+  let hash: Uint8Array;
+  if (typeof globalThis.crypto?.subtle !== 'undefined') {
+    const input = new Uint8Array(bytes).buffer as ArrayBuffer;
+    const buf = await globalThis.crypto.subtle.digest('SHA-256', input);
+    hash = new Uint8Array(buf);
+  } else {
+    // Fallback: use Node.js crypto
+    const { createHash } = await import('crypto');
+    hash = new Uint8Array(createHash('sha256').update(bytes).digest());
+  }
+
+  // Convert to hex field element matching dg-bridge dgBinding format
+  // dgBinding = full 32-byte SHA-256 as 0x-prefixed hex
+  let hex = '0x';
+  for (const b of hash) {
+    hex += b.toString(16).padStart(2, '0');
+  }
+  return hex;
 }
 
 // ---------------------------------------------------------------------------

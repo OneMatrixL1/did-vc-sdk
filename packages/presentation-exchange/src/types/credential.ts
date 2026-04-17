@@ -49,7 +49,32 @@ export interface MerkleDisclosure {
   value: string;
 }
 
-export type CredentialProof = DataIntegrityProof | ZKPProof | MerkleDisclosure;
+/**
+ * DG disclosure — reveals a raw Data Group blob (e.g. dg2 photo) with
+ * an embedded dg-bridge ZKP proof linking it to the SOD signature.
+ *
+ * Verification:
+ *   1. SHA256(data) → dgHash
+ *   2. zkpProvider.verify(dgBridgeProof)
+ *   3. dgHash === dgBridgeProof.publicOutputs.dgBinding
+ *   4. dgBridgeProof.publicInputs.eContentBinding === chain sod-validate eContentBinding
+ *   5. dgBridgeProof.publicInputs.domain === chain domain
+ */
+export interface DGDisclosure {
+  type: 'DGDisclosure';
+  /** Links to the condition that requested this disclosure. */
+  conditionID: string;
+  /** Profile field ID (e.g. 'photo'). */
+  fieldId: string;
+  /** ICAO Data Group number (e.g. 2 for facial image). */
+  dgNumber: number;
+  /** Raw DG data (base64-encoded). */
+  data: string;
+  /** Embedded dg-bridge ZKP proof proving dgBinding is in SOD. */
+  dgBridgeProof: ZKPProof;
+}
+
+export type CredentialProof = DataIntegrityProof | ZKPProof | MerkleDisclosure | DGDisclosure;
 
 // ---------------------------------------------------------------------------
 // Presented credential (may have derived proof)

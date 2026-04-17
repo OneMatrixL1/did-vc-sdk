@@ -19,7 +19,7 @@ import type {
   ProofGenPhase,
   CachedMerkleTree,
 } from './types.js';
-import type { MatchableCredential, ZKPProof, MerkleDisclosure, PresentedCredential, CredentialProof } from '../types/credential.js';
+import type { MatchableCredential, ZKPProof, MerkleDisclosure, DGDisclosure, PresentedCredential, CredentialProof } from '../types/credential.js';
 import type { DocumentConditionNode, VerifierDisclosure, DocumentRequest } from '../types/request.js';
 import type { SubmissionEntry } from '../types/response.js';
 import { extractConditions } from '../resolver/field-extractor.js';
@@ -317,12 +317,10 @@ export class ICAO9303ProofSystem {
       if (tagId === undefined) continue; // skip fields not in DG13
 
       // Special case: photo is in dg2, not DG13 Merkle tree
+      // Use DGDisclosure — raw data + embedded dg-bridge ZKP proof
       if (fieldId === 'photo') {
         const dg2 = credential.credentialSubject['dg2'];
         if (typeof dg2 === 'string') {
-          // Photo disclosed via dg2-bridge ZKP proof + raw dg2 in credentialSubject
-          derived.credentialSubject['dg2'] = dg2;
-
           const sodBase64 = this.extractSOD(credential);
           const { witness: sodWitness } = buildSodValidateInputs(sodBase64, domain.hash);
           const eContentBinding = proofSet.sodValidate.publicOutputs['eContentBinding'] as string;
@@ -338,14 +336,21 @@ export class ICAO9303ProofSystem {
               publicInputs: dg2BridgeInputs.publicInputs,
             });
             proofs.push({
-              type: 'ZKPProof',
+              type: 'DGDisclosure',
               conditionID: cond.conditionID,
-              circuitId: 'dg-bridge',
-              proofSystem: 'ultrahonk',
-              publicInputs: dg2BridgeInputs.publicInputs,
-              publicOutputs: dg2BridgeResult.publicOutputs,
-              proofValue: dg2BridgeResult.proofValue,
-            } satisfies ZKPProof);
+              fieldId: 'photo',
+              dgNumber: 2,
+              data: dg2,
+              dgBridgeProof: {
+                type: 'ZKPProof',
+                conditionID: `${cond.conditionID}-bridge`,
+                circuitId: 'dg-bridge',
+                proofSystem: 'ultrahonk',
+                publicInputs: dg2BridgeInputs.publicInputs,
+                publicOutputs: dg2BridgeResult.publicOutputs,
+                proofValue: dg2BridgeResult.proofValue,
+              },
+            } satisfies DGDisclosure);
           }
         }
         continue;

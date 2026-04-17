@@ -26,6 +26,7 @@ export type {
   ZKPProof,
   MatchableCredential,
   MerkleDisclosure,
+  DGDisclosure,
   RuleTreeMatch,
   LogicalRuleMatch,
   DocumentRequestMatch,

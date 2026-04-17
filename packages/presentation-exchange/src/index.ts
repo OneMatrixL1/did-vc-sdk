@@ -35,6 +35,12 @@ export type {
   SchemaResolver,
   SchemaResolverMap,
   DeriveOptions,
+  DisclosedField,
+  DisclosedDocument,
+  DisclosedFieldsResult,
+  FieldResult,
+  PredicateResult,
+  DisclosureMethod,
 } from './types/index.js';
 
 export { getCredentialIssuerId } from './types/credential.js';
@@ -51,6 +57,7 @@ export { evaluateTree, booleanCombine } from './resolver/index.js';
 export type { TreeNode, LogicalNode, EvalResult } from './resolver/index.js';
 export { extractConditions } from './resolver/index.js';
 export type { ExtractedFields } from './resolver/index.js';
+export { extractDisclosedFields } from './resolver/index.js';
 
 // Verifier
 export { verifyPresentationStructure } from './verifier/index.js';

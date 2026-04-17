@@ -40,3 +40,12 @@ export type {
 } from './matching.js';
 
 export type { SchemaResolver, SchemaResolverMap, DeriveOptions } from './schema-resolver.js';
+
+export type {
+  DisclosedField,
+  DisclosedDocument,
+  DisclosedFieldsResult,
+  FieldResult,
+  PredicateResult,
+  DisclosureMethod,
+} from './disclosed.js';

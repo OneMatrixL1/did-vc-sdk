@@ -25,6 +25,7 @@ import type { SubmissionEntry } from '../types/response.js';
 import { extractConditions } from '../resolver/field-extractor.js';
 import { createICAOSchemaResolver } from '../resolvers/icao-schema-resolver.js';
 import { deriveDomain, DEFAULT_DOMAIN_NAME } from './domain.js';
+import { zkpProofContext } from '../utils/zkp-proof-context.js';
 import { buildMerkleTree } from './merkle-tree.js';
 import {
   buildSodValidateInputs,
@@ -491,6 +492,12 @@ export class ICAO9303ProofSystem {
     }
 
     derived.proof = proofs;
+
+    // Add ZKP proof context for JSON-LD expansion
+    const ctx = (derived as Record<string, unknown>)['@context'];
+    if (Array.isArray(ctx)) {
+      ctx.push(zkpProofContext);
+    }
 
     // 5. Build the DocumentRequest that describes this disclosure
     const request: DocumentRequest = {

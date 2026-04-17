@@ -12,6 +12,7 @@ import { defaultResolvers } from '../resolvers/index.js';
 import { createBBSResolver, isBBSProof } from '../resolvers/bbs-resolver.js';
 import { extractConditions } from './field-extractor.js';
 import { signVPResponse, vpResponseContext } from '../signer/vp-signer.js';
+import { zkpProofContext } from '../utils/zkp-proof-context.js';
 
 // ---------------------------------------------------------------------------
 // Options
@@ -164,8 +165,16 @@ export async function resolvePresentation(
 
       // ZKP proofs replace the raw SOD proof — verifier trusts the ZKP chain
       if (proofArr.length > 0) {
-        (derived as Record<string, unknown>).proof =
-          proofArr.length === 1 ? proofArr[0] : proofArr;
+        const d = derived as Record<string, unknown>;
+        d.proof = proofArr.length === 1 ? proofArr[0] : proofArr;
+
+        // Add ZKP proof context so JSON-LD expansion handles custom properties
+        const ctx = (d['@context'] ?? []) as unknown[];
+        if (Array.isArray(ctx)) {
+          ctx.push(zkpProofContext);
+        } else {
+          d['@context'] = [ctx, zkpProofContext];
+        }
       }
     }
 

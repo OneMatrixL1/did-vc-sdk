@@ -76,6 +76,7 @@ export { resolveLocalized } from './utils/localization.js';
 export { createKeyDoc } from './utils/keydoc.js';
 export type { KeySystem } from './utils/keydoc.js';
 export { vpRequestContext } from './utils/vp-request-context.js';
+export { zkpProofContext } from './utils/zkp-proof-context.js';
 
 // Proof System
 export * from './proof-system/index.js';

@@ -43,22 +43,10 @@ export async function signVPResponse(
 ): Promise<VerifiablePresentation> {
   const domain = new URL(verifierUrl).hostname;
 
-  // Strip credential proofs before signing — they contain non-standard
-  // properties (conditionID, fieldId, etc.) that break JSON-LD expansion.
-  // Re-attach after signing since the VP holder proof only covers the
-  // VP envelope, not individual credential proofs.
-  const savedProofs: (unknown | undefined)[] = [];
-  const credsForSigning = unsigned.verifiableCredential.map((cred, i) => {
-    const { proof, ...rest } = cred as Record<string, unknown>;
-    savedProofs[i] = proof;
-    return rest;
-  });
-
   const vpDoc = {
     ...unsigned,
     type: ['VerifiablePresentation'] as ['VerifiablePresentation'],
     holder: unsigned.holder,
-    verifiableCredential: credsForSigning,
   };
 
   const signed = await signPresentation(
@@ -69,16 +57,7 @@ export async function signVPResponse(
     resolver ?? null,
   );
 
-  // Re-attach credential proofs
-  const signedVP = signed as Record<string, unknown>;
-  const signedCreds = signedVP.verifiableCredential as Record<string, unknown>[];
-  for (let i = 0; i < signedCreds.length; i++) {
-    if (savedProofs[i] !== undefined) {
-      signedCreds[i]!.proof = savedProofs[i];
-    }
-  }
-
-  return signedVP as unknown as VerifiablePresentation;
+  return signed as unknown as VerifiablePresentation;
 }
 
 export { vpResponseContext };

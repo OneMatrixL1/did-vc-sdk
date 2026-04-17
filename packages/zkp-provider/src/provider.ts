@@ -192,15 +192,6 @@ function flattenValues(obj: Record<string, unknown>): string[] {
   return result;
 }
 
-function toPublicInputsArray(
-  inputs: Record<string, unknown>,
-  outputs: Record<string, unknown>,
-  circuitId?: string,
-): string[] {
-  const orderedOutputs = orderByOutputNames(outputs, circuitId);
-  return [...flattenValues(inputs), ...flattenValues(orderedOutputs)];
-}
-
 function orderByOutputNames(
   outputs: Record<string, unknown>,
   circuitId?: string,

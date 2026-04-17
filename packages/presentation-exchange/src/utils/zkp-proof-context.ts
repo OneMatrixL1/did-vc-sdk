@@ -30,8 +30,11 @@ export const zkpProofContext: Record<string, unknown> = {
 
   // MerkleDisclosure properties
   tagId: `${VOCAB}tagId`,
+  length: `${VOCAB}length`,
+  data: { '@id': `${VOCAB}data`, '@type': '@json' },
   entropy: `${VOCAB}entropy`,
   siblings: { '@id': `${VOCAB}siblings`, '@container': '@list' },
+  value: `${VOCAB}value`,
 
   // DGDisclosure properties
   dgNumber: `${VOCAB}dgNumber`,

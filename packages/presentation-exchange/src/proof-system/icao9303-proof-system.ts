@@ -19,10 +19,11 @@ import type {
   CachedMerkleTree,
 } from './types.js';
 import type { MatchableCredential, ZKPProof, MerkleDisclosure, DGDisclosure, PresentedCredential, CredentialProof } from '../types/credential.js';
-import type { DocumentConditionNode, VerifierDisclosure, DocumentRequest } from '../types/request.js';
+import type { DocumentConditionNode, VerifierDisclosure, DocumentRequest, DocumentRequestNode, VPRequest } from '../types/request.js';
 import type { SubmissionEntry } from '../types/response.js';
 import { extractConditions } from '../resolver/field-extractor.js';
 import { createICAOSchemaResolver } from '../resolvers/icao-schema-resolver.js';
+import { getProfile } from '@1matrix/credential-sdk/icao-profile';
 import { deriveDomain, DEFAULT_DOMAIN_NAME } from './domain.js';
 import { zkpProofContext } from '../utils/zkp-proof-context.js';
 import { buildMerkleTree } from './merkle-tree.js';
@@ -572,6 +573,86 @@ export class ICAO9303ProofSystem {
   }
 
   // -------------------------------------------------------------------------
+  // One-shot orchestration (prover side)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Build all ZKP + disclosure proofs required by a VPRequest from a credential.
+   *
+   * This is the single entry point consumers should use. It:
+   *   - Fetches or generates cached chain proofs (sod-validate, dg-bridge, dg13-merklelize)
+   *   - Resolves the DG13 fieldId → tag map from the credential's ICAO profile
+   *   - Generates predicate proofs for any ZKP conditions in the request
+   *   - Builds MerkleDisclosure / DGDisclosure entries for disclose conditions
+   *
+   * The returned `zkpProofs` + `disclosureProofs` plug directly into
+   * {@link resolvePresentation}'s options.
+   */
+  async buildAllProofs(
+    request: VPRequest,
+    credential: MatchableCredential,
+    credentialId: string,
+    onProgress?: (phase: ProofGenPhase) => void,
+  ): Promise<{ zkpProofs: Map<string, ZKPProof>; disclosureProofs: CredentialProof[] }> {
+    const domain = this.deriveDomain();
+    const proofSet = await this.getOrGenerateProofs(credential, credentialId, domain, onProgress);
+
+    const zkpProofs = new Map<string, ZKPProof>();
+    // Chain proofs — always attached; prove credential authenticity + holder binding.
+    for (const chain of [proofSet.sodValidate, proofSet.dgBridge, proofSet.dg13Merklelize]) {
+      zkpProofs.set(`chain-${chain.circuitId}`, {
+        type: 'ZKPProof',
+        conditionID: `chain-${chain.circuitId}`,
+        circuitId: chain.circuitId,
+        proofSystem: 'ultrahonk',
+        publicInputs: chain.publicInputs,
+        publicOutputs: chain.publicOutputs,
+        proofValue: chain.proofValue,
+      });
+    }
+
+    const fieldTagMap = resolveFieldTagMap(credential);
+    const docRequests = collectDocRequests(request.rules);
+    const disclosureProofs: CredentialProof[] = [];
+
+    for (const dr of docRequests) {
+      const { zkp } = extractConditions(dr.conditions);
+
+      for (const cond of zkp) {
+        const fieldRef = Object.values(cond.privateInputs)[0];
+        const tagId = typeof fieldRef === 'string' ? fieldTagMap[fieldRef] : undefined;
+        if (tagId === undefined) {
+          throw new Error(
+            `ZKP condition "${cond.conditionID}" references field "${fieldRef}" ` +
+            `which is not defined in the credential's ICAO profile`,
+          );
+        }
+
+        const extra: Record<string, number> = {};
+        if (cond.publicInputs['threshold'] !== undefined) extra.threshold = Number(cond.publicInputs['threshold']);
+        if (cond.publicInputs['thresholdMin'] !== undefined) extra.thresholdMin = Number(cond.publicInputs['thresholdMin']);
+        if (cond.publicInputs['thresholdMax'] !== undefined) extra.thresholdMax = Number(cond.publicInputs['thresholdMax']);
+
+        const predicateProof = await this.generatePredicateProof(proofSet, cond.circuitId, tagId, extra);
+        zkpProofs.set(cond.conditionID, {
+          type: 'ZKPProof',
+          conditionID: cond.conditionID,
+          circuitId: predicateProof.circuitId,
+          proofSystem: cond.proofSystem,
+          publicInputs: predicateProof.publicInputs,
+          publicOutputs: predicateProof.publicOutputs,
+          proofValue: predicateProof.proofValue,
+        });
+      }
+
+      const proofs = await this.buildDisclosureProofs(credential, proofSet, dr.conditions, fieldTagMap);
+      disclosureProofs.push(...proofs);
+    }
+
+    return { zkpProofs, disclosureProofs };
+  }
+
+  // -------------------------------------------------------------------------
   // Storage
   // -------------------------------------------------------------------------
 
@@ -804,4 +885,42 @@ function stripJsonPathPrefix(field: string): string {
   if (field.startsWith(prefix)) return field.slice(prefix.length);
   const lastDot = field.lastIndexOf('.');
   return lastDot >= 0 ? field.slice(lastDot + 1) : field;
+}
+
+/**
+ * Resolve the DG13 `fieldId → tagId` map from a credential's bound ICAO profile.
+ *
+ * Reads `credential.proof.dgProfile`, looks up the profile in the SDK registry,
+ * and returns all fields with numeric DG13 `at` positions. Non-DG13 fields
+ * (e.g. DG2 photo) map to tag `0` and are handled as `DGDisclosure`.
+ */
+function resolveFieldTagMap(credential: MatchableCredential): Record<string, number> {
+  const proof = credential.proof as { dgProfile?: unknown } | undefined;
+  const profileId = typeof proof?.dgProfile === 'string' ? proof.dgProfile : undefined;
+  if (!profileId) {
+    throw new Error('Credential proof.dgProfile is required to resolve DG13 field map');
+  }
+  const profile = getProfile(profileId);
+  if (!profile) {
+    throw new Error(`ICAO profile "${profileId}" not found in SDK registry`);
+  }
+  const map: Record<string, number> = {};
+  for (const [fieldId, binding] of Object.entries(profile.fields)) {
+    if (binding.source === 'dg13' && typeof binding.at === 'number') {
+      map[fieldId] = binding.at;
+    } else {
+      map[fieldId] = 0;
+    }
+  }
+  return map;
+}
+
+function collectDocRequests(node: DocumentRequestNode): DocumentRequest[] {
+  const out: DocumentRequest[] = [];
+  function walk(n: DocumentRequestNode) {
+    if (n.type === 'Logical') for (const c of n.values) walk(c);
+    else out.push(n);
+  }
+  walk(node);
+  return out;
 }

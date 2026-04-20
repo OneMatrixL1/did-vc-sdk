@@ -25,7 +25,7 @@ export { buildMerkleTree, TREE_DEPTH, TREE_LEAVES } from './merkle-tree.js';
 
 // Proof system orchestrator
 export { ICAO9303ProofSystem, decodeMerkleField } from './icao9303-proof-system.js';
-export type { ICAO9303ProofSystemConfig, DelegationData } from './icao9303-proof-system.js';
+export type { ICAO9303ProofSystemConfig } from './icao9303-proof-system.js';
 
 // Proof stores
 export { MemoryProofStore, LocalStorageProofStore } from './proof-store.js';
@@ -36,8 +36,6 @@ export {
   buildDgBridgeInputs,
   buildDg13MerklelizeInputs,
   buildPredicateInputs,
-  buildDIDDelegateInputs,
-  buildDG15WitnessData,
 } from './witness-builder.js';
 export type {
   CircuitInputs,
@@ -45,12 +43,10 @@ export type {
   DgBridgeInputs,
   Dg13MerklelizeInputs,
   PredicateInputs,
-  DIDDelegateInputs,
-  DG15WitnessData,
 } from './witness-builder.js';
 
 // SOD parser (for advanced usage)
-export { buildSODWitnessData } from './sod-parser.js';
+export { buildSODWitnessData, extractCertFromSOD } from './sod-parser.js';
 export type { SODWitnessData } from './sod-parser.js';
 
 // DG13 parser (for advanced usage)

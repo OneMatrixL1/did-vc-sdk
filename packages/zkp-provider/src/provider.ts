@@ -17,7 +17,15 @@ export interface ZKPProveParams {
 }
 
 export interface ZKPProveResult {
+  /**
+   * Opaque envelope: base64 of [numPub(4 BE) | publicInputs(32*n) | proofBytes].
+   * Used for SDK-local round-trip verification.
+   */
   proofValue: string;
+  /** Raw proof bytes as 0x-prefixed hex. Feed this directly to on-chain verifiers. */
+  proofBytes: string;
+  /** Public signals: ordered bytes32 (0x-hex) values — the `publicInputs` parameter on-chain verifiers expect. */
+  publicSignals: string[];
   publicOutputs: Record<string, unknown>;
 }
 
@@ -40,9 +48,9 @@ export interface WasmProviderConfig {
 
 interface BackendEntry {
   backend: {
-    generateProof(witness: unknown): Promise<{ proof: Uint8Array; publicInputs: string[] }>;
-    verifyProof(proof: { proof: Uint8Array; publicInputs: string[] }): Promise<boolean>;
-    getVerificationKey(): Promise<unknown>;
+    generateProof(witness: unknown, options?: unknown): Promise<{ proof: Uint8Array; publicInputs: string[] }>;
+    verifyProof(proof: { proof: Uint8Array; publicInputs: string[] }, options?: unknown): Promise<boolean>;
+    getVerificationKey(options?: unknown): Promise<unknown>;
   };
   noir: {
     execute(inputs: unknown): Promise<{ witness: unknown; returnValue: unknown }>;
@@ -71,7 +79,8 @@ export async function createWasmZKPProvider(config?: WasmProviderConfig): Promis
     }
     const noir = new Noir(artifact as any);
     const backend = new UltraHonkBackend((artifact as any).bytecode, api);
-    await backend.getVerificationKey();
+    // Warm up VK under EVM target so prove/verify round-trip is consistent.
+    await backend.getVerificationKey({ verifierTarget: 'evm' });
 
     const entry: BackendEntry = { backend, noir };
     backends.set(circuitId, entry);
@@ -83,7 +92,11 @@ export async function createWasmZKPProvider(config?: WasmProviderConfig): Promis
       const { backend, noir } = await getBackend(params.circuitId);
       const inputs: Record<string, unknown> = { ...params.privateInputs, ...params.publicInputs };
       const { witness, returnValue } = await noir.execute(inputs);
-      const { proof, publicInputs } = await backend.generateProof(witness);
+      // verifierTarget: 'evm' → Keccak transcript + ZK (UltraKeccakZKFlavor).
+      // Matches the deployed UniversalHonkVerifier and the native plugin.
+      const { proof, publicInputs } = await backend.generateProof(witness, {
+        verifierTarget: 'evm',
+      });
       const publicOutputs = parseReturnValue(returnValue, params.circuitId);
 
       // Encode full proof: [num_public_inputs(4 BE)][public_inputs as 32-byte fields][proof bytes]
@@ -100,7 +113,17 @@ export async function createWasmZKPProvider(config?: WasmProviderConfig): Promis
       }
       fullProof.set(proof, 4 + numPub * 32);
 
-      return { proofValue: uint8ArrayToBase64(fullProof), publicOutputs };
+      const publicSignals = publicInputs.map((pi) => {
+        const hex = pi.replace(/^0x/, '').padStart(64, '0');
+        return '0x' + hex;
+      });
+
+      return {
+        proofValue: uint8ArrayToBase64(fullProof),
+        proofBytes: '0x' + uint8ArrayToHex(proof),
+        publicSignals,
+        publicOutputs,
+      };
     },
 
     async verify(params: ZKPVerifyParams): Promise<boolean> {
@@ -122,7 +145,10 @@ export async function createWasmZKPProvider(config?: WasmProviderConfig): Promis
       const proof = fullProof.slice(pubEnd);
 
       try {
-        return await backend.verifyProof({ proof, publicInputs });
+        return await backend.verifyProof(
+          { proof, publicInputs },
+          { verifierTarget: 'evm' },
+        );
       } catch {
         return false;
       }
@@ -143,6 +169,14 @@ function uint8ArrayToBase64(buf: Uint8Array): string {
     binary += String.fromCharCode(buf[i]!);
   }
   return btoa(binary);
+}
+
+function uint8ArrayToHex(buf: Uint8Array): string {
+  let hex = '';
+  for (let i = 0; i < buf.length; i++) {
+    hex += buf[i]!.toString(16).padStart(2, '0');
+  }
+  return hex;
 }
 
 function base64ToUint8Array(b64: string): Uint8Array {

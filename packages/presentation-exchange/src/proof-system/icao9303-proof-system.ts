@@ -2,7 +2,6 @@
  * ICAO 9303 ZKP Proof System — orchestrates domain-scoped proof generation.
  *
  * Proof chain: sod-validate → dg-bridge → dg13-merklelize
- * Optional: did-delegate (Active Authentication delegation)
  * All proofs share the same domain hash for binding.
  *
  * Hashing (Poseidon2) and Merkle tree building are done in pure JS.
@@ -32,7 +31,6 @@ import {
   buildDgBridgeInputs,
   buildDg13MerklelizeInputs,
   buildPredicateInputs,
-  buildDIDDelegateInputs,
 } from './witness-builder.js';
 
 // ---------------------------------------------------------------------------
@@ -44,16 +42,6 @@ export interface ICAO9303ProofSystemConfig {
   zkpProvider: ZKPProvider;
   /** Optional persistent proof store. Without one, proofs are not cached. */
   proofStore?: ProofStore;
-}
-
-/** Optional delegation data for did-delegate circuit. */
-export interface DelegationData {
-  /** Base64-encoded DG15 from credential */
-  dg15Base64: string;
-  /** Base64-encoded Active Authentication signature from chip */
-  aaSignatureBase64: string;
-  /** Holder DID as hex field element */
-  did: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,14 +79,12 @@ export class ICAO9303ProofSystem {
    * 3. Build Merkle tree from DG13 fields (pure JS Poseidon2)
    * 4. Build dg13-merklelize inputs → prove
    * 5. Assert dgBinding match (sanity check)
-   * 6. (Optional) Build did-delegate inputs → prove
    */
   async generateChainProofs(
     credential: MatchableCredential,
     credentialId: string,
     domain: Domain,
     onProgress?: (phase: ProofGenPhase) => void,
-    delegation?: DelegationData,
   ): Promise<DomainProofSet> {
     const sodBase64 = this.extractSOD(credential);
     const dg13Base64 = this.extractDG13(credential);
@@ -127,6 +113,8 @@ export class ICAO9303ProofSystem {
     const sodProof: ChainProof = {
       circuitId: 'sod-validate',
       proofValue: sodResult.proofValue,
+      proofBytes: sodResult.proofBytes,
+      publicSignals: sodResult.publicSignals,
       publicInputs: sodInputs.publicInputs,
       publicOutputs: sodResult.publicOutputs,
     };
@@ -143,6 +131,8 @@ export class ICAO9303ProofSystem {
     const dgBridgeProof: ChainProof = {
       circuitId: 'dg-bridge',
       proofValue: dgBridgeResult.proofValue,
+      proofBytes: dgBridgeResult.proofBytes,
+      publicSignals: dgBridgeResult.publicSignals,
       publicInputs: dgBridgeInputs.publicInputs,
       publicOutputs: dgBridgeResult.publicOutputs,
     };
@@ -175,6 +165,8 @@ export class ICAO9303ProofSystem {
     const dg13Proof: ChainProof = {
       circuitId: 'dg13-merklelize',
       proofValue: dg13Result.proofValue,
+      proofBytes: dg13Result.proofBytes,
+      publicSignals: dg13Result.publicSignals,
       publicInputs: dg13Inputs.publicInputs,
       publicOutputs: dg13Result.publicOutputs,
     };
@@ -186,30 +178,30 @@ export class ICAO9303ProofSystem {
       );
     }
 
-
-
-    // Step 5: DID delegation (optional)
-    let didDelegateProof: ChainProof | undefined;
-    if (delegation) {
-      onProgress?.('did-delegate');
-      const delegateInputs = buildDIDDelegateInputs(
-        delegation.dg15Base64,
-        delegation.aaSignatureBase64,
-        domain.hash,
-        delegation.did,
+    // Step 5: unique-identity (on-chain registration slot).
+    // Same private inputs as dg13-merklelize; different circuit that produces
+    // only (dgBinding, identity) — matches NationalIDRegistry's uniqueId slot.
+    onProgress?.('unique-identity');
+    const uniqueIdResult = await this.zkp.prove({
+      circuitId: 'unique-identity',
+      privateInputs: dg13Inputs.privateInputs,
+      publicInputs: dg13Inputs.publicInputs,
+    });
+    const uniqueIdBinding = uniqueIdResult.publicOutputs['dgBinding'] as string;
+    if (uniqueIdBinding !== dg13Binding) {
+      throw new Error(
+        `Binding mismatch: dg13-merklelize ${dg13Binding} vs unique-identity ${uniqueIdBinding}`,
       );
-      const delegateResult = await this.zkp.prove({
-        circuitId: 'did-delegate',
-        privateInputs: delegateInputs.privateInputs,
-        publicInputs: delegateInputs.publicInputs,
-      });
-      didDelegateProof = {
-        circuitId: 'did-delegate',
-        proofValue: delegateResult.proofValue,
-        publicInputs: delegateInputs.publicInputs,
-        publicOutputs: delegateResult.publicOutputs,
-      };
     }
+    const uniqueIdProof: ChainProof = {
+      circuitId: 'unique-identity',
+      proofValue: uniqueIdResult.proofValue,
+      proofBytes: uniqueIdResult.proofBytes,
+      publicSignals: uniqueIdResult.publicSignals,
+      publicInputs: dg13Inputs.publicInputs,
+      publicOutputs: uniqueIdResult.publicOutputs,
+    };
+
 
     const proofSet: DomainProofSet = {
       domain,
@@ -218,7 +210,7 @@ export class ICAO9303ProofSystem {
       sodValidate: sodProof,
       dgBridge: dgBridgeProof,
       dg13Merklelize: dg13Proof,
-      ...(didDelegateProof ? { didDelegate: didDelegateProof } : {}),
+      uniqueIdentity: uniqueIdProof,
       merkleTree,
     };
 
@@ -238,23 +230,19 @@ export class ICAO9303ProofSystem {
     credentialId: string,
     domain: Domain,
     onProgress?: (phase: ProofGenPhase) => void,
-    delegation?: DelegationData,
   ): Promise<DomainProofSet> {
     if (this.store) {
       const cached = await this.store.get(credentialId, domain.hash);
       if (cached) {
-        // Validate cached Merkle tree against circuit commitment.
-        // Invalidate if tree data is stale (e.g. packing bug fix).
         const cc = cached.dg13Merklelize.publicOutputs['commitment'] as string | undefined;
         const commitmentOk = cc && BigInt(cached.merkleTree.commitment) === BigInt(cc);
-        const delegationOk = !delegation || !!cached.didDelegate;
-        if (commitmentOk && delegationOk) {
+        if (commitmentOk) {
           return cached;
         }
         await this.store.deleteAll(credentialId);
       }
     }
-    return this.generateChainProofs(credential, credentialId, domain, onProgress, delegation);
+    return this.generateChainProofs(credential, credentialId, domain, onProgress);
   }
 
   // -------------------------------------------------------------------------
@@ -296,6 +284,8 @@ export class ICAO9303ProofSystem {
     return {
       circuitId,
       proofValue: result.proofValue,
+      proofBytes: result.proofBytes,
+      publicSignals: result.publicSignals,
       publicInputs: inputs.publicInputs,
       publicOutputs: result.publicOutputs,
     };
@@ -447,7 +437,6 @@ export class ICAO9303ProofSystem {
 
     // Chain proofs (always attached)
     const chains = [proofSet.sodValidate, proofSet.dgBridge, proofSet.dg13Merklelize];
-    if (proofSet.didDelegate) chains.push(proofSet.didDelegate);
     for (const chain of chains) {
       proofs.push({
         type: 'ZKPProof',

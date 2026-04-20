@@ -130,38 +130,11 @@ export async function verifyVPResponse(
       }
     }
 
-    // 3b. Verify binding chain (did-delegate is required)
+    // 3b. Verify binding chain
     const chainErrors = verifyBindingChain(zkpProofs);
     if (chainErrors.length > 0) {
       errors.push(...chainErrors);
       zkpOk = false;
-    }
-
-    // 3c. Holder binding: did-delegate "did" MUST match VP holder.
-    // This is mandatory — without it, a stolen proof chain could be replayed
-    // under a different holder DID.
-    {
-      const didDelegate = zkpProofs.find(p => p.circuitId === 'did-delegate');
-      if (!didDelegate) {
-        errors.push(
-          `${entry.docRequestID}: missing did-delegate proof — holder binding cannot be verified`,
-        );
-        zkpOk = false;
-      } else {
-        const proofDid = String(didDelegate.publicInputs['did'] ?? '');
-        const holderAddress = extractHolderAddress(presentation.holder);
-        if (!holderAddress) {
-          errors.push(
-            `${entry.docRequestID}: cannot extract address from VP holder "${presentation.holder}"`,
-          );
-          zkpOk = false;
-        } else if (proofDid !== holderAddress) {
-          errors.push(
-            `${entry.docRequestID}: did-delegate "did" (${proofDid}) does not match VP holder (${holderAddress})`,
-          );
-          zkpOk = false;
-        }
-      }
     }
 
     // 3d. Verify all requested ZKP conditions have matching proofs with correct circuit
@@ -253,13 +226,11 @@ function verifyBindingChain(proofs: ZKPProof[]): string[] {
   const sodValidate = proofs.find(p => p.circuitId === 'sod-validate');
   const dgBridge = proofs.find(p => p.circuitId === 'dg-bridge');
   const dg13 = proofs.find(p => p.circuitId === 'dg13-merklelize');
-  const didDelegate = proofs.find(p => p.circuitId === 'did-delegate');
 
-  if (!sodValidate || !dgBridge || !dg13 || !didDelegate) {
+  if (!sodValidate || !dgBridge || !dg13) {
     if (!sodValidate) errors.push('Missing sod-validate proof in chain');
     if (!dgBridge) errors.push('Missing dg-bridge proof in chain');
     if (!dg13) errors.push('Missing dg13-merklelize proof in chain');
-    if (!didDelegate) errors.push('Missing did-delegate proof in chain');
     return errors;
   }
 
@@ -287,20 +258,12 @@ function verifyBindingChain(proofs: ZKPProof[]): string[] {
   const predicates = proofs.filter(p =>
     p.circuitId !== 'sod-validate' &&
     p.circuitId !== 'dg-bridge' &&
-    p.circuitId !== 'dg13-merklelize' &&
-    p.circuitId !== 'did-delegate',
+    p.circuitId !== 'dg13-merklelize',
   );
   for (const pred of predicates) {
     if (pred.publicInputs['commitment'] !== commitment) {
       errors.push(`Predicate ${pred.conditionID ?? pred.circuitId} commitment does not match dg13-merklelize`);
     }
-  }
-
-  // did-delegate must share the same domain.
-  // Note: did-delegate.dgBinding is for DG15 (chip key), dg-bridge.dgBinding is
-  // for DG13 (identity data) — they are different data groups, so bindings differ.
-  if (didDelegate.publicInputs['domain'] !== domain) {
-    errors.push('did-delegate domain does not match sod-validate domain');
   }
 
   return errors;

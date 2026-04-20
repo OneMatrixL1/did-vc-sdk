@@ -24,7 +24,13 @@ export interface Domain {
 /** A single circuit proof with its public I/O. */
 export interface ChainProof {
   readonly circuitId: string;
+  /** Opaque envelope (base64) — used by SDK-local `ZKPProvider.verify`. */
   readonly proofValue: string;
+  /** Raw proof bytes as 0x-hex — feed directly to on-chain verifiers. */
+  readonly proofBytes: string;
+  /** Ordered bytes32 hex public signals — the `publicInputs` array on-chain verifiers expect. */
+  readonly publicSignals: readonly string[];
+  /** Circuit input map keyed by Noir parameter name. */
   readonly publicInputs: Record<string, unknown>;
   readonly publicOutputs: Record<string, unknown>;
 }
@@ -62,8 +68,8 @@ export interface DomainProofSet {
   readonly dgBridge: ChainProof;
   /** DG13 Merkle tree. publicOutputs: dgBinding, identity, commitment. */
   readonly dg13Merklelize: ChainProof;
-  /** DID delegation proof (optional — requires DG15 + Active Auth). */
-  readonly didDelegate?: ChainProof;
+  /** Unique identity (on-chain registration slot). publicOutputs: dgBinding, identity. */
+  readonly uniqueIdentity: ChainProof;
 
   /** Full Merkle tree for on-demand predicate proofs. */
   readonly merkleTree: CachedMerkleTree;
@@ -93,7 +99,15 @@ export interface ZKPProveParams {
 }
 
 export interface ZKPProveResult {
+  /**
+   * Opaque envelope: base64 of [numPub(4 BE) | publicInputs(32*n) | proofBytes].
+   * Used for SDK-local round-trip verification (noir_rs verify_ultra_honk expects this layout).
+   */
   proofValue: string;
+  /** Raw proof bytes as 0x-prefixed hex. Feed this directly to on-chain verifiers. */
+  proofBytes: string;
+  /** Public signals: ordered bytes32 (0x-hex) values — the `publicInputs` parameter on-chain verifiers expect. */
+  publicSignals: string[];
   publicOutputs: Record<string, unknown>;
 }
 
@@ -121,6 +135,6 @@ export type ProofGenPhase =
   | 'dg-bridge'
   | 'merkle-tree'
   | 'dg13-merklelize'
-  | 'did-delegate'
+  | 'unique-identity'
   | 'complete'
   | 'error';

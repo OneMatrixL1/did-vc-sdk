@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {IUniversalHonkVerifier, Honk} from "./interfaces/IUniversalHonkVerifier.sol";
+import {NationalIDRegistryVKs} from "./NationalIDRegistryVKs.sol";
 
 /**
  * @title  NationalIDRegistry
@@ -18,7 +22,12 @@ import {IUniversalHonkVerifier, Honk} from "./interfaces/IUniversalHonkVerifier.
  *           - dgBinding from dg-bridge MUST equal dgBinding from unique-identity
  *             (enforced by the circuit; the contract passes the same value to both verifier calls)
  */
-contract NationalIDRegistry {
+contract NationalIDRegistry is
+    Initializable,
+    OwnableUpgradeable,
+    UUPSUpgradeable,
+    NationalIDRegistryVKs
+{
     // =========================================================================
     // Errors
     // =========================================================================
@@ -39,26 +48,25 @@ contract NationalIDRegistry {
         address did
     );
 
-    /// @notice Emitted once per unique DSC. Off-chain indexers verify the
-    ///         CA certificate path and build a trusted DSC whitelist.
-    event DSCFirstSeen(
+    /// @notice Emitted on every successful registration, carrying a
+    ///         caller-supplied CA certificate path for this DSC.
+    /// @dev    Not verified on-chain. Off-chain indexers match `dscPubKeyHash`
+    ///         against an authoritative DSC list (ICAO PKD or local CSCA
+    ///         masterlist) to decide trust. Emitting per-registration — rather
+    ///         than once per DSC — removes the first-submitter attack where a
+    ///         junk `caPath` would permanently shadow the legitimate one.
+    event DSCAnnounced(
         bytes32 indexed dscPubKeyHash,
         bytes caPath
     );
 
     // =========================================================================
-    // Immutable state (set at deployment, no admin)
+    // Storage  (⚠ APPEND-ONLY — never reorder or delete slots across upgrades)
     // =========================================================================
 
-    IUniversalHonkVerifier public immutable verifier;
-
-    uint256 public immutable sodVkHash;
-    uint256 public immutable dgBridgeVkHash;
-    uint256 public immutable uniqueIdVkHash;
-
-    // =========================================================================
-    // Mutable state
-    // =========================================================================
+    /// @notice Verifier contract. Stored (not immutable) so implementations
+    ///         can be reused across networks via initializer.
+    IUniversalHonkVerifier public verifier;
 
     /// @notice nid[dscPubKeyHash][domain][identity] → DID (pId address).
     mapping(bytes32 => mapping(bytes32 => mapping(bytes32 => address))) public nid;
@@ -66,23 +74,41 @@ contract NationalIDRegistry {
     /// @notice count[dscPubKeyHash][domain] → number of registered identities.
     mapping(bytes32 => mapping(bytes32 => uint256)) public count;
 
-    /// @notice Whether the DSCFirstSeen event has already been emitted for this DSC.
-    mapping(bytes32 => bool) public dscSeen;
+    /// @dev Reserved storage for future variables without breaking layout.
+    ///      Decrement this when adding a new state variable above.
+    uint256[46] private __gap;
 
     // =========================================================================
-    // Constructor
+    // VK hash getters (compile-time constants from NationalIDRegistryVKs)
+    // Regenerate NationalIDRegistryVKs.sol with scripts/generate-vks-sol.ts
+    // whenever a circuit is rebuilt, then deploy a new impl and call
+    // `upgradeToAndCall(newImpl, "")`.
     // =========================================================================
 
-    constructor(
-        address verifier_,
-        uint256 sodVkHash_,
-        uint256 dgBridgeVkHash_,
-        uint256 uniqueIdVkHash_
-    ) {
+    function sodVkHash() external pure returns (uint256) { return SOD_VK_HASH; }
+    function dgBridgeVkHash() external pure returns (uint256) { return DG_BRIDGE_VK_HASH; }
+    function uniqueIdVkHash() external pure returns (uint256) { return UNIQUE_ID_VK_HASH; }
+
+    // =========================================================================
+    // Initializer  (called once via proxy; replaces constructor)
+    // =========================================================================
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address verifier_, address owner_) external initializer {
+        __Ownable_init(owner_);
         verifier = IUniversalHonkVerifier(verifier_);
-        sodVkHash = sodVkHash_;
-        dgBridgeVkHash = dgBridgeVkHash_;
-        uniqueIdVkHash = uniqueIdVkHash_;
+    }
+
+    /// @notice Owner-only upgrade authorisation (UUPS).
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    /// @notice Implementation version tag (bump when shipping a new impl).
+    function version() external pure returns (string memory) {
+        return "1.0.0";
     }
 
     // =========================================================================
@@ -92,9 +118,10 @@ contract NationalIDRegistry {
     /**
      * @notice Register a CCCD identity with 3 ZK proofs.
      *
-     * @param sodVk         Verification key for sod-validate circuit
-     * @param dgBridgeVk    Verification key for dg-bridge circuit
-     * @param uniqueIdVk    Verification key for unique-identity circuit
+     * @dev VKs are embedded in bytecode (see NationalIDRegistryVKs) — callers do
+     *      not supply them. Regenerate NationalIDRegistryVKs.sol whenever a
+     *      circuit is rebuilt and redeploy.
+     *
      * @param sodProof      UltraHonk proof for sod-validate
      * @param dgBridgeProof UltraHonk proof for dg-bridge
      * @param uniqueIdProof UltraHonk proof for unique-identity
@@ -107,9 +134,6 @@ contract NationalIDRegistry {
      * @param caPath        CA certificate path (emitted in event, not verified on-chain)
      */
     function register(
-        Honk.VerificationKey calldata sodVk,
-        Honk.VerificationKey calldata dgBridgeVk,
-        Honk.VerificationKey calldata uniqueIdVk,
         bytes calldata sodProof,
         bytes calldata dgBridgeProof,
         bytes calldata uniqueIdProof,
@@ -127,15 +151,15 @@ contract NationalIDRegistry {
         }
 
         // --- Verify sod-validate: [domain, eContentBinding, dscPubKeyHash] ---
-        //     The verifier binds vkHash into the Fiat-Shamir transcript.
-        //     Wrong VK with correct hash → proof fails. Wrong hash → wrong challenges → fails.
-        //     We pass our stored immutable hash, ensuring only the correct circuit is accepted.
+        //     VK is loaded from bytecode constants; vkHash is also constant.
+        //     The verifier binds vkHash into the Fiat-Shamir transcript, so
+        //     a wrong VK or wrong hash both fail verification.
         {
             bytes32[] memory sodPub = new bytes32[](3);
             sodPub[0] = domain;
             sodPub[1] = eContentBinding;
             sodPub[2] = dscPubKeyHash;
-            if (!verifier.verify(sodVk, sodVkHash, sodProof, sodPub)) {
+            if (!verifier.verify(_sodVk(), SOD_VK_HASH, sodProof, sodPub)) {
                 revert InvalidProof("sod-validate");
             }
         }
@@ -147,7 +171,7 @@ contract NationalIDRegistry {
             dgPub[1] = eContentBinding;
             dgPub[2] = bytes32(uint256(13));
             dgPub[3] = dgBinding;
-            if (!verifier.verify(dgBridgeVk, dgBridgeVkHash, dgBridgeProof, dgPub)) {
+            if (!verifier.verify(_dgBridgeVk(), DG_BRIDGE_VK_HASH, dgBridgeProof, dgPub)) {
                 revert InvalidProof("dg-bridge");
             }
         }
@@ -158,7 +182,7 @@ contract NationalIDRegistry {
             idPub[0] = domain;
             idPub[1] = dgBinding;
             idPub[2] = identity;
-            if (!verifier.verify(uniqueIdVk, uniqueIdVkHash, uniqueIdProof, idPub)) {
+            if (!verifier.verify(_uniqueIdVk(), UNIQUE_ID_VK_HASH, uniqueIdProof, idPub)) {
                 revert InvalidProof("unique-identity");
             }
         }
@@ -167,12 +191,9 @@ contract NationalIDRegistry {
         nid[dscPubKeyHash][domain][identity] = did;
         count[dscPubKeyHash][domain]++;
 
-        // --- Emit DSC CA-path event (once per unique DSC) ---
-        if (!dscSeen[dscPubKeyHash]) {
-            dscSeen[dscPubKeyHash] = true;
-            emit DSCFirstSeen(dscPubKeyHash, caPath);
-        }
-
+        // Announce CA path on every scan — off-chain indexers discard entries
+        // whose embedded cert pubkey doesn't rehash to `dscPubKeyHash`.
+        emit DSCAnnounced(dscPubKeyHash, caPath);
         emit IdentityRegistered(dscPubKeyHash, domain, identity, did);
     }
 

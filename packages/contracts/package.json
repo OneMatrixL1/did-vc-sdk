@@ -6,10 +6,15 @@
     "compile": "hardhat compile",
     "test": "hardhat test",
     "deploy:testnet": "hardhat run scripts/deploy.ts --network vnidchainTestnet",
-    "deploy:mainnet": "hardhat run scripts/deploy.ts --network vnidchainMainnet"
+    "deploy:mainnet": "hardhat run scripts/deploy.ts --network vnidchainMainnet",
+    "upgrade:testnet": "PROXY_ADDRESS=${PROXY_ADDRESS} hardhat run scripts/upgrade.ts --network vnidchainTestnet",
+    "upgrade:mainnet": "PROXY_ADDRESS=${PROXY_ADDRESS} hardhat run scripts/upgrade.ts --network vnidchainMainnet"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.6.1",
+    "@openzeppelin/contracts-upgradeable": "^5.6.1",
+    "@openzeppelin/hardhat-upgrades": "^3.9.1",
     "@types/mocha": "^10.0.0",
     "hardhat": "^2.22.0",
     "ts-node": "^10.9.0",

@@ -8,7 +8,9 @@
     "deploy:testnet": "hardhat run scripts/deploy.ts --network vnidchainTestnet",
     "deploy:mainnet": "hardhat run scripts/deploy.ts --network vnidchainMainnet",
     "upgrade:testnet": "PROXY_ADDRESS=${PROXY_ADDRESS} hardhat run scripts/upgrade.ts --network vnidchainTestnet",
-    "upgrade:mainnet": "PROXY_ADDRESS=${PROXY_ADDRESS} hardhat run scripts/upgrade.ts --network vnidchainMainnet"
+    "upgrade:mainnet": "PROXY_ADDRESS=${PROXY_ADDRESS} hardhat run scripts/upgrade.ts --network vnidchainMainnet",
+    "transfer-ownership:testnet": "hardhat run scripts/transfer-ownership.ts --network vnidchainTestnet",
+    "transfer-ownership:mainnet": "hardhat run scripts/transfer-ownership.ts --network vnidchainMainnet"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

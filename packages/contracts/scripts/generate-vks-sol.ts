@@ -33,7 +33,7 @@ const FIELD_ORDER: readonly string[] = [
   'lagrangeFirst', 'lagrangeLast',
 ];
 
-function loadVks(tsPath: string): { sod: VK; dgBridge: VK; uniqueId: VK; hashes: Record<string, string> } {
+function loadVks(tsPath: string): { sod: VK; dgBridge: VK; uniqueId: VK; didDelegate: VK; hashes: Record<string, string> } {
   // Import the TS file dynamically. Uses ts-node register when run via `npx ts-node`.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const mod = require(tsPath);
@@ -41,10 +41,12 @@ function loadVks(tsPath: string): { sod: VK; dgBridge: VK; uniqueId: VK; hashes:
     sod: mod.sodValidateVk,
     dgBridge: mod.dgBridgeVk,
     uniqueId: mod.uniqueIdentityVk,
+    didDelegate: mod.didDelegateVk,
     hashes: {
       sod: mod.sodValidateVkHash,
       dgBridge: mod.dgBridgeVkHash,
       uniqueId: mod.uniqueIdentityVkHash,
+      didDelegate: mod.didDelegateVkHash,
     },
   };
 }
@@ -74,7 +76,7 @@ function main() {
   const source = process.argv[2] ? resolve(process.argv[2]) : defaultSource;
   const outPath = resolve(__dirname, '..', 'contracts', 'NationalIDRegistryVKs.sol');
 
-  const { sod, dgBridge, uniqueId, hashes } = loadVks(source);
+  const { sod, dgBridge, uniqueId, didDelegate, hashes } = loadVks(source);
 
   const body = [
     '// SPDX-License-Identifier: MIT',
@@ -88,12 +90,15 @@ function main() {
     `    uint256 internal constant SOD_VK_HASH = uint256(${hashes.sod});`,
     `    uint256 internal constant DG_BRIDGE_VK_HASH = uint256(${hashes.dgBridge});`,
     `    uint256 internal constant UNIQUE_ID_VK_HASH = uint256(${hashes.uniqueId});`,
+    `    uint256 internal constant DID_DELEGATE_VK_HASH = uint256(${hashes.didDelegate});`,
     '',
     emitVK('sod', sod),
     '',
     emitVK('dgBridge', dgBridge),
     '',
     emitVK('uniqueId', uniqueId),
+    '',
+    emitVK('didDelegate', didDelegate),
     '}',
     '',
   ].join('\n');

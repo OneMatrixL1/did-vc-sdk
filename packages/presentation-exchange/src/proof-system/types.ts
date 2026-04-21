@@ -77,6 +77,13 @@ export interface DomainProofSet {
    * require this proof; others ignore its absence. publicOutputs: dgBinding.
    */
   readonly didDelegate?: ChainProof;
+  /**
+   * DG15 bridge proof — binds DG15 hash into SOD via dg-bridge with dgNumber=15.
+   * Present only when didDelegate is present (same prerequisites). Its
+   * `publicOutputs.dgBinding` must match `didDelegate.publicOutputs.dgBinding`
+   * so the on-chain registry can chain DG15 ← SOD ← delegate(did).
+   */
+  readonly dgBridge15?: ChainProof;
 
   /** Full Merkle tree for on-demand predicate proofs. */
   readonly merkleTree: CachedMerkleTree;
@@ -143,6 +150,7 @@ export type ProofGenPhase =
   | 'merkle-tree'
   | 'dg13-merklelize'
   | 'unique-identity'
+  | 'dg-bridge-15'
   | 'did-delegate'
   | 'complete'
   | 'error';

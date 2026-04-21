@@ -27,6 +27,7 @@ const CIRCUITS = [
   { jsName: 'sodValidate', file: 'sod_validate_circuit.json' },
   { jsName: 'dgBridge', file: 'dg_bridge_circuit.json' },
   { jsName: 'uniqueIdentity', file: 'unique_identity_circuit.json' },
+  { jsName: 'didDelegate', file: 'did_delegate_circuit.json' },
 ];
 
 const FIELD_ORDER = [

@@ -204,14 +204,48 @@ export class ICAO9303ProofSystem {
       publicOutputs: uniqueIdResult.publicOutputs,
     };
 
-    // Step 6: did-delegate (holder binding).
+    // Step 6: dg-bridge(15) + did-delegate (holder binding chain).
     // Requires DG15 + the AA signature + holder DID. When any of those is
     // missing (e.g. legacy credential with no delegation material) we skip
-    // this step; verifiers that set `requireHolderBinding` will then reject
-    // the resulting VP, but the rest of the chain still generates.
+    // both; verifiers / on-chain registries that require holder binding will
+    // then reject the resulting artefact, but the rest of the chain still
+    // generates.
+    //
+    // Chain: SOD → dg-bridge(15) → dg15Binding → did-delegate(did, dg15Binding)
+    //   - dg-bridge(15) reads DG15 hash from eContent, commits it under `domain`
+    //   - did-delegate  hashes DG15 raw bytes, verifies ISO 9796-2 AA sig over
+    //     Poseidon2(did), commits the same DG15 hash under `domain`
+    // Both produce identical `dgBinding` iff SOD's DG15 hash = sha256(dg15 bytes).
     const delegateInputsData = extractDelegateMaterial(credential);
+    let dgBridge15Proof: ChainProof | undefined;
     let didDelegateProof: ChainProof | undefined;
     if (delegateInputsData) {
+      // Step 6a: dg-bridge with dgNumber=15
+      onProgress?.('dg-bridge-15');
+      const { findDGEntry } = await import('./sod-parser.js');
+      const dg15Offset = findDGEntry(new Uint8Array(sodWitness.econtent), 15);
+      if (dg15Offset < 0) {
+        throw new Error('dg-bridge(15): DG15 entry not found in eContent');
+      }
+      const dgBridge15Inputs = buildDgBridgeInputs(sodWitness, domain.hash, eContentBinding);
+      dgBridge15Inputs.publicInputs.dgNumber = 15;
+      dgBridge15Inputs.privateInputs.dgOffset = dg15Offset;
+      const dgBridge15Result = await this.zkp.prove({
+        circuitId: 'dg-bridge',
+        privateInputs: dgBridge15Inputs.privateInputs,
+        publicInputs: dgBridge15Inputs.publicInputs,
+      });
+      const dg15BindingFromSod = dgBridge15Result.publicOutputs['dgBinding'] as string;
+      dgBridge15Proof = {
+        circuitId: 'dg-bridge',
+        proofValue: dgBridge15Result.proofValue,
+        proofBytes: dgBridge15Result.proofBytes,
+        publicSignals: dgBridge15Result.publicSignals,
+        publicInputs: dgBridge15Inputs.publicInputs,
+        publicOutputs: dgBridge15Result.publicOutputs,
+      };
+
+      // Step 6b: did-delegate
       onProgress?.('did-delegate');
       const delegateInputs = buildDidDelegateInputs(
         delegateInputsData.dg15Base64,
@@ -224,6 +258,18 @@ export class ICAO9303ProofSystem {
         privateInputs: delegateInputs.privateInputs,
         publicInputs: delegateInputs.publicInputs,
       });
+      const dg15BindingFromChip = delegateResult.publicOutputs['dgBinding'] as string;
+
+      // Sanity: dg-bridge(15) and did-delegate must agree on dg15Binding —
+      // they hash the same DG15 bytes (SOD stores sha256(dg15), circuit
+      // recomputes sha256(dg15)). Divergence means DG15 bytes read off the
+      // chip don't match what the passport issuer signed into SOD.
+      if (dg15BindingFromSod !== dg15BindingFromChip) {
+        throw new Error(
+          `DG15 binding mismatch: dg-bridge(15) ${dg15BindingFromSod} vs did-delegate ${dg15BindingFromChip}`,
+        );
+      }
+
       didDelegateProof = {
         circuitId: 'did-delegate',
         proofValue: delegateResult.proofValue,
@@ -242,6 +288,7 @@ export class ICAO9303ProofSystem {
       dgBridge: dgBridgeProof,
       dg13Merklelize: dg13Proof,
       uniqueIdentity: uniqueIdProof,
+      ...(dgBridge15Proof ? { dgBridge15: dgBridge15Proof } : {}),
       ...(didDelegateProof ? { didDelegate: didDelegateProof } : {}),
       merkleTree,
     };
@@ -630,6 +677,11 @@ export class ICAO9303ProofSystem {
 
     const zkpProofs = new Map<string, ZKPProof>();
     // Chain proofs — always attached; prove credential authenticity + holder binding.
+    // NOTE: dgBridge15 is generated and stored in `proofSet` for on-chain
+    // registry submission but is NOT attached to the VP. Peer verification
+    // trusts dg-bridge(13) for DG13 ← SOD, and did-delegate alone is enough
+    // for holder binding proof-of-possession within a session. The on-chain
+    // registry path reads dgBridge15 directly from `proofSet`.
     const chainProofs: ChainProof[] = [
       proofSet.sodValidate,
       proofSet.dgBridge,

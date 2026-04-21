@@ -137,6 +137,31 @@ export async function verifyVPResponse(
       zkpOk = false;
     }
 
+    // 3c. Holder binding: when the docRequest required it, enforce that a
+    // did-delegate proof is present and its `did` public input matches the VP
+    // holder's address. Otherwise a valid VP could be replayed by a different
+    // holder without the issuer's consent being re-verified for that subject.
+    const docReqForBinding = docRequests.get(entry.docRequestID);
+    if (docReqForBinding?.requireHolderBinding) {
+      const delegate = zkpProofs.find(p => p.circuitId === 'did-delegate');
+      if (!delegate) {
+        errors.push(
+          `${entry.docRequestID}: requireHolderBinding is set but no did-delegate ZKP proof was provided`,
+        );
+        zkpOk = false;
+      } else {
+        const boundDid = String(delegate.publicInputs['did'] ?? '').toLowerCase();
+        const holderAddr = extractHolderAddress(presentation.holder)?.toLowerCase();
+        if (!holderAddr || !boundDid || boundDid !== holderAddr) {
+          errors.push(
+            `${entry.docRequestID}: did-delegate proof does not bind the VP holder ` +
+            `(proof did=${delegate.publicInputs['did']}, holder=${presentation.holder})`,
+          );
+          zkpOk = false;
+        }
+      }
+    }
+
     // 3d. Verify all requested ZKP conditions have matching proofs with correct circuit
     const docReqForConds = docRequests.get(entry.docRequestID);
     if (docReqForConds) {
@@ -253,13 +278,28 @@ function verifyBindingChain(proofs: ZKPProof[]): string[] {
     errors.push('dg13-merklelize domain does not match sod-validate domain');
   }
 
-  // Predicate proofs must reference dg13's commitment
+  // did-delegate binds the holder DID to the chip via DG15/AA; its dgBinding
+  // is derived from dg15 (not dg13) so it intentionally differs. We only
+  // require the shared domain.
+  const didDelegate = proofs.find(p => p.circuitId === 'did-delegate');
+  if (didDelegate && didDelegate.publicInputs['domain'] !== domain) {
+    errors.push('did-delegate domain does not match sod-validate domain');
+  }
+
+  // Predicate proofs must reference dg13's commitment. Chain circuits
+  // (sod-validate, dg-bridge, dg13-merklelize, did-delegate) don't expose a
+  // `commitment` public input — they bind via dgBinding / eContentBinding
+  // instead. Also skip `unique-identity`, which shares dg13 privates but
+  // publishes only (dgBinding, identity) like did-delegate.
+  const CHAIN_CIRCUITS = new Set([
+    'sod-validate',
+    'dg-bridge',
+    'dg13-merklelize',
+    'did-delegate',
+    'unique-identity',
+  ]);
   const commitment = dg13.publicOutputs['commitment'];
-  const predicates = proofs.filter(p =>
-    p.circuitId !== 'sod-validate' &&
-    p.circuitId !== 'dg-bridge' &&
-    p.circuitId !== 'dg13-merklelize',
-  );
+  const predicates = proofs.filter(p => !CHAIN_CIRCUITS.has(p.circuitId));
   for (const pred of predicates) {
     if (pred.publicInputs['commitment'] !== commitment) {
       errors.push(`Predicate ${pred.conditionID ?? pred.circuitId} commitment does not match dg13-merklelize`);

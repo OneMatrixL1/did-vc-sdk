@@ -173,15 +173,19 @@ function buildDisclosedDocument(
     ? String(didDelegate.publicInputs['did'] ?? '')
     : null;
 
-  // Check chain integrity (all 4 chain proofs present)
+  // Chain integrity: the core 3-proof chain (sod-validate → dg-bridge →
+  // dg13-merklelize) is always required. did-delegate is only required when
+  // the document request opted into holder-binding via requireHolderBinding.
   const chainCircuitIds = proofs
     .filter((p): p is ZKPProof => p.type === 'ZKPProof')
     .map(p => p.circuitId);
-  const chainVerified =
+  const coreChainOk =
     chainCircuitIds.includes('sod-validate') &&
     chainCircuitIds.includes('dg-bridge') &&
-    chainCircuitIds.includes('dg13-merklelize') &&
-    chainCircuitIds.includes('did-delegate');
+    chainCircuitIds.includes('dg13-merklelize');
+  const holderBindingOk =
+    !docReq.requireHolderBinding || chainCircuitIds.includes('did-delegate');
+  const chainVerified = coreChainOk && holderBindingOk;
 
   // Build field index for getField()
   const fieldIndex = new Map<string, DisclosedField>();

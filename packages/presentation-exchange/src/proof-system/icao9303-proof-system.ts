@@ -32,6 +32,7 @@ import {
   buildDgBridgeInputs,
   buildDg13MerklelizeInputs,
   buildPredicateInputs,
+  buildDidDelegateInputs,
 } from './witness-builder.js';
 
 // ---------------------------------------------------------------------------
@@ -203,6 +204,35 @@ export class ICAO9303ProofSystem {
       publicOutputs: uniqueIdResult.publicOutputs,
     };
 
+    // Step 6: did-delegate (holder binding).
+    // Requires DG15 + the AA signature + holder DID. When any of those is
+    // missing (e.g. legacy credential with no delegation material) we skip
+    // this step; verifiers that set `requireHolderBinding` will then reject
+    // the resulting VP, but the rest of the chain still generates.
+    const delegateInputsData = extractDelegateMaterial(credential);
+    let didDelegateProof: ChainProof | undefined;
+    if (delegateInputsData) {
+      onProgress?.('did-delegate');
+      const delegateInputs = buildDidDelegateInputs(
+        delegateInputsData.dg15Base64,
+        delegateInputsData.aaSignatureBase64,
+        domain.hash,
+        delegateInputsData.holderDID,
+      );
+      const delegateResult = await this.zkp.prove({
+        circuitId: 'did-delegate',
+        privateInputs: delegateInputs.privateInputs,
+        publicInputs: delegateInputs.publicInputs,
+      });
+      didDelegateProof = {
+        circuitId: 'did-delegate',
+        proofValue: delegateResult.proofValue,
+        proofBytes: delegateResult.proofBytes,
+        publicSignals: delegateResult.publicSignals,
+        publicInputs: delegateInputs.publicInputs,
+        publicOutputs: delegateResult.publicOutputs,
+      };
+    }
 
     const proofSet: DomainProofSet = {
       domain,
@@ -212,6 +242,7 @@ export class ICAO9303ProofSystem {
       dgBridge: dgBridgeProof,
       dg13Merklelize: dg13Proof,
       uniqueIdentity: uniqueIdProof,
+      ...(didDelegateProof ? { didDelegate: didDelegateProof } : {}),
       merkleTree,
     };
 
@@ -599,7 +630,13 @@ export class ICAO9303ProofSystem {
 
     const zkpProofs = new Map<string, ZKPProof>();
     // Chain proofs — always attached; prove credential authenticity + holder binding.
-    for (const chain of [proofSet.sodValidate, proofSet.dgBridge, proofSet.dg13Merklelize]) {
+    const chainProofs: ChainProof[] = [
+      proofSet.sodValidate,
+      proofSet.dgBridge,
+      proofSet.dg13Merklelize,
+      ...(proofSet.didDelegate ? [proofSet.didDelegate] : []),
+    ];
+    for (const chain of chainProofs) {
       zkpProofs.set(`chain-${chain.circuitId}`, {
         type: 'ZKPProof',
         conditionID: `chain-${chain.circuitId}`,
@@ -923,4 +960,32 @@ function collectDocRequests(node: DocumentRequestNode): DocumentRequest[] {
   }
   walk(node);
   return out;
+}
+
+/**
+ * Pull the pieces needed for the did-delegate proof out of the credential:
+ *   - DG15 (chip RSA pubkey) — from `credentialSubject.dg15`
+ *   - AA signature + holder DID — from `proof.delegationCertificate`
+ *
+ * Returns `null` if any piece is missing; callers treat that as "no binding
+ * proof available" and skip delegate proof generation.
+ */
+function extractDelegateMaterial(
+  credential: MatchableCredential,
+): { dg15Base64: string; aaSignatureBase64: string; holderDID: string } | null {
+  const dg15 = credential.credentialSubject['dg15'];
+  if (typeof dg15 !== 'string' || dg15.length === 0) return null;
+
+  const proof = credential.proof as Record<string, unknown> | undefined;
+  const cert = proof?.['delegationCertificate'] as
+    | { aaSignature?: unknown; holderDID?: unknown }
+    | undefined;
+  if (!cert) return null;
+
+  const aaSignature = cert.aaSignature;
+  const holderDID = cert.holderDID;
+  if (typeof aaSignature !== 'string' || typeof holderDID !== 'string') return null;
+  if (aaSignature.length === 0 || holderDID.length === 0) return null;
+
+  return { dg15Base64: dg15, aaSignatureBase64: aaSignature, holderDID };
 }

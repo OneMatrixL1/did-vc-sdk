@@ -70,6 +70,13 @@ export interface DomainProofSet {
   readonly dg13Merklelize: ChainProof;
   /** Unique identity (on-chain registration slot). publicOutputs: dgBinding, identity. */
   readonly uniqueIdentity: ChainProof;
+  /**
+   * Holder-binding proof: Active Authentication signature bound to the holder DID.
+   * Present only when scan-time data (DG15 + aaSignature) and the holder DID were
+   * supplied to `generateChainProofs`. Verifiers that set `requireHolderBinding`
+   * require this proof; others ignore its absence. publicOutputs: dgBinding.
+   */
+  readonly didDelegate?: ChainProof;
 
   /** Full Merkle tree for on-demand predicate proofs. */
   readonly merkleTree: CachedMerkleTree;
@@ -136,5 +143,6 @@ export type ProofGenPhase =
   | 'merkle-tree'
   | 'dg13-merklelize'
   | 'unique-identity'
+  | 'did-delegate'
   | 'complete'
   | 'error';

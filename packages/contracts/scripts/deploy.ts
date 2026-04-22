@@ -20,10 +20,25 @@ const DEFAULT_VERIFIERS: Record<string, string> = {
 };
 
 async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("Deploying with:", deployer.address);
+  // When `accounts: []` is configured (mainnet via Frame), hardhat has no
+  // local signer. Ask the RPC (Frame) who it's signing as, then grab the
+  // JsonRpcSigner — which routes tx submission back through eth_sendTransaction.
+  const signers = await ethers.getSigners();
+  let deployer;
+  if (signers.length > 0) {
+    deployer = signers[0];
+  } else {
+    const accounts: string[] = await ethers.provider.send("eth_accounts", []);
+    if (!accounts || accounts.length === 0) {
+      throw new Error(
+        "No signer available. Is Frame running at 127.0.0.1:1248 with an account selected?",
+      );
+    }
+    deployer = await ethers.provider.getSigner(accounts[0]);
+  }
+  console.log("Deploying with:", await deployer.getAddress());
   console.log("Network:        ", network.name, "(chainId", network.config.chainId, ")");
-  console.log("Balance:        ", ethers.formatEther(await ethers.provider.getBalance(deployer.address)));
+  console.log("Balance:        ", ethers.formatEther(await ethers.provider.getBalance(await deployer.getAddress())));
 
   const VERIFIER_ADDRESS =
     process.env.VERIFIER_ADDRESS || DEFAULT_VERIFIERS[network.name] || "";
@@ -38,10 +53,10 @@ async function main() {
   }
 
   console.log("Deploying NationalIDRegistry (UUPS proxy)...");
-  const factory = await ethers.getContractFactory("NationalIDRegistry");
+  const factory = await ethers.getContractFactory("NationalIDRegistry", deployer);
   const proxy = await upgrades.deployProxy(
     factory,
-    [VERIFIER_ADDRESS, deployer.address],  // initialize(verifier_, owner_)
+    [VERIFIER_ADDRESS, await deployer.getAddress()],  // initialize(verifier_, owner_)
     { kind: "uups" },
   );
   await proxy.waitForDeployment();
@@ -54,7 +69,7 @@ async function main() {
   console.log("=== Deployment Complete ===");
   console.log("Proxy (use this address):     ", proxyAddress);
   console.log("Implementation (current impl):", implAddress);
-  console.log("Owner:                        ", deployer.address);
+  console.log("Owner:                        ", await deployer.getAddress());
   console.log("Verifier:                     ", VERIFIER_ADDRESS);
   console.log("Deploy tx:                    ", tx?.hash);
   console.log("Network:                      ", network.name, `(chainId ${network.config.chainId})`);
